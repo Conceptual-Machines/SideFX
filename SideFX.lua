@@ -396,6 +396,29 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width)
     if ctx:begin_child("Column" .. depth, width, 0, imgui.ChildFlags.Border()) then
         ctx:text(column_title)
         ctx:separator()
+        
+        -- Drop zone for main FX chain (depth 1) - allows dragging FX out of containers
+        if depth == 1 then
+            -- Check if something is being dragged
+            local has_payload = ctx:get_drag_drop_payload("FX_GUID")
+            if has_payload then
+                -- Show drop zone - accept logic will check if it's from a container
+                ctx:push_style_color(imgui.Col.Button(), 0x4488FF88)
+                ctx:button("Drop here to remove from container", -1, 24)
+                ctx:pop_style_color()
+                if ctx:begin_drag_drop_target() then
+                    local accepted, guid = ctx:accept_drag_drop_payload("FX_GUID")
+                    if accepted and guid then
+                        local fx = state.track:find_fx_by_guid(guid)
+                        if fx and fx:get_parent_container() then
+                            fx:move_out_of_container()
+                            refresh_fx_list()
+                        end
+                    end
+                    ctx:end_drag_drop_target()
+                end
+            end
+        end
 
         if #fx_list == 0 then
             ctx:text_disabled("Empty")
@@ -417,10 +440,14 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width)
             local is_multi = state.multi_select[guid] ~= nil
             local enabled = fx:get_enabled()
 
-            if not enabled then
-                ctx:push_style_color(imgui.Col.Text(), 0x808080FF)
-            end
-
+            -- Layout constants (relative to column width)
+            local icon_w = 24
+            local btn_w = 34
+            local wet_w = 52
+            local controls_w = btn_w + wet_w + 8
+            local name_w = width - icon_w - controls_w - 30  -- 30px gap
+            local controls_x = width - controls_w - 8
+            
             -- Icon with emoji font
             if icon_font then r.ImGui_PushFont(ctx.ctx, icon_font, icon_size) end
             local icon = is_container
@@ -429,23 +456,27 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width)
             ctx:text(icon)
             if icon_font then r.ImGui_PopFont(ctx.ctx) end
 
-            -- Name with default font as selectable
+            -- Name as selectable
             ctx:same_line()
             local highlight = is_expanded or is_selected or is_multi
+            local name = fx:get_name()
+            -- Truncate based on available width (approx 7px per char)
+            local max_chars = math.floor(name_w / 7)
+            if #name > max_chars then
+                name = string.sub(name, 1, max_chars - 2) .. ".."
+            end
 
-            if ctx:selectable(fx:get_name(), highlight) then
+            if ctx:selectable(name .. "##sel" .. i, highlight, 0, name_w, 0) then
                 if ctx:is_shift_down() then
-                    -- When starting multi-select, include current selected_fx
                     if state.selected_fx and get_multi_select_count() == 0 then
                         state.multi_select[state.selected_fx] = true
                     end
-                    -- Toggle this item in multi-select
                     if state.multi_select[guid] then
                         state.multi_select[guid] = nil
                     else
                         state.multi_select[guid] = true
                     end
-                    state.selected_fx = nil  -- Clear single selection when multi-selecting
+                    state.selected_fx = nil
                 else
                     clear_multi_select()
                     if is_container then
@@ -455,9 +486,55 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width)
                     end
                 end
             end
+            if ctx:is_item_hovered() then ctx:set_tooltip(fx:get_name()) end
 
-            if not enabled then
-                ctx:pop_style_color()
+            -- Controls on the right
+            ctx:same_line_ex(controls_x)
+            
+            -- Wet/Dry slider
+            local wet_idx = fx:get_param_from_ident(":wet")
+            if wet_idx >= 0 then
+                local wet_val = fx:get_param(wet_idx)
+                ctx:set_next_item_width(wet_w - 5)
+                local wet_changed, new_wet = ctx:slider_double("##wet" .. i, wet_val, 0, 1, "%.0f%%")
+                if wet_changed then
+                    fx:set_param(wet_idx, new_wet)
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Wet: " .. string.format("%.0f%%", wet_val * 100)) end
+                ctx:same_line()
+            end
+
+            -- Bypass button (colored)
+            if enabled then
+                ctx:push_style_color(imgui.Col.Button(), 0x44AA44FF)
+            else
+                ctx:push_style_color(imgui.Col.Button(), 0xAA4444FF)
+            end
+            if ctx:small_button(enabled and "ON##" .. i or "OFF##" .. i) then
+                fx:set_enabled(not enabled)
+            end
+            ctx:pop_style_color()
+
+            -- Drag source for moving FX
+            if ctx:begin_drag_drop_source() then
+                ctx:set_drag_drop_payload("FX_GUID", guid)
+                ctx:text("Moving: " .. fx:get_name())
+                ctx:end_drag_drop_source()
+            end
+
+            -- Drop target for containers - allows dragging FX into them
+            if is_container then
+                if ctx:begin_drag_drop_target() then
+                    local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
+                    if accepted and payload and payload ~= guid then
+                        local drag_fx = state.track:find_fx_by_guid(payload)
+                        if drag_fx then
+                            drag_fx:move_to_container(fx)
+                            refresh_fx_list()
+                        end
+                    end
+                    ctx:end_drag_drop_target()
+                end
             end
 
             -- Right-click context menu
@@ -469,6 +546,16 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width)
                     fx:set_enabled(not enabled)
                 end
                 ctx:separator()
+                -- Remove from container option (only if inside a container)
+                local parent = fx:get_parent_container()
+                if parent then
+                    if ctx:menu_item("Remove from Container") then
+                        fx:move_out_of_container()
+                        collapse_from_depth(depth)
+                        refresh_fx_list()
+                    end
+                    ctx:separator()
+                end
                 if ctx:menu_item("Delete") then
                     fx:delete()
                     collapse_from_depth(depth)
@@ -477,9 +564,14 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width)
                 ctx:separator()
                 local sel_count = get_multi_select_count()
                 if sel_count > 0 then
-                    if ctx:menu_item("Add Selected to Container") then
+                    if ctx:menu_item("Add Selected to Container (" .. sel_count .. ")") then
                         add_to_new_container(get_multi_selected_fx())
                         clear_multi_select()
+                    end
+                elseif not is_container then
+                    -- Single item - add to new container
+                    if ctx:menu_item("Add to New Container") then
+                        add_to_new_container({fx})
                     end
                 end
                 ctx:end_popup()
@@ -721,7 +813,7 @@ local function main()
             ctx:separator()
 
             -- Column widths
-            local col_w = 200
+            local col_w = 280
             local browser_w = 260
 
             -- Detail column width depends on param count
