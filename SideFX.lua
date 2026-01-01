@@ -37,7 +37,18 @@ local reawrap_reapack = scripts_folder .. "ReaWrap/Libraries/lua/"
 local sidefx_parent = script_path:match("^(.+[/\\])SideFX[/\\]")
 local reawrap_dev = sidefx_parent and (sidefx_parent .. "ReaWrap/lua/") or ""
 
--- Dev paths first, then ReaPack install
+-- EmojImGui path
+local emojimgui_path = scripts_folder .. "ReaTeam Scripts/Development/talagan_EmojImGui/"
+
+-- Load EmojImGui FIRST with ReaImGui's builtin path (before ReaWrap's imgui shadows it)
+local reaimgui_path = r.ImGui_GetBuiltinPath and (r.ImGui_GetBuiltinPath() .. "/?.lua;") or ""
+package.path = reaimgui_path .. emojimgui_path .. "?.lua;" .. package.path
+local EmojImGui = require('emojimgui')
+
+-- Clear the cached ReaImGui 'imgui' so we can load ReaWrap's version
+package.loaded['imgui'] = nil
+
+-- NOW set up ReaWrap paths (these will shadow ReaImGui's imgui with ReaWrap's imgui)
 package.path = script_path .. "?.lua;"
     .. script_path .. "lib/?.lua;"
     .. reawrap_dev .. "?.lua;"
@@ -58,27 +69,52 @@ local Plugins = require('plugins')
 local helpers = require('helpers')
 
 --------------------------------------------------------------------------------
+-- Icons (using OpenMoji font)
+--------------------------------------------------------------------------------
+
+local Icons = {
+    folder_open = "1F4C2",      -- 📂
+    folder_closed = "1F4C1",    -- 📁
+    package = "1F4E6",          -- 📦
+    plug = "1F50C",             -- 🔌
+    musical_keyboard = "1F3B9", -- 🎹
+    wrench = "1F527",           -- 🔧
+    speaker_high = "1F50A",     -- 🔊
+    speaker_muted = "1F507",    -- 🔇
+    arrows_counterclockwise = "1F504", -- 🔄
+}
+
+local icon_font = nil
+local icon_size = 16
+
+local function icon_text(icon_id)
+    local info = EmojImGui.Asset.CharInfo("OpenMoji", icon_id)
+    return info and info.utf8 or "?"
+end
+
+--------------------------------------------------------------------------------
 -- State
 --------------------------------------------------------------------------------
 
 local state = {
     track = nil,
     track_name = "No track selected",
-    
+
     -- FX data
     top_level_fx = {},
-    
+    last_fx_count = 0,  -- For detecting external FX changes
+
     -- Column navigation: list of expanded container GUIDs (breadcrumb trail)
     expanded_path = {},  -- e.g. {container1_guid, container2_guid, ...}
-    
+
     -- Selected FX for detail panel
     selected_fx = nil,
-    
+
     -- Multi-select for operations
     multi_select = {},
-    
+
     show_debug = false,
-    
+
     -- Plugin browser state
     browser = {
         search = "",
@@ -105,22 +141,48 @@ end
 
 local function refresh_fx_list()
     state.top_level_fx = {}
-    if not state.track then return end
-    
+    if not state.track then 
+        state.last_fx_count = 0
+        return 
+    end
+
     for fx in state.track:iter_track_fx_chain() do
         local parent = fx:get_parent_container()
         if not parent then
             state.top_level_fx[#state.top_level_fx + 1] = fx
         end
     end
+    state.last_fx_count = state.track:get_track_fx_count()
+end
+
+-- Check if FX chain changed externally and refresh if needed
+local function check_fx_changes()
+    if not state.track then return end
+    local current_count = state.track:get_track_fx_count()
+    if current_count ~= state.last_fx_count then
+        refresh_fx_list()
+        -- Clear invalid selections
+        clear_multi_select()
+        state.selected_fx = nil
+        -- Validate expanded_path - remove any GUIDs that no longer exist
+        local valid_path = {}
+        for _, guid in ipairs(state.expanded_path) do
+            if state.track:find_fx_by_guid(guid) then
+                valid_path[#valid_path + 1] = guid
+            else
+                break  -- Stop at first invalid - rest would be children
+            end
+        end
+        state.expanded_path = valid_path
+    end
 end
 
 local function get_container_children(container_guid)
     if not state.track or not container_guid then return {} end
-    
+
     local container = state.track:find_fx_by_guid(container_guid)
     if not container or not container:is_container() then return {} end
-    
+
     local children = {}
     for child in container:iter_container_children() do
         children[#children + 1] = child
@@ -160,19 +222,16 @@ end
 
 -- Toggle container at a specific depth
 local function toggle_container(guid, depth)
-    -- If this container is already expanded at this depth, collapse it and all children
     if state.expanded_path[depth] == guid then
         collapse_from_depth(depth)
     else
-        -- Collapse anything beyond this depth first
         collapse_from_depth(depth)
-        -- Then expand this container
         state.expanded_path[depth] = guid
     end
     state.selected_fx = nil
 end
 
--- Toggle FX selection for detail panel (clicking same FX closes detail)
+-- Toggle FX selection for detail panel
 local function toggle_fx_detail(guid)
     if state.selected_fx == guid then
         state.selected_fx = nil
@@ -187,7 +246,7 @@ end
 
 local function scan_plugins()
     if state.browser.scanned then return end
-    
+
     Plugins.scan()
     state.browser.plugins = {}
     for plugin in Plugins.iter_all() do
@@ -201,7 +260,7 @@ local function filter_plugins()
     local search = state.browser.search:lower()
     local filter = state.browser.filter
     local results = {}
-    
+
     local source = state.browser.plugins
     if filter == "instruments" then
         source = {}
@@ -214,7 +273,7 @@ local function filter_plugins()
             source[#source + 1] = plugin
         end
     end
-    
+
     for plugin in helpers.iter(source) do
         if search == "" then
             results[#results + 1] = plugin
@@ -226,13 +285,13 @@ local function filter_plugins()
             end
         end
     end
-    
+
     state.browser.filtered = results
 end
 
 local function add_plugin_to_track(plugin)
     if not state.track then return end
-    
+
     local fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
     if fx then
         refresh_fx_list()
@@ -246,20 +305,20 @@ end
 local function add_to_new_container(fx_list)
     if #fx_list == 0 then return end
     if not state.track then return end
-    
+
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
-    
+
     local container = state.track:add_fx_to_new_container(fx_list)
-    
+
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Add to Container", -1)
-    
+
     if container then
         state.expanded_path = { container:get_guid() }
         refresh_fx_list()
     end
-    
+
     return container
 end
 
@@ -275,7 +334,7 @@ local function draw_plugin_browser(ctx)
         filter_plugins()
     end
     if ctx:is_item_hovered() then ctx:set_tooltip("Search plugins...") end
-    
+
     if ctx:begin_tab_bar("BrowserTabs") then
         if ctx:begin_tab_item("  All  ") then
             if state.browser.filter ~= "all" then
@@ -284,14 +343,14 @@ local function draw_plugin_browser(ctx)
             end
             ctx:end_tab_item()
         end
-        if ctx:begin_tab_item(" 🎹 Inst ") then
+        if ctx:begin_tab_item(" Inst ") then
             if state.browser.filter ~= "instruments" then
                 state.browser.filter = "instruments"
                 filter_plugins()
             end
             ctx:end_tab_item()
         end
-        if ctx:begin_tab_item(" 🔧 FX ") then
+        if ctx:begin_tab_item(" FX ") then
             if state.browser.filter ~= "effects" then
                 state.browser.filter = "effects"
                 filter_plugins()
@@ -300,24 +359,29 @@ local function draw_plugin_browser(ctx)
         end
         ctx:end_tab_bar()
     end
-    
+
     if ctx:begin_child("PluginList", 0, 0, imgui.ChildFlags.Border()) then
         local i = 0
         for plugin in helpers.iter(state.browser.filtered) do
             i = i + 1
             ctx:push_id(i)
-            
-            local icon = plugin.is_instrument and "🎹" or "🔧"
-            local label = icon .. " " .. plugin.name
-            
-            if ctx:selectable(label, false) then
+
+            -- Icon with emoji font
+            if icon_font then r.ImGui_PushFont(ctx.ctx, icon_font, icon_size) end
+            local icon = plugin.is_instrument and icon_text(Icons.musical_keyboard) or icon_text(Icons.wrench)
+            ctx:text(icon)
+            if icon_font then r.ImGui_PopFont(ctx.ctx) end
+
+            -- Text with default font
+            ctx:same_line()
+            if ctx:selectable(plugin.name, false) then
                 add_plugin_to_track(plugin)
             end
-            
+
             if ctx:is_item_hovered() then
                 ctx:set_tooltip(plugin.full_name)
             end
-            
+
             ctx:pop_id()
         end
         ctx:end_child()
@@ -332,45 +396,56 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width)
     if ctx:begin_child("Column" .. depth, width, 0, imgui.ChildFlags.Border()) then
         ctx:text(column_title)
         ctx:separator()
-        
+
         if #fx_list == 0 then
             ctx:text_disabled("Empty")
             ctx:end_child()
             return
         end
-        
+
         local i = 0
         for fx in helpers.iter(fx_list) do
             i = i + 1
             local guid = fx:get_guid()
             if not guid then goto continue end
-            
+
             ctx:push_id(i)
-            
+
             local is_container = fx:is_container()
             local is_expanded = state.expanded_path[depth] == guid
             local is_selected = state.selected_fx == guid
             local is_multi = state.multi_select[guid] ~= nil
             local enabled = fx:get_enabled()
-            
+
             if not enabled then
                 ctx:push_style_color(imgui.Col.Text(), 0x808080FF)
             end
-            
-            local icon = is_container and (is_expanded and "📂" or "📁") or "🔌"
-            local label = icon .. " " .. fx:get_name()
-            
-            -- Highlight if expanded OR selected for detail OR multi-selected
+
+            -- Icon with emoji font
+            if icon_font then r.ImGui_PushFont(ctx.ctx, icon_font, icon_size) end
+            local icon = is_container
+                and (is_expanded and icon_text(Icons.folder_open) or icon_text(Icons.folder_closed))
+                or icon_text(Icons.plug)
+            ctx:text(icon)
+            if icon_font then r.ImGui_PopFont(ctx.ctx) end
+
+            -- Name with default font as selectable
+            ctx:same_line()
             local highlight = is_expanded or is_selected or is_multi
-            
-            if ctx:selectable(label, highlight) then
-                if ctx:is_key_down(imgui.Key.Shift()) then
-                    -- Multi-select toggle
+
+            if ctx:selectable(fx:get_name(), highlight) then
+                if ctx:is_shift_down() then
+                    -- When starting multi-select, include current selected_fx
+                    if state.selected_fx and get_multi_select_count() == 0 then
+                        state.multi_select[state.selected_fx] = true
+                    end
+                    -- Toggle this item in multi-select
                     if state.multi_select[guid] then
                         state.multi_select[guid] = nil
                     else
                         state.multi_select[guid] = true
                     end
+                    state.selected_fx = nil  -- Clear single selection when multi-selecting
                 else
                     clear_multi_select()
                     if is_container then
@@ -380,11 +455,11 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width)
                     end
                 end
             end
-            
+
             if not enabled then
                 ctx:pop_style_color()
             end
-            
+
             -- Right-click context menu
             if ctx:begin_popup_context_item() then
                 if ctx:menu_item("Open FX Window") then
@@ -409,7 +484,7 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width)
                 end
                 ctx:end_popup()
             end
-            
+
             -- Double-click
             if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
                 if is_container then
@@ -418,11 +493,11 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width)
                     fx:show(3)
                 end
             end
-            
+
             ctx:pop_id()
             ::continue::
         end
-        
+
         ctx:end_child()
     end
 end
@@ -433,7 +508,7 @@ end
 
 local function draw_fx_detail_column(ctx, width)
     if not state.selected_fx then return end
-    
+
     if ctx:begin_child("FXDetail", width, 0, imgui.ChildFlags.Border()) then
         local fx = state.track:find_fx_by_guid(state.selected_fx)
         if not fx then
@@ -441,55 +516,52 @@ local function draw_fx_detail_column(ctx, width)
             ctx:end_child()
             return
         end
-        
+
         -- Header
-        ctx:text("🎛️ " .. fx:get_name())
+        ctx:text(fx:get_name())
         ctx:separator()
-        
+
         -- Bypass toggle + Open button on same line
         local enabled = fx:get_enabled()
         local button_w = (width - 20) / 2
-        if ctx:button(enabled and "🔊 On" or "🔇 Off", button_w, 0) then
+        if ctx:button(enabled and "ON" or "OFF", button_w, 0) then
             fx:set_enabled(not enabled)
         end
         ctx:same_line()
         if ctx:button("Open FX", button_w, 0) then
             fx:show(3)
         end
-        
+
         ctx:separator()
-        
+
         -- Parameters header
         local param_count = fx:get_num_params()
         ctx:text(string.format("Parameters (%d)", param_count))
-        
+
         if param_count == 0 then
             ctx:text_disabled("No parameters")
         else
             -- Scrollable parameter list with two columns for many params
             if ctx:begin_child("ParamList", 0, 0, imgui.ChildFlags.Border()) then
                 local use_two_cols = param_count > 8 and width > 350
-                local col_width = use_two_cols and ((width - 30) / 2) or (width - 20)
-                
+
                 if use_two_cols then
-                    -- Two-column layout
                     local half = math.ceil(param_count / 2)
-                    
+
                     if r.ImGui_BeginTable(ctx.ctx, "ParamTable", 2) then
                         r.ImGui_TableSetupColumn(ctx.ctx, "Col1", r.ImGui_TableColumnFlags_WidthStretch())
                         r.ImGui_TableSetupColumn(ctx.ctx, "Col2", r.ImGui_TableColumnFlags_WidthStretch())
-                        
+
                         for row = 0, half - 1 do
                             r.ImGui_TableNextRow(ctx.ctx)
-                            
-                            -- Left column
+
                             r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
                             local i = row
                             if i < param_count then
                                 local name = fx:get_param_name(i)
                                 local val = fx:get_param_normalized(i) or 0
                                 local display_name = (name and name ~= "") and name or ("P" .. (i + 1))
-                                
+
                                 ctx:push_id(i)
                                 ctx:text(display_name)
                                 ctx:set_next_item_width(-1)
@@ -499,15 +571,14 @@ local function draw_fx_detail_column(ctx, width)
                                 end
                                 ctx:pop_id()
                             end
-                            
-                            -- Right column
+
                             r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
                             local j = row + half
                             if j < param_count then
                                 local name = fx:get_param_name(j)
                                 local val = fx:get_param_normalized(j) or 0
                                 local display_name = (name and name ~= "") and name or ("P" .. (j + 1))
-                                
+
                                 ctx:push_id(j)
                                 ctx:text(display_name)
                                 ctx:set_next_item_width(-1)
@@ -518,16 +589,15 @@ local function draw_fx_detail_column(ctx, width)
                                 ctx:pop_id()
                             end
                         end
-                        
+
                         r.ImGui_EndTable(ctx.ctx)
                     end
                 else
-                    -- Single column layout
                     for i = 0, param_count - 1 do
                         local name = fx:get_param_name(i)
                         local val = fx:get_param_normalized(i) or 0
                         local display_name = (name and name ~= "") and name or ("Param " .. (i + 1))
-                        
+
                         ctx:push_id(i)
                         ctx:text(display_name)
                         ctx:set_next_item_width(-1)
@@ -542,7 +612,7 @@ local function draw_fx_detail_column(ctx, width)
                 ctx:end_child()
             end
         end
-        
+
         ctx:end_child()
     end
 end
@@ -552,43 +622,48 @@ end
 --------------------------------------------------------------------------------
 
 local function draw_toolbar(ctx)
-    if ctx:button("↻") then
+    -- Refresh button (icon only)
+    if icon_font then r.ImGui_PushFont(ctx.ctx, icon_font, icon_size) end
+    if ctx:button(icon_text(Icons.arrows_counterclockwise)) then
         refresh_fx_list()
     end
+    if icon_font then r.ImGui_PopFont(ctx.ctx) end
     if ctx:is_item_hovered() then ctx:set_tooltip("Refresh") end
-    
+
     ctx:same_line()
-    
+
+    -- Add to container button (icon only)
     local sel_count = get_multi_select_count()
     ctx:with_disabled(sel_count < 1, function()
-        if ctx:button("📦+") then
+        if icon_font then r.ImGui_PushFont(ctx.ctx, icon_font, icon_size) end
+        if ctx:button(icon_text(Icons.package)) then
             add_to_new_container(get_multi_selected_fx())
             clear_multi_select()
         end
+        if icon_font then r.ImGui_PopFont(ctx.ctx) end
     end)
-    if ctx:is_item_hovered() then ctx:set_tooltip("Add selected to new container") end
-    
+    if ctx:is_item_hovered() then ctx:set_tooltip("Add selected to new container (" .. sel_count .. " selected)") end
+
     ctx:same_line()
     ctx:text("|")
     ctx:same_line()
     ctx:text(state.track_name)
-    
+
     -- Breadcrumb trail
     if #state.expanded_path > 0 then
         ctx:same_line()
-        ctx:text("→")
+        ctx:text(">")
         for i, guid in ipairs(state.expanded_path) do
             ctx:same_line()
             local container = state.track:find_fx_by_guid(guid)
             if container then
                 if ctx:small_button(container:get_name()) then
-                    -- Click on breadcrumb collapses everything after it
                     collapse_from_depth(i + 1)
                 end
             end
             if i < #state.expanded_path then
                 ctx:same_line()
-                ctx:text("→")
+                ctx:text(">")
             end
         end
     end
@@ -606,20 +681,25 @@ local function main()
         )
         return
     end
-    
+
     state.track, state.track_name = get_selected_track()
     refresh_fx_list()
     scan_plugins()
-    
+
     Window.run({
         title = "SideFX",
         width = 1000,
         height = 500,
         dockable = true,
-        
+
         on_draw = function(self, ctx)
             theme.Reaper:apply(ctx)
-            
+
+            -- Load icon font on first frame
+            if not icon_font then
+                icon_font = EmojImGui.Asset.Font(ctx.ctx, "OpenMoji")
+            end
+
             -- Track change detection
             local track, name = get_selected_track()
             local track_changed = (track and state.track and track.pointer ~= state.track.pointer)
@@ -631,16 +711,19 @@ local function main()
                 state.selected_fx = nil
                 clear_multi_select()
                 refresh_fx_list()
+            else
+                -- Check for external FX changes (e.g. user deleted FX in REAPER)
+                check_fx_changes()
             end
-            
+
             -- Toolbar
             draw_toolbar(ctx)
             ctx:separator()
-            
+
             -- Column widths
             local col_w = 200
             local browser_w = 260
-            
+
             -- Detail column width depends on param count
             local detail_w = 220
             if state.selected_fx and state.track then
@@ -648,11 +731,11 @@ local function main()
                 if fx then
                     local param_count = fx:get_num_params()
                     if param_count > 8 then
-                        detail_w = 400  -- Wide for two-column layout
+                        detail_w = 400
                     end
                 end
             end
-            
+
             -- Plugin Browser (fixed left)
             if ctx:begin_child("Browser", browser_w, 0, imgui.ChildFlags.Border()) then
                 ctx:text("Plugins")
@@ -660,34 +743,34 @@ local function main()
                 draw_plugin_browser(ctx)
                 ctx:end_child()
             end
-            
+
             ctx:same_line()
-            
+
             -- Scrollable columns area for FX chain + containers
             local flags = r.ImGui_WindowFlags_HorizontalScrollbar()
             if ctx:begin_child("ColumnsArea", 0, 0, imgui.ChildFlags.None(), flags) then
-                
+
                 -- Column 1: Top-level FX chain
                 draw_fx_list_column(ctx, state.top_level_fx, "FX Chain", 1, col_w)
-                
+
                 -- Additional columns for each expanded container
                 for depth, container_guid in ipairs(state.expanded_path) do
                     ctx:same_line()
                     local children = get_container_children(container_guid)
                     local container = state.track:find_fx_by_guid(container_guid)
-                    local title = container and ("📦 " .. container:get_name()) or "Container"
+                    local title = container and container:get_name() or "Container"
                     draw_fx_list_column(ctx, children, title, depth + 1, col_w)
                 end
-                
+
                 -- Detail column (if FX selected)
                 if state.selected_fx then
                     ctx:same_line()
                     draw_fx_detail_column(ctx, detail_w)
                 end
-                
+
                 ctx:end_child()
             end
-            
+
             theme.Reaper:unapply(ctx)
         end,
     })

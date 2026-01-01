@@ -5,7 +5,7 @@
 -- @license MIT
 
 local r = reaper
-local container = require('lib.container')
+local container = require('container')
 
 local M = {}
 
