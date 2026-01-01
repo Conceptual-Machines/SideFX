@@ -38,7 +38,9 @@ local scripts_folder = r.GetResourcePath() .. "/Scripts/"
 
 -- ReaWrap paths (try ReaPack install first, then local dev)
 local reawrap_reapack = scripts_folder .. "ReaWrap/lua/"
-local reawrap_dev = "/Users/lucaromagnoli/Dropbox/Code/Projects/ReaScript/ReaWrap/lua/"
+-- Local dev path (same parent folder structure as ReaScript workspace)
+local sidefx_parent = script_path:match("^(.+[/\\])SideFX[/\\]")
+local reawrap_dev = sidefx_parent and (sidefx_parent .. "ReaWrap/lua/") or ""
 
 -- Add paths
 package.path = script_path .. "?.lua;"
