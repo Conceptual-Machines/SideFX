@@ -155,6 +155,10 @@ local function refresh_fx_list()
     state.last_fx_count = state.track:get_track_fx_count()
 end
 
+local function clear_multi_select()
+    state.multi_select = {}
+end
+
 -- Check if FX chain changed externally and refresh if needed
 local function check_fx_changes()
     if not state.track then return end
@@ -188,10 +192,6 @@ local function get_container_children(container_guid)
         children[#children + 1] = child
     end
     return children
-end
-
-local function clear_multi_select()
-    state.multi_select = {}
 end
 
 local function get_multi_selected_fx()
@@ -392,31 +392,72 @@ end
 -- UI: FX List Column (reusable for any level)
 --------------------------------------------------------------------------------
 
-local function draw_fx_list_column(ctx, fx_list, column_title, depth, width)
+local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, parent_container_guid)
     if ctx:begin_child("Column" .. depth, width, 0, imgui.ChildFlags.Border()) then
         ctx:text(column_title)
         ctx:separator()
         
-        -- Drop zone for main FX chain (depth 1) - allows dragging FX out of containers
-        if depth == 1 then
-            -- Check if something is being dragged
-            local has_payload = ctx:get_drag_drop_payload("FX_GUID")
-            if has_payload then
-                -- Show drop zone - accept logic will check if it's from a container
-                ctx:push_style_color(imgui.Col.Button(), 0x4488FF88)
-                ctx:button("Drop here to remove from container", -1, 24)
-                ctx:pop_style_color()
-                if ctx:begin_drag_drop_target() then
-                    local accepted, guid = ctx:accept_drag_drop_payload("FX_GUID")
-                    if accepted and guid then
-                        local fx = state.track:find_fx_by_guid(guid)
-                        if fx and fx:get_parent_container() then
-                            fx:move_out_of_container()
-                            refresh_fx_list()
+        -- Drop zone for this column
+        local has_payload = ctx:get_drag_drop_payload("FX_GUID")
+        if has_payload then
+            local drop_label = depth == 1 and "Drop to move to track" or ("Drop to add to " .. column_title)
+            ctx:push_style_color(imgui.Col.Button(), 0x4488FF88)
+            ctx:button(drop_label .. "##drop" .. depth, -1, 24)
+            ctx:pop_style_color()
+            if ctx:begin_drag_drop_target() then
+                local accepted, guid = ctx:accept_drag_drop_payload("FX_GUID")
+                if accepted and guid then
+                    local fx = state.track:find_fx_by_guid(guid)
+                    if fx then
+                        local fx_parent = fx:get_parent_container()
+                        local fx_parent_guid = fx_parent and fx_parent:get_guid() or nil
+                        
+                        if depth == 1 then
+                            -- Move to track level (only if FX is in a container)
+                            if fx_parent then
+                                while fx:get_parent_container() do
+                                    fx:move_out_of_container()
+                                    fx = state.track:find_fx_by_guid(guid)
+                                    if not fx then break end
+                                end
+                                refresh_fx_list()
+                            end
+                        elseif parent_container_guid then
+                            -- Move into this column's container (if not already there)
+                            if fx_parent_guid ~= parent_container_guid then
+                                local target_container = state.track:find_fx_by_guid(parent_container_guid)
+                                if target_container then
+                                    -- Build path from FX to target container
+                                    -- We need to move through intermediate containers
+                                    local target_path = {}  -- GUIDs from root to target
+                                    local container = target_container
+                                    while container do
+                                        table.insert(target_path, 1, container:get_guid())
+                                        container = container:get_parent_container()
+                                    end
+                                    
+                                    -- Move FX through each level
+                                    for _, container_guid in ipairs(target_path) do
+                                        fx = state.track:find_fx_by_guid(guid)
+                                        if not fx then break end
+                                        
+                                        local current_parent = fx:get_parent_container()
+                                        local current_parent_guid = current_parent and current_parent:get_guid() or nil
+                                        
+                                        if current_parent_guid ~= container_guid then
+                                            local c = state.track:find_fx_by_guid(container_guid)
+                                            if c then
+                                                c:add_fx_to_container(fx)
+                                            end
+                                        end
+                                    end
+                                    refresh_fx_list()
+                                end
+                            end
                         end
                     end
-                    ctx:end_drag_drop_target()
                 end
+                ctx:end_drag_drop_target()
             end
         end
 
@@ -432,7 +473,8 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width)
             local guid = fx:get_guid()
             if not guid then goto continue end
 
-            ctx:push_id(i)
+            -- Use depth + index for unique IDs across columns
+            ctx:push_id(depth * 1000 + i)
 
             local is_container = fx:is_container()
             local is_expanded = state.expanded_path[depth] == guid
@@ -834,8 +876,8 @@ local function main()
             local flags = r.ImGui_WindowFlags_AlwaysHorizontalScrollbar()
             if ctx:begin_child("ColumnsArea", 0, 0, imgui.ChildFlags.None(), flags) then
 
-                -- Column 1: Top-level FX chain
-                draw_fx_list_column(ctx, state.top_level_fx, "FX Chain", 1, col_w)
+                -- Column 1: Top-level FX chain (no parent container)
+                draw_fx_list_column(ctx, state.top_level_fx, "FX Chain", 1, col_w, nil)
 
                 -- Additional columns for each expanded container
                 for depth, container_guid in ipairs(state.expanded_path) do
@@ -843,7 +885,8 @@ local function main()
                     local children = get_container_children(container_guid)
                     local container = state.track:find_fx_by_guid(container_guid)
                     local title = container and container:get_name() or "Container"
-                    draw_fx_list_column(ctx, children, title, depth + 1, col_w)
+                    -- Pass the container guid so drops can target this container
+                    draw_fx_list_column(ctx, children, title, depth + 1, col_w, container_guid)
                 end
 
                 -- Detail column (if FX selected)
