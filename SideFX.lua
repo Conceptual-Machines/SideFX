@@ -486,43 +486,15 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width)
                     end
                 end
             end
-            if ctx:is_item_hovered() then ctx:set_tooltip(fx:get_name()) end
-
-            -- Controls on the right
-            ctx:same_line_ex(controls_x)
             
-            -- Wet/Dry slider
-            local wet_idx = fx:get_param_from_ident(":wet")
-            if wet_idx >= 0 then
-                local wet_val = fx:get_param(wet_idx)
-                ctx:set_next_item_width(wet_w - 5)
-                local wet_changed, new_wet = ctx:slider_double("##wet" .. i, wet_val, 0, 1, "%.0f%%")
-                if wet_changed then
-                    fx:set_param(wet_idx, new_wet)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("Wet: " .. string.format("%.0f%%", wet_val * 100)) end
-                ctx:same_line()
-            end
-
-            -- Bypass button (colored)
-            if enabled then
-                ctx:push_style_color(imgui.Col.Button(), 0x44AA44FF)
-            else
-                ctx:push_style_color(imgui.Col.Button(), 0xAA4444FF)
-            end
-            if ctx:small_button(enabled and "ON##" .. i or "OFF##" .. i) then
-                fx:set_enabled(not enabled)
-            end
-            ctx:pop_style_color()
-
-            -- Drag source for moving FX
+            -- Drag source for moving FX (must be right after selectable)
             if ctx:begin_drag_drop_source() then
                 ctx:set_drag_drop_payload("FX_GUID", guid)
                 ctx:text("Moving: " .. fx:get_name())
                 ctx:end_drag_drop_source()
             end
 
-            -- Drop target for containers - allows dragging FX into them
+            -- Drop target for containers (must be right after selectable)
             if is_container then
                 if ctx:begin_drag_drop_target() then
                     local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
@@ -537,8 +509,8 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width)
                 end
             end
 
-            -- Right-click context menu
-            if ctx:begin_popup_context_item() then
+            -- Right-click context menu (must be right after selectable)
+            if ctx:begin_popup_context_item("fxmenu" .. i) then
                 if ctx:menu_item("Open FX Window") then
                     fx:show(3)
                 end
@@ -568,23 +540,43 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width)
                         add_to_new_container(get_multi_selected_fx())
                         clear_multi_select()
                     end
-                elseif not is_container then
-                    -- Single item - add to new container
+                else
+                    -- Single item - add to new container (works for FX and containers)
                     if ctx:menu_item("Add to New Container") then
                         add_to_new_container({fx})
                     end
                 end
                 ctx:end_popup()
             end
+            
+            if ctx:is_item_hovered() then ctx:set_tooltip(fx:get_name()) end
 
-            -- Double-click
-            if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-                if is_container then
-                    toggle_container(guid, depth)
-                else
-                    fx:show(3)
+            -- Controls on the right
+            ctx:same_line_ex(controls_x)
+            
+            -- Wet/Dry slider
+            local wet_idx = fx:get_param_from_ident(":wet")
+            if wet_idx >= 0 then
+                local wet_val = fx:get_param(wet_idx)
+                ctx:set_next_item_width(wet_w - 5)
+                local wet_changed, new_wet = ctx:slider_double("##wet" .. i, wet_val, 0, 1, "%.0f%%")
+                if wet_changed then
+                    fx:set_param(wet_idx, new_wet)
                 end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Wet: " .. string.format("%.0f%%", wet_val * 100)) end
+                ctx:same_line()
             end
+
+            -- Bypass button (colored)
+            if enabled then
+                ctx:push_style_color(imgui.Col.Button(), 0x44AA44FF)
+            else
+                ctx:push_style_color(imgui.Col.Button(), 0xAA4444FF)
+            end
+            if ctx:small_button(enabled and "ON##" .. i or "OFF##" .. i) then
+                fx:set_enabled(not enabled)
+            end
+            ctx:pop_style_color()
 
             ctx:pop_id()
             ::continue::
@@ -839,7 +831,7 @@ local function main()
             ctx:same_line()
 
             -- Scrollable columns area for FX chain + containers
-            local flags = r.ImGui_WindowFlags_HorizontalScrollbar()
+            local flags = r.ImGui_WindowFlags_AlwaysHorizontalScrollbar()
             if ctx:begin_child("ColumnsArea", 0, 0, imgui.ChildFlags.None(), flags) then
 
                 -- Column 1: Top-level FX chain
