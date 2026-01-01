@@ -446,48 +446,100 @@ local function draw_fx_detail_column(ctx, width)
         ctx:text("🎛️ " .. fx:get_name())
         ctx:separator()
         
-        -- Bypass toggle
+        -- Bypass toggle + Open button on same line
         local enabled = fx:get_enabled()
-        if ctx:button(enabled and "🔊 Enabled" or "🔇 Bypassed", -1, 0) then
+        local button_w = (width - 20) / 2
+        if ctx:button(enabled and "🔊 On" or "🔇 Off", button_w, 0) then
             fx:set_enabled(not enabled)
         end
-        
-        ctx:spacing()
-        
-        -- Open FX window button
-        if ctx:button("Open FX Window", -1, 0) then
+        ctx:same_line()
+        if ctx:button("Open FX", button_w, 0) then
             fx:show(3)
         end
         
-        ctx:spacing()
         ctx:separator()
-        ctx:spacing()
         
-        -- Parameters
-        ctx:text("Parameters:")
-        
+        -- Parameters header
         local param_count = fx:get_num_params()
+        ctx:text(string.format("Parameters (%d)", param_count))
+        
         if param_count == 0 then
             ctx:text_disabled("No parameters")
         else
-            local max_params = math.min(param_count, 12)
-            
-            for i = 0, max_params - 1 do
-                local _, name = fx:get_param_name(i)
-                local val = fx:get_param_normalized(i) or 0
+            -- Scrollable parameter list with two columns for many params
+            if ctx:begin_child("ParamList", 0, 0, imgui.ChildFlags.Border()) then
+                local use_two_cols = param_count > 8 and width > 350
+                local col_width = use_two_cols and ((width - 30) / 2) or (width - 20)
                 
-                ctx:push_id(i)
-                ctx:text(name or ("Param " .. i))
-                ctx:set_next_item_width(-1)
-                local changed, new_val = ctx:slider_double("##param", val, 0.0, 1.0, "%.2f")
-                if changed then
-                    fx:set_param_normalized(i, new_val)
+                if use_two_cols then
+                    -- Two-column layout
+                    local half = math.ceil(param_count / 2)
+                    
+                    if r.ImGui_BeginTable(ctx.ctx, "ParamTable", 2) then
+                        r.ImGui_TableSetupColumn(ctx.ctx, "Col1", r.ImGui_TableColumnFlags_WidthStretch())
+                        r.ImGui_TableSetupColumn(ctx.ctx, "Col2", r.ImGui_TableColumnFlags_WidthStretch())
+                        
+                        for row = 0, half - 1 do
+                            r.ImGui_TableNextRow(ctx.ctx)
+                            
+                            -- Left column
+                            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+                            local i = row
+                            if i < param_count then
+                                local name = fx:get_param_name(i)
+                                local val = fx:get_param_normalized(i) or 0
+                                local display_name = (name and name ~= "") and name or ("P" .. (i + 1))
+                                
+                                ctx:push_id(i)
+                                ctx:text(display_name)
+                                ctx:set_next_item_width(-1)
+                                local changed, new_val = ctx:slider_double("##p", val, 0.0, 1.0, "%.2f")
+                                if changed then
+                                    fx:set_param_normalized(i, new_val)
+                                end
+                                ctx:pop_id()
+                            end
+                            
+                            -- Right column
+                            r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+                            local j = row + half
+                            if j < param_count then
+                                local name = fx:get_param_name(j)
+                                local val = fx:get_param_normalized(j) or 0
+                                local display_name = (name and name ~= "") and name or ("P" .. (j + 1))
+                                
+                                ctx:push_id(j)
+                                ctx:text(display_name)
+                                ctx:set_next_item_width(-1)
+                                local changed, new_val = ctx:slider_double("##p", val, 0.0, 1.0, "%.2f")
+                                if changed then
+                                    fx:set_param_normalized(j, new_val)
+                                end
+                                ctx:pop_id()
+                            end
+                        end
+                        
+                        r.ImGui_EndTable(ctx.ctx)
+                    end
+                else
+                    -- Single column layout
+                    for i = 0, param_count - 1 do
+                        local name = fx:get_param_name(i)
+                        local val = fx:get_param_normalized(i) or 0
+                        local display_name = (name and name ~= "") and name or ("Param " .. (i + 1))
+                        
+                        ctx:push_id(i)
+                        ctx:text(display_name)
+                        ctx:set_next_item_width(-1)
+                        local changed, new_val = ctx:slider_double("##p", val, 0.0, 1.0, "%.3f")
+                        if changed then
+                            fx:set_param_normalized(i, new_val)
+                        end
+                        ctx:spacing()
+                        ctx:pop_id()
+                    end
                 end
-                ctx:pop_id()
-            end
-            
-            if param_count > max_params then
-                ctx:text_disabled(string.format("... +%d more", param_count - max_params))
+                ctx:end_child()
             end
         end
         
@@ -588,7 +640,18 @@ local function main()
             -- Column widths
             local col_w = 200
             local browser_w = 260
+            
+            -- Detail column width depends on param count
             local detail_w = 220
+            if state.selected_fx and state.track then
+                local fx = state.track:find_fx_by_guid(state.selected_fx)
+                if fx then
+                    local param_count = fx:get_num_params()
+                    if param_count > 8 then
+                        detail_w = 400  -- Wide for two-column layout
+                    end
+                end
+            end
             
             -- Plugin Browser (fixed left)
             if ctx:begin_child("Browser", browser_w, 0, imgui.ChildFlags.Border()) then
