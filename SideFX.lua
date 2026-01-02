@@ -1172,6 +1172,8 @@ local function main()
                 clear_multi_select()
                 refresh_fx_list()
             else
+                -- Always update track name (in case user renamed it)
+                state.track_name = name
                 -- Check for external FX changes (e.g. user deleted FX in REAPER)
                 check_fx_changes()
             end
