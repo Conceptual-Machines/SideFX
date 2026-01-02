@@ -86,6 +86,7 @@ local Icons = {
 
 local icon_font = nil
 local icon_size = 16
+local default_font = nil
 
 local function icon_text(icon_id)
     local info = EmojImGui.Asset.CharInfo("OpenMoji", icon_id)
@@ -113,6 +114,10 @@ local state = {
     -- Multi-select for operations
     multi_select = {},
 
+    -- Rename state
+    renaming_fx = nil,  -- GUID of FX being renamed
+    rename_text = "",    -- Current rename text
+
     show_debug = false,
 
     -- Plugin browser state
@@ -124,6 +129,9 @@ local state = {
         scanned = false,
     },
 }
+
+-- Create dynamic REAPER theme (reads actual theme colors)
+local reaper_theme = theme.from_reaper_theme("REAPER Dynamic")
 
 --------------------------------------------------------------------------------
 -- Helpers
@@ -210,6 +218,16 @@ local function get_multi_select_count()
     local count = 0
     for _ in pairs(state.multi_select) do count = count + 1 end
     return count
+end
+
+-- Get display name for FX (uses renamed_name if set, otherwise default name)
+local function get_fx_display_name(fx)
+    if not fx then return "Unknown" end
+    local ok, renamed = pcall(function() return fx:get_named_config_param("renamed_name") end)
+    if ok and renamed and renamed ~= "" then
+        return renamed
+    end
+    return fx:get_name()
 end
 
 -- Collapse all columns from a certain depth onwards
@@ -320,6 +338,58 @@ local function add_to_new_container(fx_list)
     end
 
     return container
+end
+
+local function dissolve_container(container)
+    if not container or not container:is_container() then return false end
+    if not state.track then return false end
+
+    -- Get all children before we start moving them
+    local children = {}
+    for child in container:iter_container_children() do
+        children[#children + 1] = child:get_guid()
+    end
+
+    if #children == 0 then
+        -- Empty container, just delete it
+        container:delete()
+        return true
+    end
+
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+
+    -- Get the parent container (or nil if at track level)
+    local parent_container = container:get_parent_container()
+    
+    -- Move all children out of the container
+    -- We need to re-lookup by GUID after each move since pointers may change
+    for _, child_guid in ipairs(children) do
+        local child = state.track:find_fx_by_guid(child_guid)
+        if child then
+            -- Move out of container - this will move to parent or track level
+            while child:get_parent_container() and child:get_parent_container():get_guid() == container:get_guid() do
+                child:move_out_of_container()
+                -- Re-lookup after move (pointer may have changed)
+                child = state.track:find_fx_by_guid(child_guid)
+                if not child then break end
+            end
+        end
+    end
+
+    -- Re-lookup container (pointer may have changed after moves)
+    local container_guid = container:get_guid()
+    container = state.track:find_fx_by_guid(container_guid)
+    
+    -- Delete the now-empty container
+    if container then
+        container:delete()
+    end
+
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Dissolve Container", -1)
+
+    return true
 end
 
 --------------------------------------------------------------------------------
@@ -498,33 +568,66 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
             ctx:text(icon)
             if icon_font then r.ImGui_PopFont(ctx.ctx) end
 
-            -- Name as selectable
+            -- Name as selectable (or input text if renaming)
             ctx:same_line()
             local highlight = is_expanded or is_selected or is_multi
-            local name = fx:get_name()
-            -- Truncate based on available width (approx 7px per char)
-            local max_chars = math.floor(name_w / 7)
-            if #name > max_chars then
-                name = string.sub(name, 1, max_chars - 2) .. ".."
-            end
+            local is_renaming = state.renaming_fx == guid
+            
+            if is_renaming then
+                -- Inline rename input
+                ctx:set_next_item_width(name_w)
+                local changed, new_text = ctx:input_text("##rename" .. i, state.rename_text, imgui.InputTextFlags.EnterReturnsTrue())
+                if changed then
+                    state.rename_text = new_text
+                    -- If Enter was pressed (EnterReturnsTrue flag), save and finish
+                    if state.rename_text ~= "" then
+                        -- Save renamed name
+                        fx:set_named_config_param("renamed_name", state.rename_text)
+                    end
+                    state.renaming_fx = nil
+                    state.rename_text = ""
+                end
+                -- Check if item was deactivated after edit (clicked away)
+                if r.ImGui_IsItemDeactivatedAfterEdit(ctx.ctx) then
+                    if state.rename_text ~= "" then
+                        -- Save renamed name
+                        fx:set_named_config_param("renamed_name", state.rename_text)
+                    end
+                    state.renaming_fx = nil
+                    state.rename_text = ""
+                end
+                -- Cancel on Escape
+                if ctx:is_key_pressed(r.ImGui_Key_Escape()) then
+                    -- Cancel rename
+                    state.renaming_fx = nil
+                    state.rename_text = ""
+                end
+            else
+                local name = get_fx_display_name(fx)
+                -- Truncate based on available width (approx 7px per char)
+                local max_chars = math.floor(name_w / 7)
+                if #name > max_chars then
+                    name = string.sub(name, 1, max_chars - 2) .. ".."
+                end
 
-            if ctx:selectable(name .. "##sel" .. i, highlight, 0, name_w, 0) then
-                if ctx:is_shift_down() then
-                    if state.selected_fx and get_multi_select_count() == 0 then
-                        state.multi_select[state.selected_fx] = true
-                    end
-                    if state.multi_select[guid] then
-                        state.multi_select[guid] = nil
+                if ctx:selectable(name .. "##sel" .. i, highlight, 0, name_w, 0) then
+                    if ctx:is_shift_down() then
+                        if state.selected_fx and get_multi_select_count() == 0 then
+                            state.multi_select[state.selected_fx] = true
+                        end
+                        if state.multi_select[guid] then
+                            state.multi_select[guid] = nil
+                        else
+                            state.multi_select[guid] = true
+                        end
+                        state.selected_fx = nil
                     else
-                        state.multi_select[guid] = true
-                    end
-                    state.selected_fx = nil
-                else
-                    clear_multi_select()
-                    if is_container then
-                        toggle_container(guid, depth)
-                    else
-                        toggle_fx_detail(guid)
+                        clear_multi_select()
+                        if is_container then
+                            toggle_container(guid, depth)
+                        else
+                            toggle_fx_detail(guid)
+                        end
                     end
                 end
             end
@@ -532,7 +635,7 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
             -- Drag source for moving FX (must be right after selectable)
             if ctx:begin_drag_drop_source() then
                 ctx:set_drag_drop_payload("FX_GUID", guid)
-                ctx:text("Moving: " .. fx:get_name())
+                ctx:text("Moving: " .. get_fx_display_name(fx))
                 ctx:end_drag_drop_source()
             end
 
@@ -609,11 +712,25 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
                     fx:set_enabled(not enabled)
                 end
                 ctx:separator()
+                if ctx:menu_item("Rename") then
+                    state.renaming_fx = guid
+                    state.rename_text = get_fx_display_name(fx)
+                end
+                ctx:separator()
                 -- Remove from container option (only if inside a container)
                 local parent = fx:get_parent_container()
                 if parent then
                     if ctx:menu_item("Remove from Container") then
                         fx:move_out_of_container()
+                        collapse_from_depth(depth)
+                        refresh_fx_list()
+                    end
+                    ctx:separator()
+                end
+                -- Dissolve container option (only for containers)
+                if is_container then
+                    if ctx:menu_item("Dissolve Container") then
+                        dissolve_container(fx)
                         collapse_from_depth(depth)
                         refresh_fx_list()
                     end
@@ -640,7 +757,7 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
                 ctx:end_popup()
             end
             
-            if ctx:is_item_hovered() then ctx:set_tooltip(fx:get_name()) end
+            if ctx:is_item_hovered() then ctx:set_tooltip(get_fx_display_name(fx)) end
 
             -- Controls on the right
             ctx:same_line_ex(controls_x)
@@ -693,7 +810,7 @@ local function draw_fx_detail_column(ctx, width)
         end
 
         -- Header
-        ctx:text(fx:get_name())
+        ctx:text(get_fx_display_name(fx))
         ctx:separator()
 
         -- Bypass toggle + Open button on same line
@@ -832,7 +949,7 @@ local function draw_toolbar(ctx)
             ctx:same_line()
             local container = state.track:find_fx_by_guid(guid)
             if container then
-                if ctx:small_button(container:get_name()) then
+                if ctx:small_button(get_fx_display_name(container)) then
                     collapse_from_depth(i + 1)
                 end
             end
@@ -868,8 +985,38 @@ local function main()
         dockable = true,
 
         on_draw = function(self, ctx)
-            theme.Reaper:apply(ctx)
+            reaper_theme:apply(ctx)
 
+            -- Load fonts on first frame
+            if not default_font then
+                -- Create a larger, more legible default font
+                -- Try common system fonts that are known to be readable
+                local font_families = {
+                    "Segoe UI",      -- Windows default
+                    "Helvetica Neue", -- macOS default
+                    "Arial",         -- Fallback
+                    "DejaVu Sans",   -- Linux/common
+                }
+                
+                for _, family in ipairs(font_families) do
+                    -- ImGui_CreateFont takes: family_or_file, size (flags are optional via separate call)
+                    default_font = r.ImGui_CreateFont(family, 14)
+                    if default_font then
+                        break
+                    end
+                end
+                
+                -- If no font was created, try with a generic name
+                if not default_font then
+                    default_font = r.ImGui_CreateFont("", 14)
+                end
+            end
+            
+            -- Push default font if available
+            if default_font then
+                r.ImGui_PushFont(ctx.ctx, default_font, 14)
+            end
+            
             -- Load icon font on first frame
             if not icon_font then
                 icon_font = EmojImGui.Asset.Font(ctx.ctx, "OpenMoji")
@@ -933,7 +1080,7 @@ local function main()
                     ctx:same_line()
                     local children = get_container_children(container_guid)
                     local container = state.track:find_fx_by_guid(container_guid)
-                    local title = container and container:get_name() or "Container"
+                    local title = container and get_fx_display_name(container) or "Container"
                     -- Pass the container guid so drops can target this container
                     draw_fx_list_column(ctx, children, title, depth + 1, col_w, container_guid)
                 end
@@ -947,7 +1094,12 @@ local function main()
                 ctx:end_child()
             end
 
-            theme.Reaper:unapply(ctx)
+            reaper_theme:unapply(ctx)
+            
+            -- Pop default font if we pushed it
+            if default_font then
+                r.ImGui_PopFont(ctx.ctx)
+            end
         end,
     })
 end
