@@ -4,6 +4,7 @@
 #include "reaper_plugin.h"
 #include "modulator.h"
 #include "audio_hook.h"
+#include "ui/sidefx_window.h"
 
 #include <cstring>
 #include <string>
@@ -28,8 +29,9 @@ static bool (*InsertEnvelopePoint)(TrackEnvelope* env, double time, double value
 static bool (*DeleteEnvelopePointRange)(TrackEnvelope* env, double time_start, double time_end);
 static bool (*Envelope_SortPoints)(TrackEnvelope* env);
 
-// Action command ID
-static int g_commandId = 0;
+// Action command IDs
+static int g_commandId = 0;           // Test action
+static int g_windowCommandId = 0;     // Window toggle action
 
 // Global plugin handle
 REAPER_PLUGIN_HINSTANCE g_hInst;
@@ -353,6 +355,28 @@ static int SideFX_Mod_GetRecordedPointCount(int id) {
 }
 
 //------------------------------------------------------------------------------
+// ImGui Timer Callback
+//------------------------------------------------------------------------------
+
+static void imguiTimerCallback() {
+    if (sidefx::g_sideFXWindow && sidefx::g_sideFXWindow->IsVisible()) {
+        sidefx::g_sideFXWindow->Render();
+    }
+}
+
+//------------------------------------------------------------------------------
+// Window Toggle Action
+//------------------------------------------------------------------------------
+
+static bool onWindowToggle() {
+    if (sidefx::g_sideFXWindow) {
+        sidefx::g_sideFXWindow->Toggle();
+        return true;
+    }
+    return false;
+}
+
+//------------------------------------------------------------------------------
 // Test Action
 //------------------------------------------------------------------------------
 
@@ -366,10 +390,12 @@ static bool onTestAction() {
         "Extension loaded successfully!\n"
         "Created test modulator ID: %d\n"
         "Audio hook active: %s\n"
+        "ReaImGui available: %s\n"
         "API functions: SideFX_Mod_Create, SetCurve, Link, etc.\n"
         "=====================================\n",
         id,
-        sidefx::isAudioHookActive() ? "YES" : "NO"
+        sidefx::isAudioHookActive() ? "YES" : "NO",
+        (sidefx::g_sideFXWindow && sidefx::g_sideFXWindow->IsAvailable()) ? "YES" : "NO"
     );
     
     // Try console first (more reliable)
@@ -390,9 +416,15 @@ static bool onTestAction() {
 
 // hookcommand2 is needed for custom_action (section-aware)
 static bool hookCommandProc2(KbdSectionInfo* sec, int command, int val, int valhw, int relmode, HWND hwnd) {
-    if (sec && sec->uniqueID == 0 && command == g_commandId) {
-        onTestAction();
-        return true;
+    if (sec && sec->uniqueID == 0) {
+        if (command == g_commandId) {
+            onTestAction();
+            return true;
+        }
+        if (command == g_windowCommandId) {
+            onWindowToggle();
+            return true;
+        }
     }
     return false;
 }
@@ -581,6 +613,12 @@ REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
     if (!rec) {
         // Cleanup on unload
         sidefx::cleanupAudioHook();
+        
+        // Cleanup window
+        if (sidefx::g_sideFXWindow) {
+            delete sidefx::g_sideFXWindow;
+            sidefx::g_sideFXWindow = nullptr;
+        }
         return 0;
     }
 
@@ -635,13 +673,23 @@ REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
     };
     g_commandId = plugin_register("custom_action", &action);
     
+    // Register window toggle action
+    static custom_action_register_t windowAction = {
+        0,          // section (main)
+        "SIDEFX_TOGGLE_WINDOW",  // idStr  
+        "SideFX: Open/Close Window",  // name
+        nullptr     // extra (not used)
+    };
+    g_windowCommandId = plugin_register("custom_action", &windowAction);
+    
     if (ShowConsoleMsg) {
         char buf[128];
-        snprintf(buf, sizeof(buf), "[SideFX Mod] Registered action ID: %d\n", g_commandId);
+        snprintf(buf, sizeof(buf), "[SideFX Mod] Registered action IDs: test=%d, window=%d\n", 
+                 g_commandId, g_windowCommandId);
         ShowConsoleMsg(buf);
     }
     
-    if (g_commandId) {
+    if (g_commandId || g_windowCommandId) {
         plugin_register("hookcommand2", (void*)hookCommandProc2);
     }
 
@@ -668,6 +716,23 @@ REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
         snprintf(buf, sizeof(buf), "[SideFX Mod] Audio hook active: %s\n", 
                  sidefx::isAudioHookActive() ? "YES" : "NO");
         ShowConsoleMsg(buf);
+    }
+
+    // Initialize ImGui window (requires ReaImGui extension)
+    sidefx::g_sideFXWindow = new sidefx::SideFXWindow();
+    if (sidefx::g_sideFXWindow->Initialize(rec)) {
+        // Register timer for ImGui rendering (~30 fps)
+        plugin_register("timer", (void*)imguiTimerCallback);
+        if (ShowConsoleMsg) {
+            ShowConsoleMsg("[SideFX Mod] ReaImGui initialized - window available\n");
+        }
+    } else {
+        if (ShowConsoleMsg) {
+            ShowConsoleMsg("[SideFX Mod] ReaImGui not available - install ReaImGui extension for UI\n");
+        }
+    }
+    
+    if (ShowConsoleMsg) {
         ShowConsoleMsg("[SideFX Mod] Extension loaded successfully!\n");
     }
 

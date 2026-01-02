@@ -23,12 +23,16 @@ set(SOURCES
     src/main.cpp
     src/modulator.cpp
     src/audio_hook.cpp
+    src/ui/reaimgui_api.cpp
+    src/ui/sidefx_window.cpp
 )
 
 set(HEADERS
     include/bezier.h
     include/modulator.h
     include/audio_hook.h
+    include/reaimgui_api.h
+    include/ui/sidefx_window.h
 )
 
 # SWELL stub for macOS (required for non-UI extensions)
