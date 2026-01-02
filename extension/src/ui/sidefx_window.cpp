@@ -3,6 +3,7 @@
 #include "modulator.h"
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <algorithm>
 
 namespace sidefx {
@@ -26,6 +27,10 @@ static int (*TrackFX_AddByName)(MediaTrack* track, const char* fxname, bool recF
 static bool (*TrackFX_CopyToTrack)(MediaTrack* srcTrack, int srcFX, MediaTrack* destTrack, int destFX, bool is_move) = nullptr;
 static int (*TrackFX_GetRecCount)(MediaTrack* track) = nullptr;
 static int (*EnumInstalledFX)(int index, const char** nameOut, const char** identOut) = nullptr;
+static bool (*TrackFX_Delete)(MediaTrack* track, int fx) = nullptr;
+static void (*Undo_BeginBlock)() = nullptr;
+static void (*Undo_EndBlock)(const char* descchange, int extraflags) = nullptr;
+static void (*PreventUIRefresh)(int prevent_count) = nullptr;
 
 // Layout constants
 static const double COLUMN_WIDTH = 280.0;
@@ -71,6 +76,10 @@ bool SideFXWindow::Initialize(reaper_plugin_info_t* rec) {
     TrackFX_CopyToTrack = (bool (*)(MediaTrack*, int, MediaTrack*, int, bool))rec->GetFunc("TrackFX_CopyToTrack");
     TrackFX_GetRecCount = (int (*)(MediaTrack*))rec->GetFunc("TrackFX_GetRecCount");
     EnumInstalledFX = (int (*)(int, const char**, const char**))rec->GetFunc("EnumInstalledFX");
+    TrackFX_Delete = (bool (*)(MediaTrack*, int))rec->GetFunc("TrackFX_Delete");
+    Undo_BeginBlock = (void (*)())rec->GetFunc("Undo_BeginBlock");
+    Undo_EndBlock = (void (*)(const char*, int))rec->GetFunc("Undo_EndBlock");
+    PreventUIRefresh = (void (*)(int))rec->GetFunc("PreventUIRefresh");
 
     m_available = true;
     return true;
@@ -288,6 +297,8 @@ void SideFXWindow::AddPluginToTrack(const PluginInfo& plugin) {
 void SideFXWindow::RefreshFXList() {
     m_selectedFX = -1;
     m_multiSelect.clear();
+    m_fxChainModifiedFrame = m_frameCounter;  // Block drops for a few frames
+    m_draggingFX = -1;  // Clear any drag state
 }
 
 std::vector<int> SideFXWindow::GetContainerChildren(MediaTrack* track, int containerIdx) {
@@ -309,6 +320,308 @@ std::vector<int> SideFXWindow::GetContainerChildren(MediaTrack* track, int conta
     }
     
     return children;
+}
+
+//------------------------------------------------------------------------------
+// Container Helper Functions
+//------------------------------------------------------------------------------
+
+int SideFXWindow::GetParentContainer(MediaTrack* track, int fxIndex) {
+    if (!track || !TrackFX_GetNamedConfigParm) return -1;
+    
+    char buf[64];
+    if (TrackFX_GetNamedConfigParm(track, fxIndex, "parent_container", buf, sizeof(buf))) {
+        return atoi(buf);
+    }
+    return -1;  // At track level
+}
+
+bool SideFXWindow::IsContainer(MediaTrack* track, int fxIndex) {
+    if (!track || !TrackFX_GetNamedConfigParm) return false;
+    
+    char buf[64];
+    // If container_count query succeeds at all, it's a container
+    return TrackFX_GetNamedConfigParm(track, fxIndex, "container_count", buf, sizeof(buf));
+}
+
+int SideFXWindow::GetContainerChildCount(MediaTrack* track, int containerIdx) {
+    if (!track || !TrackFX_GetNamedConfigParm) return 0;
+    
+    char buf[64];
+    if (TrackFX_GetNamedConfigParm(track, containerIdx, "container_count", buf, sizeof(buf))) {
+        return atoi(buf);
+    }
+    return 0;
+}
+
+// Calculate destination index for moving FX into a container
+// Based on REAPER's container addressing scheme from ReaWrap
+int SideFXWindow::CalcContainerDestIndex(MediaTrack* track, int containerIdx, int position) {
+    if (!track || !m_TrackFX_GetCount) return -1;
+    
+    bool isNested = containerIdx >= 0x2000000;
+    int oneBasedPos = position + 1;
+    
+    if (isNested) {
+        // For nested containers: use parent's container_count
+        int parent = GetParentContainer(track, containerIdx);
+        if (parent < 0) return -1;
+        int parentCount = GetContainerChildCount(track, parent);
+        int result = containerIdx + 2 * (parentCount + 1);
+        
+        if (m_ShowConsoleMsg) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "[SideFX] CalcDestIdx (nested): parent=%d, parentCount=%d, result=0x%X\n", 
+                     parent, parentCount, result);
+            m_ShowConsoleMsg(msg);
+        }
+        return result;
+    } else {
+        // For top-level containers:
+        // Formula: 0x2000000 + (1-based position) * (fx_count + 1) + (1-based container index)
+        int fxCount = m_TrackFX_GetCount(track);
+        int oneBasedContainer = containerIdx + 1;
+        int result = 0x2000000 + oneBasedPos * (fxCount + 1) + oneBasedContainer;
+        
+        if (m_ShowConsoleMsg) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "[SideFX] CalcDestIdx (top): fxCount=%d, pos=%d, container=%d, result=0x%X (%d)\n", 
+                     fxCount, oneBasedPos, oneBasedContainer, result, result);
+            m_ShowConsoleMsg(msg);
+        }
+        return result;
+    }
+}
+
+// Add FX to a container at given position (or end if position < 0)
+bool SideFXWindow::AddFXToContainer(MediaTrack* track, int fxIndex, int containerIdx, int position) {
+    if (m_ShowConsoleMsg) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "[SideFX] AddFXToContainer: fxIndex=%d, containerIdx=%d, position=%d\n", 
+                 fxIndex, containerIdx, position);
+        m_ShowConsoleMsg(msg);
+    }
+    
+    if (!track || !TrackFX_CopyToTrack) {
+        if (m_ShowConsoleMsg) m_ShowConsoleMsg("[SideFX] AddFXToContainer: Missing track or CopyToTrack\n");
+        return false;
+    }
+    
+    if (!IsContainer(track, containerIdx)) {
+        if (m_ShowConsoleMsg) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "[SideFX] AddFXToContainer: %d is not a container!\n", containerIdx);
+            m_ShowConsoleMsg(msg);
+        }
+        return false;
+    }
+    
+    int childCount = GetContainerChildCount(track, containerIdx);
+    int destPos = (position < 0) ? childCount : position;
+    int destIdx = CalcContainerDestIndex(track, containerIdx, destPos);
+    
+    if (m_ShowConsoleMsg) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "[SideFX] AddFXToContainer: childCount=%d, destPos=%d, destIdx=0x%X (%d)\n", 
+                 childCount, destPos, destIdx, destIdx);
+        m_ShowConsoleMsg(msg);
+    }
+    
+    if (destIdx < 0) {
+        if (m_ShowConsoleMsg) m_ShowConsoleMsg("[SideFX] AddFXToContainer: Invalid destIdx!\n");
+        return false;
+    }
+    
+    // Check if source FX is before container (will shift container down after move)
+    bool willShift = (containerIdx < 0x2000000) && (fxIndex < containerIdx);
+    
+    bool result = TrackFX_CopyToTrack(track, fxIndex, track, destIdx, true);
+    
+    if (m_ShowConsoleMsg) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "[SideFX] AddFXToContainer: CopyToTrack returned %s\n", result ? "true" : "false");
+        m_ShowConsoleMsg(msg);
+    }
+    
+    return result;
+}
+
+// Remove FX from its current container (move to parent or track level)
+bool SideFXWindow::RemoveFXFromContainer(MediaTrack* track, int fxIndex) {
+    if (!track || !TrackFX_CopyToTrack) return false;
+    
+    int parentContainer = GetParentContainer(track, fxIndex);
+    if (parentContainer < 0) return false;  // Already at track level
+    
+    int grandparent = GetParentContainer(track, parentContainer);
+    
+    if (grandparent >= 0) {
+        // Move to grandparent container (at end)
+        return AddFXToContainer(track, fxIndex, grandparent, -1);
+    } else {
+        // Move to track level, after the container
+        // For top-level containers, just use the position after
+        int destIdx = parentContainer + 1;
+        return TrackFX_CopyToTrack(track, fxIndex, track, destIdx, true);
+    }
+}
+
+//------------------------------------------------------------------------------
+// Container Operations (User-facing)
+//------------------------------------------------------------------------------
+
+void SideFXWindow::DeleteFX(MediaTrack* track, int fxIndex) {
+    if (!track || !TrackFX_Delete) return;
+    
+    if (Undo_BeginBlock) Undo_BeginBlock();
+    if (PreventUIRefresh) PreventUIRefresh(1);
+    
+    TrackFX_Delete(track, fxIndex);
+    
+    if (PreventUIRefresh) PreventUIRefresh(-1);
+    if (Undo_EndBlock) Undo_EndBlock("SideFX: Delete FX", -1);
+    
+    RefreshFXList();
+}
+
+void SideFXWindow::MoveToNewContainer(MediaTrack* track, int fxIndex) {
+    if (m_ShowConsoleMsg) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "[SideFX] MoveToNewContainer: track=%p, fxIndex=%d\n", (void*)track, fxIndex);
+        m_ShowConsoleMsg(msg);
+    }
+    
+    if (!track) {
+        if (m_ShowConsoleMsg) m_ShowConsoleMsg("[SideFX] MoveToNewContainer: No track!\n");
+        return;
+    }
+    if (!TrackFX_AddByName) {
+        if (m_ShowConsoleMsg) m_ShowConsoleMsg("[SideFX] MoveToNewContainer: No TrackFX_AddByName!\n");
+        return;
+    }
+    if (!TrackFX_CopyToTrack) {
+        if (m_ShowConsoleMsg) m_ShowConsoleMsg("[SideFX] MoveToNewContainer: No TrackFX_CopyToTrack!\n");
+        return;
+    }
+    if (!m_TrackFX_GetCount) {
+        if (m_ShowConsoleMsg) m_ShowConsoleMsg("[SideFX] MoveToNewContainer: No m_TrackFX_GetCount!\n");
+        return;
+    }
+    
+    if (Undo_BeginBlock) Undo_BeginBlock();
+    if (PreventUIRefresh) PreventUIRefresh(1);
+    
+    // Create container at the FX's current position
+    // TrackFX_AddByName instantiate parameter: -1 = end, -1000-pos = at position, 0+ = query only
+    int instantiate = -1000 - fxIndex;
+    int containerIdx = TrackFX_AddByName(track, "Container", false, instantiate);
+    
+    if (m_ShowConsoleMsg) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "[SideFX] MoveToNewContainer: Container created at %d\n", containerIdx);
+        m_ShowConsoleMsg(msg);
+    }
+    
+    if (containerIdx >= 0) {
+        // Container was inserted at fxIndex, so our FX is now at fxIndex + 1
+        int newFxIndex = fxIndex + 1;
+        
+        if (m_ShowConsoleMsg) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "[SideFX] MoveToNewContainer: Moving FX %d into container %d\n", newFxIndex, containerIdx);
+            m_ShowConsoleMsg(msg);
+        }
+        
+        // Move FX into the container (at position 0)
+        bool moved = AddFXToContainer(track, newFxIndex, containerIdx, 0);
+        
+        if (m_ShowConsoleMsg) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "[SideFX] MoveToNewContainer: AddFXToContainer returned %s\n", moved ? "true" : "false");
+            m_ShowConsoleMsg(msg);
+        }
+        
+        // Expand the new container
+        m_expandedContainers.clear();
+        m_expandedContainers.push_back(containerIdx);
+    }
+    
+    if (PreventUIRefresh) PreventUIRefresh(-1);
+    if (Undo_EndBlock) Undo_EndBlock("SideFX: Move to New Container", -1);
+    
+    RefreshFXList();
+}
+
+void SideFXWindow::MoveOutOfContainer(MediaTrack* track, int fxIndex) {
+    if (!track) return;
+    
+    if (Undo_BeginBlock) Undo_BeginBlock();
+    if (PreventUIRefresh) PreventUIRefresh(1);
+    
+    RemoveFXFromContainer(track, fxIndex);
+    
+    if (PreventUIRefresh) PreventUIRefresh(-1);
+    if (Undo_EndBlock) Undo_EndBlock("SideFX: Move Out of Container", -1);
+    
+    RefreshFXList();
+}
+
+void SideFXWindow::DissolveContainer(MediaTrack* track, int containerIdx) {
+    if (!track || !IsContainer(track, containerIdx)) return;
+    if (!TrackFX_Delete) return;
+    
+    if (Undo_BeginBlock) Undo_BeginBlock();
+    if (PreventUIRefresh) PreventUIRefresh(1);
+    
+    // Get children before we start moving
+    std::vector<int> children = GetContainerChildren(track, containerIdx);
+    
+    // Move all children out (from last to first to preserve indices)
+    for (int i = (int)children.size() - 1; i >= 0; i--) {
+        RemoveFXFromContainer(track, children[i]);
+    }
+    
+    // Delete the now-empty container
+    TrackFX_Delete(track, containerIdx);
+    
+    if (PreventUIRefresh) PreventUIRefresh(-1);
+    if (Undo_EndBlock) Undo_EndBlock("SideFX: Dissolve Container", -1);
+    
+    m_expandedContainers.clear();
+    RefreshFXList();
+}
+
+// Create an empty container at track level or inside another container
+int SideFXWindow::CreateEmptyContainer(MediaTrack* track, int parentContainerIdx) {
+    if (!track || !TrackFX_AddByName) return -1;
+    
+    if (Undo_BeginBlock) Undo_BeginBlock();
+    if (PreventUIRefresh) PreventUIRefresh(1);
+    
+    int newContainerIdx = -1;
+    
+    if (parentContainerIdx < 0) {
+        // Create at track level (at end)
+        newContainerIdx = TrackFX_AddByName(track, "Container", false, -1);
+    } else {
+        // Create at track level first, then move into parent container
+        newContainerIdx = TrackFX_AddByName(track, "Container", false, -1);
+        if (newContainerIdx >= 0) {
+            AddFXToContainer(track, newContainerIdx, parentContainerIdx, -1);
+            // After move, we need to get the new index (it's now inside the container)
+            // The container's children list will have it
+            std::vector<int> children = GetContainerChildren(track, parentContainerIdx);
+            if (!children.empty()) {
+                newContainerIdx = children.back();  // Last child is the newly added container
+            }
+        }
+    }
+    
+    if (PreventUIRefresh) PreventUIRefresh(-1);
+    if (Undo_EndBlock) Undo_EndBlock("SideFX: Create Container", -1);
+    
+    RefreshFXList();
+    return newContainerIdx;
 }
 
 bool SideFXWindow::IsContainerExpanded(int fxIndex) {
@@ -421,25 +734,49 @@ void SideFXWindow::RenderToolbar() {
         m_GetTrackName(track, trackName, sizeof(trackName));
     }
     
-    // Browser toggle button
-    if (ImGui_PushStyleColor) {
-        if (m_browserVisible) {
-            ImGui_PushStyleColor(m_ctx, ImGuiCol::Button, Theme::Accent);
-        }
+    // Browser toggle button - capture state BEFORE button interaction
+    bool wasVisible = m_browserVisible;
+    
+    if (ImGui_PushStyleColor && wasVisible) {
+        ImGui_PushStyleColor(m_ctx, ImGuiCol::Button, Theme::Accent);
     }
     
-    if (ImGui_SmallButton && ImGui_SmallButton(m_ctx, m_browserVisible ? "[B]" : "B")) {
+    if (ImGui_SmallButton && ImGui_SmallButton(m_ctx, wasVisible ? "[B]" : "B")) {
         m_browserVisible = !m_browserVisible;
     }
     
-    if (ImGui_PushStyleColor && m_browserVisible) {
+    if (ImGui_PopStyleColor && wasVisible) {
         int one = 1;
         ImGui_PopStyleColor(m_ctx, &one);
     }
     
     if (ImGui_IsItemHovered && ImGui_IsItemHovered(m_ctx, nullptr)) {
         if (ImGui_SetTooltip) {
-            ImGui_SetTooltip(m_ctx, m_browserVisible ? "Hide Browser" : "Show Browser");
+            ImGui_SetTooltip(m_ctx, wasVisible ? "Hide Browser" : "Show Browser");
+        }
+    }
+    
+    if (ImGui_SameLine) ImGui_SameLine(m_ctx, nullptr, nullptr);
+    
+    // Modulators toggle button - capture state BEFORE button interaction
+    bool wasModVisible = m_modulatorsVisible;
+    
+    if (ImGui_PushStyleColor && wasModVisible) {
+        ImGui_PushStyleColor(m_ctx, ImGuiCol::Button, Theme::Accent);
+    }
+    
+    if (ImGui_SmallButton && ImGui_SmallButton(m_ctx, wasModVisible ? "[M]" : "M")) {
+        m_modulatorsVisible = !m_modulatorsVisible;
+    }
+    
+    if (ImGui_PopStyleColor && wasModVisible) {
+        int one = 1;
+        ImGui_PopStyleColor(m_ctx, &one);
+    }
+    
+    if (ImGui_IsItemHovered && ImGui_IsItemHovered(m_ctx, nullptr)) {
+        if (ImGui_SetTooltip) {
+            ImGui_SetTooltip(m_ctx, wasModVisible ? "Hide Modulators" : "Show Modulators");
         }
     }
     
@@ -626,9 +963,23 @@ void SideFXWindow::RenderPluginBrowser() {
             if (ImGui_BeginDragDropSource) {
                 int dragFlags = 0;
                 if (ImGui_BeginDragDropSource(m_ctx, &dragFlags)) {
+                    // Set payload with the plugin name
                     if (ImGui_SetDragDropPayload) {
-                        ImGui_SetDragDropPayload(m_ctx, "PLUGIN_NAME", plugin.fullName.c_str(), nullptr);
+                        bool setOk = ImGui_SetDragDropPayload(m_ctx, "PLUGIN_NAME", plugin.fullName.c_str(), 0);
+                        // Log once when drag starts
+                        static std::string lastDragged;
+                        if (lastDragged != plugin.fullName) {
+                            lastDragged = plugin.fullName;
+                            if (m_ShowConsoleMsg) {
+                                char msg[512];
+                                snprintf(msg, sizeof(msg), "[SideFX Mod] Dragging: '%s' (payload set: %s)\n", 
+                                         plugin.fullName.c_str(), setOk ? "YES" : "NO");
+                                m_ShowConsoleMsg(msg);
+                            }
+                        }
                     }
+                    
+                    // Show drag preview
                     if (ImGui_Text) {
                         char dragText[256];
                         snprintf(dragText, sizeof(dragText), "Add: %s", plugin.name.c_str());
@@ -662,76 +1013,6 @@ void SideFXWindow::RenderPluginBrowser() {
 //------------------------------------------------------------------------------
 // Drop Zone
 //------------------------------------------------------------------------------
-
-void SideFXWindow::RenderDropZone(MediaTrack* track, int depth, int parentFxIndex) {
-    if (!track) return;
-    
-    // Check if we're dragging something
-    bool hasDrag = false;
-    if (ImGui_GetDragDropPayload) {
-        const char* payload = nullptr;
-        int size = 0;
-        // Check for plugin payload
-        if (ImGui_GetDragDropPayload(m_ctx, "PLUGIN_NAME", nullptr, &payload, &size) && payload) {
-            hasDrag = true;
-        }
-        // Check for FX reorder payload  
-        if (!hasDrag && ImGui_GetDragDropPayload(m_ctx, "FX_INDEX", nullptr, &payload, &size) && payload) {
-            hasDrag = true;
-        }
-    }
-    
-    // Only show drop zone when dragging
-    if (!hasDrag) return;
-    
-    // Draw the drop zone button
-    const char* dropLabel = (depth == 0) ? "Drop to add to track" : "Drop here";
-    
-    if (ImGui_PushStyleColor) {
-        ImGui_PushStyleColor(m_ctx, ImGuiCol::Button, Theme::Accent & 0xFFFFFF88);  // Semi-transparent accent
-    }
-    
-    double btnW = -1;  // Full width
-    double btnH = 24;
-    if (ImGui_Button && ImGui_Button(m_ctx, dropLabel, &btnW, &btnH)) {
-        // Button clicked - no action needed, just for drop target
-    }
-    
-    if (ImGui_PopStyleColor) {
-        int one = 1;
-        ImGui_PopStyleColor(m_ctx, &one);
-    }
-    
-    // Make it a drop target
-    if (ImGui_BeginDragDropTarget && ImGui_BeginDragDropTarget(m_ctx)) {
-        // Accept plugin drops
-        const char* pluginPayload = nullptr;
-        int payloadSize = 0;
-        if (ImGui_AcceptDragDropPayload && 
-            ImGui_AcceptDragDropPayload(m_ctx, "PLUGIN_NAME", nullptr, &pluginPayload, &payloadSize)) {
-            if (pluginPayload && TrackFX_AddByName) {
-                if (m_ShowConsoleMsg) {
-                    char msg[512];
-                    snprintf(msg, sizeof(msg), "[SideFX Mod] Drop zone: Adding FX '%s'\n", pluginPayload);
-                    m_ShowConsoleMsg(msg);
-                }
-                int result = TrackFX_AddByName(track, pluginPayload, false, -1);
-                if (m_ShowConsoleMsg) {
-                    char msg[128];
-                    snprintf(msg, sizeof(msg), "[SideFX Mod] TrackFX_AddByName returned: %d\n", result);
-                    m_ShowConsoleMsg(msg);
-                }
-                RefreshFXList();
-            }
-        }
-        
-        if (ImGui_EndDragDropTarget) ImGui_EndDragDropTarget(m_ctx);
-    }
-    
-    if (ImGui_Spacing) ImGui_Spacing(m_ctx);
-}
-
-//------------------------------------------------------------------------------
 // FX Item Rendering
 //------------------------------------------------------------------------------
 
@@ -743,14 +1024,15 @@ void SideFXWindow::RenderFXItem(MediaTrack* track, int fxIndex, int depth) {
     
     bool enabled = m_TrackFX_GetEnabled(track, fxIndex);
     
-    // Check if container
+    // Check if container - container_count exists for containers (even if 0)
     bool isContainer = false;
     int containerCount = 0;
     if (TrackFX_GetNamedConfigParm) {
         char buf[64] = {0};
+        // If container_count query succeeds, it's a container (even if count is 0)
         if (TrackFX_GetNamedConfigParm(track, fxIndex, "container_count", buf, sizeof(buf))) {
             containerCount = atoi(buf);
-            isContainer = containerCount > 0;
+            isContainer = true;  // It's a container if this parameter exists
         }
     }
     
@@ -781,20 +1063,31 @@ void SideFXWindow::RenderFXItem(MediaTrack* track, int fxIndex, int depth) {
         snprintf(displayName, sizeof(displayName), "%s", fxName);
     }
     
-    // Selectable
-    bool highlight = isExpanded || isSelected || isMultiSelected;
+    // Selectable with fixed width
     bool clicked = false;
     
     if (ImGui_Selectable) {
-        clicked = ImGui_Selectable(m_ctx, displayName, &highlight, nullptr, nullptr, nullptr);
+        double selectW = 130;  // Fixed width for FX name
+        // Highlight: expanded containers OR selected FX
+        bool highlight = (isContainer && isExpanded) || (!isContainer && isSelected);
+        clicked = ImGui_Selectable(m_ctx, displayName, &highlight, nullptr, &selectW, nullptr);
     }
     
-    // Handle click
+    // Single-click behavior
     if (clicked) {
         if (isContainer) {
+            // Click container: expand/collapse (shows/hides its column)
             ToggleContainerExpanded(fxIndex);
         } else {
+            // Click FX: toggle selection for detail panel
             m_selectedFX = (m_selectedFX == fxIndex) ? -1 : fxIndex;
+        }
+    }
+    
+    // Double-click: open FX window
+    if (ImGui_IsItemHovered && ImGui_IsMouseDoubleClicked) {
+        if (ImGui_IsItemHovered(m_ctx, nullptr) && ImGui_IsMouseDoubleClicked(m_ctx, 0)) {
+            if (TrackFX_Show) TrackFX_Show(track, fxIndex, 3);
         }
     }
     
@@ -806,7 +1099,13 @@ void SideFXWindow::RenderFXItem(MediaTrack* track, int fxIndex, int depth) {
             char payload[32];
             snprintf(payload, sizeof(payload), "%d", fxIndex);
             if (ImGui_SetDragDropPayload) {
-                ImGui_SetDragDropPayload(m_ctx, "FX_INDEX", payload, nullptr);
+                bool setOk = ImGui_SetDragDropPayload(m_ctx, "FX_INDEX", payload, 0);
+                if (m_ShowConsoleMsg) {
+                    char msg[128];
+                    snprintf(msg, sizeof(msg), "[SideFX] FX drag started: idx=%d payload='%s' set=%s\n", 
+                             fxIndex, payload, setOk ? "YES" : "NO");
+                    m_ShowConsoleMsg(msg);
+                }
             }
             if (ImGui_Text) {
                 char dragText[256];
@@ -815,42 +1114,61 @@ void SideFXWindow::RenderFXItem(MediaTrack* track, int fxIndex, int depth) {
             }
             if (ImGui_EndDragDropSource) ImGui_EndDragDropSource(m_ctx);
         }
+    } else {
+        // Not dragging this FX - clear if we were
+        if (m_draggingFX == fxIndex) {
+            m_draggingFX = -1;
+        }
     }
     
-    // Drop target
-    if (ImGui_BeginDragDropTarget && ImGui_BeginDragDropTarget(m_ctx)) {
-        // Accept FX reorder
-        const char* fxPayload = nullptr;
-        int payloadSize = 0;
-        if (ImGui_AcceptDragDropPayload && 
-            ImGui_AcceptDragDropPayload(m_ctx, "FX_INDEX", nullptr, &fxPayload, &payloadSize)) {
-            if (fxPayload && TrackFX_CopyToTrack) {
-                int srcIdx = atoi(fxPayload);
-                if (srcIdx != fxIndex) {
-                    TrackFX_CopyToTrack(track, srcIdx, track, fxIndex, true);
+    // Drop target for CONTAINERS only - to accept drops inside
+    if (isContainer) {
+        if (ImGui_BeginDragDropTarget && ImGui_BeginDragDropTarget(m_ctx)) {
+            if (m_ShowConsoleMsg) {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "[SideFX] Container %d is drop target\n", fxIndex);
+                m_ShowConsoleMsg(msg);
+            }
+            
+            char payload[512] = {0};
+            
+            // Accept plugin drops into container
+            if (ImGui_AcceptDragDropPayload && 
+                ImGui_AcceptDragDropPayload(m_ctx, "PLUGIN_NAME", payload, sizeof(payload), 0)) {
+                if (m_ShowConsoleMsg) m_ShowConsoleMsg("[SideFX] Got PLUGIN_NAME payload\n");
+                if (payload[0] && TrackFX_AddByName) {
+                    int newFxIdx = TrackFX_AddByName(track, payload, false, -1);
+                    if (newFxIdx >= 0) {
+                        AddFXToContainer(track, newFxIdx, fxIndex, -1);
+                        if (!IsContainerExpanded(fxIndex)) {
+                            ToggleContainerExpanded(fxIndex);
+                        }
+                    }
                     RefreshFXList();
                 }
             }
-        }
-        
-        // Accept plugin drop
-        const char* pluginPayload = nullptr;
-        if (ImGui_AcceptDragDropPayload && 
-            ImGui_AcceptDragDropPayload(m_ctx, "PLUGIN_NAME", nullptr, &pluginPayload, &payloadSize)) {
-            if (pluginPayload && TrackFX_AddByName) {
-                // Add after this FX
-                TrackFX_AddByName(track, pluginPayload, false, fxIndex + 1);
-                RefreshFXList();
+            
+            // Accept FX drops into container
+            if (ImGui_AcceptDragDropPayload && 
+                ImGui_AcceptDragDropPayload(m_ctx, "FX_INDEX", payload, sizeof(payload), 0)) {
+                if (m_ShowConsoleMsg) {
+                    char msg[128];
+                    snprintf(msg, sizeof(msg), "[SideFX] Got FX_INDEX payload: '%s'\n", payload);
+                    m_ShowConsoleMsg(msg);
+                }
+                if (payload[0]) {
+                    int srcIdx = atoi(payload);
+                    if (srcIdx != fxIndex) {  // Don't drop container into itself
+                        AddFXToContainer(track, srcIdx, fxIndex, -1);
+                        if (!IsContainerExpanded(fxIndex)) {
+                            ToggleContainerExpanded(fxIndex);
+                        }
+                        RefreshFXList();
+                    }
+                }
             }
-        }
-        
-        if (ImGui_EndDragDropTarget) ImGui_EndDragDropTarget(m_ctx);
-    }
-    
-    // Double-click to open
-    if (ImGui_IsItemHovered && ImGui_IsMouseDoubleClicked && TrackFX_Show) {
-        if (ImGui_IsItemHovered(m_ctx, nullptr) && ImGui_IsMouseDoubleClicked(m_ctx, 0)) {
-            TrackFX_Show(track, fxIndex, 3);
+            
+            if (ImGui_EndDragDropTarget) ImGui_EndDragDropTarget(m_ctx);
         }
     }
     
@@ -859,12 +1177,61 @@ void SideFXWindow::RenderFXItem(MediaTrack* track, int fxIndex, int depth) {
         if (ImGui_SetTooltip) {
             if (isContainer) {
                 char tip[256];
-                snprintf(tip, sizeof(tip), "%s\n(%d FX inside)\nClick to expand", fxName, containerCount);
+                snprintf(tip, sizeof(tip), "%s\n(%d FX inside)\nClick to expand, Double-click to open", fxName, containerCount);
                 ImGui_SetTooltip(m_ctx, tip);
             } else {
                 ImGui_SetTooltip(m_ctx, fxName);
             }
         }
+    }
+    
+    // Context menu
+    char contextMenuId[32];
+    snprintf(contextMenuId, sizeof(contextMenuId), "##fxmenu%d", fxIndex);
+    
+    if (ImGui_BeginPopupContextItem && ImGui_BeginPopupContextItem(m_ctx, contextMenuId, nullptr)) {
+        int parentContainer = GetParentContainer(track, fxIndex);
+        
+        // Open FX window
+        if (ImGui_MenuItem && TrackFX_Show) {
+            if (ImGui_MenuItem(m_ctx, "Open FX Window", nullptr, nullptr, nullptr)) {
+                TrackFX_Show(track, fxIndex, 3);
+            }
+        }
+        
+        if (ImGui_Separator) ImGui_Separator(m_ctx);
+        
+        // Move to new container (works for FX and containers)
+        if (ImGui_MenuItem) {
+            if (ImGui_MenuItem(m_ctx, "Move to New Container", nullptr, nullptr, nullptr)) {
+                MoveToNewContainer(track, fxIndex);
+            }
+        }
+        
+        // Move out of container (only if inside a container)
+        if (parentContainer >= 0 && ImGui_MenuItem) {
+            if (ImGui_MenuItem(m_ctx, "Move Out of Container", nullptr, nullptr, nullptr)) {
+                MoveOutOfContainer(track, fxIndex);
+            }
+        }
+        
+        // Dissolve (only for containers)
+        if (isContainer && ImGui_MenuItem) {
+            if (ImGui_MenuItem(m_ctx, "Dissolve Container", nullptr, nullptr, nullptr)) {
+                DissolveContainer(track, fxIndex);
+            }
+        }
+        
+        if (ImGui_Separator) ImGui_Separator(m_ctx);
+        
+        // Delete
+        if (ImGui_MenuItem) {
+            if (ImGui_MenuItem(m_ctx, "Delete", nullptr, nullptr, nullptr)) {
+                DeleteFX(track, fxIndex);
+            }
+        }
+        
+        if (ImGui_EndPopup) ImGui_EndPopup(m_ctx);
     }
     
     // Wet/dry slider
@@ -943,9 +1310,6 @@ void SideFXWindow::RenderFXChainColumn(int depth, int parentFxIndex) {
     }
     if (ImGui_Separator) ImGui_Separator(m_ctx);
     
-    // Drop zone for adding plugins
-    RenderDropZone(track, depth, parentFxIndex);
-    
     // Get FX list for this column
     std::vector<int> fxIndices;
     
@@ -954,7 +1318,6 @@ void SideFXWindow::RenderFXChainColumn(int depth, int parentFxIndex) {
         int fxCount = m_TrackFX_GetCount(track);
         for (int i = 0; i < fxCount; i++) {
             // Check if this FX has a parent container
-            // If not, it's top level
             bool hasParent = false;
             if (TrackFX_GetNamedConfigParm) {
                 char buf[64];
@@ -979,16 +1342,69 @@ void SideFXWindow::RenderFXChainColumn(int depth, int parentFxIndex) {
         fxIndices = GetContainerChildren(track, parentFxIndex);
     }
     
+    // Render each FX item
     if (fxIndices.empty()) {
         if (ImGui_TextColored) {
-            ImGui_TextColored(m_ctx, Theme::TextDim, "Empty");
+            ImGui_TextColored(m_ctx, Theme::TextDim, "(empty - drop plugins here)");
         }
-        return;
+    } else {
+        for (int fxIdx : fxIndices) {
+            RenderFXItem(track, fxIdx, depth);
+        }
     }
     
-    // Render each FX
-    for (int fxIdx : fxIndices) {
-        RenderFXItem(track, fxIdx, depth);
+    // Column-level drop target (invisible button covering remaining space)
+    if (ImGui_InvisibleButton) {
+        // Fill remaining vertical space as drop target
+        double availW = 0, availH = 0;
+        if (ImGui_GetContentRegionAvail) {
+            ImGui_GetContentRegionAvail(m_ctx, &availW, &availH);
+        }
+        if (availH < 50) availH = 50;  // Minimum drop area
+        if (availW < 10) availW = COLUMN_WIDTH - 20;
+        
+        char dropId[64];
+        snprintf(dropId, sizeof(dropId), "##drop_%d_%d", depth, parentFxIndex);
+        ImGui_InvisibleButton(m_ctx, dropId, availW, availH, nullptr);
+    }
+    
+    // Accept drops on the column (adds to end)
+    if (ImGui_BeginDragDropTarget && ImGui_BeginDragDropTarget(m_ctx)) {
+        char payload[512] = {0};
+        
+        // Accept plugin drops
+        if (ImGui_AcceptDragDropPayload && 
+            ImGui_AcceptDragDropPayload(m_ctx, "PLUGIN_NAME", payload, sizeof(payload), 0)) {
+            if (payload[0] && TrackFX_AddByName) {
+                int newFxIdx = TrackFX_AddByName(track, payload, false, -1);  // Add at end
+                if (newFxIdx >= 0 && parentFxIndex >= 0) {
+                    // Move into container if this is a container column
+                    AddFXToContainer(track, newFxIdx, parentFxIndex, -1);
+                }
+                RefreshFXList();
+            }
+        }
+        
+        // Accept FX reorder drops
+        if (ImGui_AcceptDragDropPayload && 
+            ImGui_AcceptDragDropPayload(m_ctx, "FX_INDEX", payload, sizeof(payload), 0)) {
+            if (payload[0]) {
+                int srcIdx = atoi(payload);
+                if (srcIdx >= 0 || srcIdx >= 0x2000000) {
+                    if (parentFxIndex >= 0) {
+                        // Drop into container
+                        AddFXToContainer(track, srcIdx, parentFxIndex, -1);
+                    } else if (TrackFX_CopyToTrack && m_TrackFX_GetCount) {
+                        // Move to end of track
+                        int destIdx = m_TrackFX_GetCount(track);
+                        TrackFX_CopyToTrack(track, srcIdx, track, destIdx, true);
+                    }
+                    RefreshFXList();
+                }
+            }
+        }
+        
+        if (ImGui_EndDragDropTarget) ImGui_EndDragDropTarget(m_ctx);
     }
 }
 
@@ -1116,6 +1532,8 @@ void SideFXWindow::RenderDetailPanel() {
 //------------------------------------------------------------------------------
 
 void SideFXWindow::RenderModulatorPanel() {
+    if (!m_modulatorsVisible) return;
+    
     auto& manager = ModulatorManager::instance();
     auto modulators = manager.getActiveModulators();
 
@@ -1183,6 +1601,10 @@ void SideFXWindow::Render() {
     if (!m_visible) return;
     
     if (!IsReaImGuiAvailable()) return;
+    
+    // Increment frame counter and reset drop flag
+    m_frameCounter++;
+    m_dropHandledThisFrame = false;
 
     if (!m_ctx) {
         if (ImGui_CreateContext) {
@@ -1245,15 +1667,23 @@ void SideFXWindow::Render() {
         }
         if (ImGui_EndChild) ImGui_EndChild(m_ctx);
         
-        // Expanded container columns
+        // Expanded container columns (only show if container has children)
+        MediaTrack* track = m_GetSelectedTrack ? m_GetSelectedTrack(nullptr, 0) : nullptr;
         for (size_t i = 0; i < m_expandedContainers.size(); i++) {
+            int containerIdx = m_expandedContainers[i];
+            
+            // Skip if container is empty or track is null
+            if (!track) continue;
+            std::vector<int> children = GetContainerChildren(track, containerIdx);
+            if (children.empty()) continue;
+            
             if (ImGui_SameLine) ImGui_SameLine(m_ctx, nullptr, nullptr);
             
             char colId[32];
             snprintf(colId, sizeof(colId), "ContainerCol%zu", i);
             
             if (ImGui_BeginChild && ImGui_BeginChild(m_ctx, colId, &colW, &colH, &colFlags, nullptr)) {
-                RenderFXChainColumn((int)i + 1, m_expandedContainers[i]);
+                RenderFXChainColumn((int)i + 1, containerIdx);
             }
             if (ImGui_EndChild) ImGui_EndChild(m_ctx);
         }
@@ -1264,13 +1694,15 @@ void SideFXWindow::Render() {
             RenderDetailPanel();
         }
         
-        // Modulator column
-        if (ImGui_SameLine) ImGui_SameLine(m_ctx, nullptr, nullptr);
-        
-        if (ImGui_BeginChild && ImGui_BeginChild(m_ctx, "ModulatorCol", &colW, &colH, &colFlags, nullptr)) {
-            RenderModulatorPanel();
+        // Modulator column (only if visible)
+        if (m_modulatorsVisible) {
+            if (ImGui_SameLine) ImGui_SameLine(m_ctx, nullptr, nullptr);
+            
+            if (ImGui_BeginChild && ImGui_BeginChild(m_ctx, "ModulatorCol", &colW, &colH, &colFlags, nullptr)) {
+                RenderModulatorPanel();
+            }
+            if (ImGui_EndChild) ImGui_EndChild(m_ctx);
         }
-        if (ImGui_EndChild) ImGui_EndChild(m_ctx);
         
         if (ImGui_EndChild) ImGui_EndChild(m_ctx);
     }

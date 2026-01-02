@@ -57,7 +57,6 @@ private:
     // UI Panels
     void RenderToolbar();
     void RenderPluginBrowser();
-    void RenderDropZone(MediaTrack* track, int depth, int parentFxIndex);
     void RenderFXChainColumn(int depth, int parentFxIndex);
     void RenderFXItem(MediaTrack* track, int fxIndex, int depth);
     void RenderDetailPanel();
@@ -72,6 +71,23 @@ private:
     // FX helpers
     void RefreshFXList();
     std::vector<int> GetContainerChildren(MediaTrack* track, int containerIdx);
+    int GetParentContainer(MediaTrack* track, int fxIndex);
+    bool IsContainer(MediaTrack* track, int fxIndex);
+    int GetContainerChildCount(MediaTrack* track, int containerIdx);
+    
+    // Container index calculations
+    int CalcContainerDestIndex(MediaTrack* track, int containerIdx, int position);
+    
+    // Low-level container operations
+    bool AddFXToContainer(MediaTrack* track, int fxIndex, int containerIdx, int position = -1);
+    bool RemoveFXFromContainer(MediaTrack* track, int fxIndex);
+    
+    // High-level container operations (with undo)
+    void DeleteFX(MediaTrack* track, int fxIndex);
+    void MoveToNewContainer(MediaTrack* track, int fxIndex);
+    void MoveOutOfContainer(MediaTrack* track, int fxIndex);
+    void DissolveContainer(MediaTrack* track, int containerIdx);
+    int CreateEmptyContainer(MediaTrack* track, int parentContainerIdx = -1);
     bool IsContainerExpanded(int fxIndex);
     void ToggleContainerExpanded(int fxIndex);
     void CollapseFromDepth(int depth);
@@ -83,8 +99,14 @@ private:
     void* m_ctx = nullptr;
     int m_themeColorCount = 0;
     
-    // Browser state
+    // Panel visibility
     bool m_browserVisible = true;
+    bool m_modulatorsVisible = true;
+    bool m_dropHandledThisFrame = false;
+    int m_fxChainModifiedFrame = 0;  // Frame counter when FX chain was last modified
+    int m_frameCounter = 0;
+    
+    // Browser state
     char m_searchBuffer[256] = {0};
     int m_filterMode = 0;  // 0=All, 1=Instruments, 2=Effects
     std::vector<PluginInfo> m_allPlugins;

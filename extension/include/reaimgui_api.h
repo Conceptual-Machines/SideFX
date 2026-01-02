@@ -95,11 +95,11 @@ extern void (*ImGui_SetKeyboardFocusHere)(void* ctx, int* offsetInOptional);
 
 // Drag & Drop
 extern bool (*ImGui_BeginDragDropSource)(void* ctx, int* flagsInOptional);
-extern bool (*ImGui_SetDragDropPayload)(void* ctx, const char* type, const char* data, int* condInOptional);
+extern bool (*ImGui_SetDragDropPayload)(void* ctx, const char* type, const char* data, int condInOptional);
 extern void (*ImGui_EndDragDropSource)(void* ctx);
 extern bool (*ImGui_BeginDragDropTarget)(void* ctx);
-extern bool (*ImGui_AcceptDragDropPayload)(void* ctx, const char* type, int* flagsInOptional, const char** dataOut, int* sizeOut);
-extern bool (*ImGui_GetDragDropPayload)(void* ctx, const char* type, int* flagsInOptional, const char** dataOut, int* sizeOut);
+extern bool (*ImGui_AcceptDragDropPayload)(void* ctx, const char* type, char* payloadBuf, int payloadBuf_sz, int flagsInOptional);
+extern bool (*ImGui_GetDragDropPayload)(void* ctx, char* typeOut, int typeOut_sz, char* payloadOut, int payloadOut_sz, bool* is_previewOut, bool* is_deliveryOut);
 extern void (*ImGui_EndDragDropTarget)(void* ctx);
 
 // Drawing
@@ -125,9 +125,12 @@ extern bool (*ImGui_IsItemClicked)(void* ctx, int* mouse_buttonInOptional);
 extern bool (*ImGui_IsItemActive)(void* ctx);
 extern bool (*ImGui_IsMouseDown)(void* ctx, int button);
 extern bool (*ImGui_IsMouseClicked)(void* ctx, int button, bool* repeatInOptional);
+extern bool (*ImGui_IsMouseReleased)(void* ctx, int button);
 extern bool (*ImGui_IsMouseDoubleClicked)(void* ctx, int button);
 extern void (*ImGui_GetMousePos)(void* ctx, double* xOut, double* yOut);
 extern void (*ImGui_GetMouseDelta)(void* ctx, double* xOut, double* yOut);
+extern void (*ImGui_GetItemRectMin)(void* ctx, double* xOut, double* yOut);
+extern void (*ImGui_GetItemRectMax)(void* ctx, double* xOut, double* yOut);
 
 // Tooltips
 extern bool (*ImGui_BeginTooltip)(void* ctx);

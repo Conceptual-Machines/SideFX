@@ -93,11 +93,11 @@ void (*ImGui_SetKeyboardFocusHere)(void* ctx, int* offsetInOptional) = nullptr;
 
 // Drag & Drop
 bool (*ImGui_BeginDragDropSource)(void* ctx, int* flagsInOptional) = nullptr;
-bool (*ImGui_SetDragDropPayload)(void* ctx, const char* type, const char* data, int* condInOptional) = nullptr;
+bool (*ImGui_SetDragDropPayload)(void* ctx, const char* type, const char* data, int condInOptional) = nullptr;
 void (*ImGui_EndDragDropSource)(void* ctx) = nullptr;
 bool (*ImGui_BeginDragDropTarget)(void* ctx) = nullptr;
-bool (*ImGui_AcceptDragDropPayload)(void* ctx, const char* type, int* flagsInOptional, const char** dataOut, int* sizeOut) = nullptr;
-bool (*ImGui_GetDragDropPayload)(void* ctx, const char* type, int* flagsInOptional, const char** dataOut, int* sizeOut) = nullptr;
+bool (*ImGui_AcceptDragDropPayload)(void* ctx, const char* type, char* payloadBuf, int payloadBuf_sz, int flagsInOptional) = nullptr;
+bool (*ImGui_GetDragDropPayload)(void* ctx, char* typeOut, int typeOut_sz, char* payloadOut, int payloadOut_sz, bool* is_previewOut, bool* is_deliveryOut) = nullptr;
 void (*ImGui_EndDragDropTarget)(void* ctx) = nullptr;
 
 // Drawing
@@ -122,10 +122,13 @@ bool (*ImGui_IsItemHovered)(void* ctx, int* flagsInOptional) = nullptr;
 bool (*ImGui_IsItemClicked)(void* ctx, int* mouse_buttonInOptional) = nullptr;
 bool (*ImGui_IsItemActive)(void* ctx) = nullptr;
 bool (*ImGui_IsMouseDown)(void* ctx, int button) = nullptr;
+bool (*ImGui_IsMouseReleased)(void* ctx, int button) = nullptr;
 bool (*ImGui_IsMouseClicked)(void* ctx, int button, bool* repeatInOptional) = nullptr;
 bool (*ImGui_IsMouseDoubleClicked)(void* ctx, int button) = nullptr;
 void (*ImGui_GetMousePos)(void* ctx, double* xOut, double* yOut) = nullptr;
 void (*ImGui_GetMouseDelta)(void* ctx, double* xOut, double* yOut) = nullptr;
+void (*ImGui_GetItemRectMin)(void* ctx, double* xOut, double* yOut) = nullptr;
+void (*ImGui_GetItemRectMax)(void* ctx, double* xOut, double* yOut) = nullptr;
 
 // Tooltips
 bool (*ImGui_BeginTooltip)(void* ctx) = nullptr;
@@ -315,9 +318,12 @@ bool InitializeReaImGui(reaper_plugin_info_t* rec) {
     LOAD_IMGUI_FUNC(ImGui_IsItemActive);
     LOAD_IMGUI_FUNC(ImGui_IsMouseDown);
     LOAD_IMGUI_FUNC(ImGui_IsMouseClicked);
+    LOAD_IMGUI_FUNC(ImGui_IsMouseReleased);
     LOAD_IMGUI_FUNC(ImGui_IsMouseDoubleClicked);
     LOAD_IMGUI_FUNC(ImGui_GetMousePos);
     LOAD_IMGUI_FUNC(ImGui_GetMouseDelta);
+    LOAD_IMGUI_FUNC(ImGui_GetItemRectMin);
+    LOAD_IMGUI_FUNC(ImGui_GetItemRectMax);
 
     // Tooltips
     LOAD_IMGUI_FUNC(ImGui_BeginTooltip);
