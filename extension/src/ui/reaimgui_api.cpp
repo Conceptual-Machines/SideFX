@@ -179,11 +179,28 @@ bool InitializeReaImGui(reaper_plugin_info_t* rec) {
         return false;
     }
 
+    // Get ShowConsoleMsg for debug output
+    void (*ShowConsoleMsg)(const char* msg) = 
+        (void (*)(const char*))rec->GetFunc("ShowConsoleMsg");
+    
+    if (ShowConsoleMsg) {
+        ShowConsoleMsg("[SideFX Mod] Initializing ReaImGui API...\n");
+    }
+
     // Core functions (required)
     LOAD_IMGUI_FUNC(ImGui_CreateContext);
     LOAD_IMGUI_FUNC(ImGui_DestroyContext);
     LOAD_IMGUI_FUNC(ImGui_Begin);
     LOAD_IMGUI_FUNC(ImGui_End);
+
+    // Debug: show which core functions loaded
+    if (ShowConsoleMsg) {
+        char buf[256];
+        snprintf(buf, sizeof(buf), 
+            "[SideFX Mod] Core ImGui functions: CreateContext=%p, Begin=%p, End=%p\n",
+            (void*)ImGui_CreateContext, (void*)ImGui_Begin, (void*)ImGui_End);
+        ShowConsoleMsg(buf);
+    }
 
     // Check if core functions are available
     if (!ImGui_CreateContext || !ImGui_Begin || !ImGui_End) {

@@ -9,6 +9,9 @@ namespace sidefx {
 // Global instance
 SideFXWindow* g_sideFXWindow = nullptr;
 
+// Store rec for lazy initialization
+static reaper_plugin_info_t* s_rec = nullptr;
+
 SideFXWindow::SideFXWindow() {}
 
 SideFXWindow::~SideFXWindow() {
@@ -23,10 +26,8 @@ bool SideFXWindow::Initialize(reaper_plugin_info_t* rec) {
         return false;
     }
 
-    // Initialize ReaImGui API
-    if (!InitializeReaImGui(rec)) {
-        return false;
-    }
+    // Store rec for lazy initialization of ReaImGui
+    s_rec = rec;
 
     // Load REAPER API functions we need
     m_GetSelectedTrack = (MediaTrack* (*)(ReaProject*, int))rec->GetFunc("GetSelectedTrack");
@@ -37,14 +38,65 @@ bool SideFXWindow::Initialize(reaper_plugin_info_t* rec) {
     m_TrackFX_GetEnabled = (bool (*)(MediaTrack*, int))rec->GetFunc("TrackFX_GetEnabled");
     m_ShowConsoleMsg = (void (*)(const char*))rec->GetFunc("ShowConsoleMsg");
 
-    m_available = IsReaImGuiAvailable();
-    return m_available;
+    // Don't try to initialize ReaImGui yet - it might not be loaded
+    // We'll try lazily when Show() is called
+    m_available = true;  // Assume available, will check on first use
+    return true;
+}
+
+// Try to initialize ReaImGui (called lazily)
+bool SideFXWindow::TryInitReaImGui() {
+    if (m_reaimguiInitialized) {
+        return IsReaImGuiAvailable();
+    }
+    
+    m_reaimguiInitialized = true;
+    
+    if (!s_rec) {
+        if (m_ShowConsoleMsg) {
+            m_ShowConsoleMsg("[SideFX Mod] ERROR: rec not stored\n");
+        }
+        return false;
+    }
+    
+    if (m_ShowConsoleMsg) {
+        m_ShowConsoleMsg("[SideFX Mod] Lazy-initializing ReaImGui...\n");
+    }
+    
+    if (InitializeReaImGui(s_rec)) {
+        if (m_ShowConsoleMsg) {
+            m_ShowConsoleMsg("[SideFX Mod] ReaImGui initialized successfully!\n");
+        }
+        return true;
+    }
+    
+    if (m_ShowConsoleMsg) {
+        m_ShowConsoleMsg("[SideFX Mod] ReaImGui still not available\n");
+    }
+    return false;
 }
 
 void SideFXWindow::Show() {
+    // Try to initialize ReaImGui lazily if not done yet
+    if (!m_reaimguiInitialized) {
+        TryInitReaImGui();
+    }
+    
+    if (!IsReaImGuiAvailable()) {
+        if (m_ShowConsoleMsg) {
+            m_ShowConsoleMsg("[SideFX Mod] Cannot show window - ReaImGui not available\n");
+        }
+        return;
+    }
+    
     m_visible = true;
-    if (!m_ctx && m_available && ImGui_CreateContext) {
+    if (!m_ctx && ImGui_CreateContext) {
         m_ctx = ImGui_CreateContext("SideFX", nullptr);
+        if (m_ShowConsoleMsg) {
+            char buf[128];
+            snprintf(buf, sizeof(buf), "[SideFX Mod] Created ImGui context: %p\n", m_ctx);
+            m_ShowConsoleMsg(buf);
+        }
     }
 }
 
@@ -372,7 +424,12 @@ void SideFXWindow::RenderStatusBar() {
 }
 
 void SideFXWindow::Render() {
-    if (!m_available || !m_visible) {
+    if (!m_visible) {
+        return;
+    }
+    
+    // Make sure ReaImGui is initialized
+    if (!IsReaImGuiAvailable()) {
         return;
     }
 

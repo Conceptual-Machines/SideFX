@@ -401,18 +401,7 @@ static bool onWindowToggle() {
     }
     
     if (sidefx::g_sideFXWindow) {
-        if (!sidefx::g_sideFXWindow->IsAvailable()) {
-            if (ShowConsoleMsg) {
-                ShowConsoleMsg("[SideFX Mod] ReaImGui not available - please install ReaImGui extension\n");
-            }
-            if (ShowMessageBox) {
-                ShowMessageBox("ReaImGui extension is required for the SideFX window.\n\n"
-                               "Please install ReaImGui from ReaPack:\n"
-                               "Extensions > ReaPack > Browse packages > Search 'ReaImGui'",
-                               "SideFX - ReaImGui Required", 0);
-            }
-            return true;
-        }
+        // Toggle will handle lazy ReaImGui initialization
         sidefx::g_sideFXWindow->Toggle();
         if (ShowConsoleMsg) {
             char buf[64];
@@ -663,16 +652,33 @@ static void registerAPI() {
 // Menu Hook - Add SideFX to Extensions menu
 //------------------------------------------------------------------------------
 
-static void menuHook(const char* menuidstr, HMENU menu, int flag) {
+static void menuHook(const char* menuidstr, void* menu, int flag) {
+    // Debug: always log when menu hook is called
+    if (ShowConsoleMsg && menuidstr) {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "[SideFX Mod] menuHook called: menuidstr='%s', flag=%d, menu=%p\n", 
+                 menuidstr, flag, menu);
+        ShowConsoleMsg(buf);
+    }
+    
     if (!menuidstr || !menu) return;
     
     // Add to "Main extensions" menu when flag is 0 (building menu)
     if (strcmp(menuidstr, "Main extensions") == 0 && flag == 0) {
-        HMENU hMenu = menu;
+        HMENU hMenu = (HMENU)menu;
+        
+        if (ShowConsoleMsg) {
+            ShowConsoleMsg("[SideFX Mod] Building menu in Main extensions...\n");
+        }
         
         // Create SideFX submenu
         HMENU hSubMenu = CreatePopupMenu();
-        if (!hSubMenu) return;
+        if (!hSubMenu) {
+            if (ShowConsoleMsg) {
+                ShowConsoleMsg("[SideFX Mod] ERROR: Failed to create popup menu\n");
+            }
+            return;
+        }
         
         // Add "Open Window" item
         MENUITEMINFO subMi = {sizeof(MENUITEMINFO)};
@@ -697,6 +703,10 @@ static void menuHook(const char* menuidstr, HMENU menu, int flag) {
         mi.wID = g_menuCommandId;
         mi.dwTypeData = (char*)"SideFX";
         InsertMenuItem(hMenu, GetMenuItemCount(hMenu), true, &mi);
+        
+        if (ShowConsoleMsg) {
+            ShowConsoleMsg("[SideFX Mod] Menu added successfully\n");
+        }
     }
 }
 
@@ -835,18 +845,15 @@ REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
         ShowConsoleMsg(buf);
     }
 
-    // Initialize ImGui window (requires ReaImGui extension)
+    // Initialize ImGui window (ReaImGui will be initialized lazily when window opens)
     sidefx::g_sideFXWindow = new sidefx::SideFXWindow();
-    if (sidefx::g_sideFXWindow->Initialize(rec)) {
-        // Register timer for ImGui rendering (~30 fps)
-        plugin_register("timer", (void*)imguiTimerCallback);
-        if (ShowConsoleMsg) {
-            ShowConsoleMsg("[SideFX Mod] ReaImGui initialized - window available\n");
-        }
-    } else {
-        if (ShowConsoleMsg) {
-            ShowConsoleMsg("[SideFX Mod] ReaImGui not available - install ReaImGui extension for UI\n");
-        }
+    sidefx::g_sideFXWindow->Initialize(rec);
+    
+    // Register timer for ImGui rendering (~30 fps)
+    plugin_register("timer", (void*)imguiTimerCallback);
+    
+    if (ShowConsoleMsg) {
+        ShowConsoleMsg("[SideFX Mod] Window manager initialized (ReaImGui will load on first use)\n");
     }
     
     if (ShowConsoleMsg) {

@@ -31,6 +31,9 @@ public:
     void Render();
 
 private:
+    // Try to initialize ReaImGui (lazy initialization)
+    bool TryInitReaImGui();
+    
     // Apply theme colors
     void ApplyTheme();
     void PopTheme();
@@ -45,6 +48,7 @@ private:
     // State
     bool m_available = false;
     bool m_visible = false;
+    bool m_reaimguiInitialized = false;
     void* m_ctx = nullptr;
     int m_themeColorCount = 0;
 
