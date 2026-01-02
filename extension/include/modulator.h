@@ -2,16 +2,22 @@
 
 #include "bezier.h"
 #include <string>
+#include <vector>
 #include <unordered_map>
 #include <mutex>
 #include <atomic>
+#include <memory>
 
-// Forward declare REAPER types (matching reaper_plugin.h)
+// Forward declare REAPER types
 class MediaTrack;
+class TrackEnvelope;
 
 namespace sidefx {
 
-// Modulation target: which FX parameter to modulate
+//------------------------------------------------------------------------------
+// Modulation Target
+//------------------------------------------------------------------------------
+
 struct ModulationTarget {
     MediaTrack* track = nullptr;
     int fx_index = -1;
@@ -22,39 +28,46 @@ struct ModulationTarget {
     }
 };
 
-// Modulation source type
-enum class ModSource {
-    LFO,            // Bezier curve LFO (default)
-    AudioEnvelope,  // Envelope follower from track audio
-    MidiCC,         // MIDI CC value
-    MidiNote        // MIDI note velocity/gate
+//------------------------------------------------------------------------------
+// Trigger Mode - What starts/restarts the modulation
+//------------------------------------------------------------------------------
+
+enum class TriggerMode {
+    Free,           // Continuous, no trigger (classic LFO)
+    AudioLevel,     // Trigger when audio crosses threshold
+    AudioTransient, // Trigger on audio attack/transient
+    MidiNote,       // Trigger on MIDI note-on
+    Manual          // Trigger via API call only
 };
 
-// Rate mode: free Hz or tempo-synced
+//------------------------------------------------------------------------------
+// Playback Mode - How the shape plays
+//------------------------------------------------------------------------------
+
+enum class PlaybackMode {
+    Loop,       // Repeats continuously (LFO style)
+    OneShot     // Plays once, holds at end (envelope style)
+};
+
+//------------------------------------------------------------------------------
+// Rate Mode - Free Hz or tempo-synced
+//------------------------------------------------------------------------------
+
 enum class RateMode {
-    FreeHz,         // Rate in Hz
-    TempoSync       // Rate as beat division
+    FreeHz,     // Rate in Hz
+    TempoSync   // Rate as beat division
 };
 
-// Tempo sync divisions
+//------------------------------------------------------------------------------
+// Tempo Sync Divisions
+//------------------------------------------------------------------------------
+
 enum class SyncDivision {
-    Bar4 = 0,       // 4 bars
-    Bar2,           // 2 bars
-    Bar1,           // 1 bar
-    Half,           // 1/2 note
-    Quarter,        // 1/4 note
-    Eighth,         // 1/8 note
-    Sixteenth,      // 1/16 note
-    ThirtySecond,   // 1/32 note
-    DottedHalf,     // Dotted 1/2
-    DottedQuarter,  // Dotted 1/4
-    DottedEighth,   // Dotted 1/8
-    TripletHalf,    // Triplet 1/2
-    TripletQuarter, // Triplet 1/4
-    TripletEighth   // Triplet 1/8
+    Bar4 = 0, Bar2, Bar1, Half, Quarter, Eighth, Sixteenth, ThirtySecond,
+    DottedHalf, DottedQuarter, DottedEighth,
+    TripletHalf, TripletQuarter, TripletEighth
 };
 
-// Get beats for a sync division (assuming 4/4)
 inline double getSyncBeats(SyncDivision div) {
     switch (div) {
         case SyncDivision::Bar4:          return 16.0;
@@ -75,74 +88,110 @@ inline double getSyncBeats(SyncDivision div) {
     }
 }
 
-// A single modulator instance
+//------------------------------------------------------------------------------
+// Recorded Automation Point
+//------------------------------------------------------------------------------
+
+struct AutomationPoint {
+    double time;    // Project time in seconds
+    double value;   // Normalized value 0-1
+};
+
+//------------------------------------------------------------------------------
+// Modulator - Main class
+//------------------------------------------------------------------------------
+
 class Modulator {
 public:
     int id = -1;
     std::string name;
 
-    // Source type
-    ModSource source = ModSource::LFO;
+    //=== SHAPE (Bezier curve) ===
+    BezierCurve curve;              // The modulation shape
 
-    // === LFO Settings ===
-    BezierCurve curve;                          // LFO shape
+    //=== PLAYBACK ===
+    PlaybackMode playbackMode = PlaybackMode::Loop;
     RateMode rateMode = RateMode::FreeHz;
-    double rateHz = 1.0;                        // Free rate in Hz
+    double rateHz = 1.0;
     SyncDivision syncDivision = SyncDivision::Quarter;
-    std::atomic<double> phase{0.0};             // Current phase 0-1
-    double phaseOffset = 0.0;                   // Starting phase offset
 
-    // === Audio Envelope Follower Settings ===
-    MediaTrack* sourceTrack = nullptr;          // Track to follow
-    double attackMs = 10.0;                     // Attack time in ms
-    double releaseMs = 100.0;                   // Release time in ms
-    std::atomic<double> envelopeValue{0.0};     // Current envelope value (smoothed)
-    double lastPeak = 0.0;                      // Last raw peak for smoothing
+    //=== TRIGGER ===
+    TriggerMode triggerMode = TriggerMode::Free;
+    
+    // Audio trigger settings
+    MediaTrack* triggerTrack = nullptr;
+    double audioThreshold = 0.1;        // 0-1
+    double retriggerDelayMs = 50.0;     // Minimum ms between triggers
+    double lastTriggerTime = 0.0;       // For retrigger delay
+    double lastPeakValue = 0.0;         // For transient detection
+    
+    // MIDI trigger settings
+    int midiChannel = -1;               // -1 = omni
+    int midiNote = -1;                  // -1 = any
+    bool velocityToDepth = false;       // Scale depth by velocity
+    double velocityDepthScale = 1.0;    // Current velocity scaling
 
-    // === MIDI Settings ===
-    int midiChannel = -1;                       // -1 = omni, 0-15 = specific channel
-    int midiCC = 1;                             // CC number (1 = mod wheel)
-    int midiNote = -1;                          // Note number for note tracking (-1 = any)
-    std::atomic<double> midiValue{0.0};         // Current MIDI value (0-1)
-    std::atomic<double> midiVelocity{0.0};      // Last note velocity (0-1)
-    std::atomic<bool> midiNoteOn{false};        // Note gate
+    //=== OUTPUT ===
+    ModulationTarget target;
+    double depth = 1.0;                 // 0-1
+    double offset = 0.5;                // 0-1 center
+    bool bipolar = true;
 
-    // === Target & Output ===
-    ModulationTarget target;                    // Target FX parameter
-    double depth = 1.0;                         // 0-1, modulation amount
-    double offset = 0.5;                        // 0-1, center point
-    bool bipolar = true;                        // true: around offset, false: 0 to depth
+    //=== STATE ===
+    std::atomic<double> phase{0.0};     // Current phase 0-1
+    double phaseOffset = 0.0;           // Starting phase
     std::atomic<bool> enabled{false};
+    std::atomic<bool> triggered{false}; // Has been triggered (for one-shot)
+    std::atomic<bool> playing{false};   // Currently playing
 
-    // Get the current modulation value (0-1)
+    //=== RECORDING ===
+    std::atomic<bool> recording{false};
+    double recordStartTime = 0.0;
+    double recordEndTime = 0.0;
+    double recordResolution = 0.01;     // Seconds between points (10ms default)
+    std::vector<AutomationPoint> recordedPoints;
+    std::mutex recordMutex;
+
+    //=== METHODS ===
+
+    // Get current output value (0-1 normalized)
     double getCurrentValue() const {
-        double rawValue = 0.0;
-
-        switch (source) {
-            case ModSource::LFO:
-                rawValue = curve.evaluate(phase.load());
-                break;
-            case ModSource::AudioEnvelope:
-                rawValue = envelopeValue.load();
-                break;
-            case ModSource::MidiCC:
-                rawValue = midiValue.load();
-                break;
-            case ModSource::MidiNote:
-                rawValue = midiNoteOn.load() ? midiVelocity.load() : 0.0;
-                break;
+        if (!playing.load() && playbackMode == PlaybackMode::OneShot) {
+            // One-shot not triggered or finished - return offset
+            double p = phase.load();
+            if (p >= 1.0 || !triggered.load()) {
+                // Return end value or offset based on curve
+                return bipolar ? offset : offset;
+            }
         }
 
+        double curveValue = curve.evaluate(phase.load());
+        double effectiveDepth = depth * velocityDepthScale;
+
         if (bipolar) {
-            return offset + (rawValue - 0.5) * depth;
+            return offset + (curveValue - 0.5) * effectiveDepth;
         } else {
-            return offset + rawValue * depth;
+            return offset + curveValue * effectiveDepth;
         }
     }
 
-    // Advance LFO phase by delta time (only for LFO source)
+    // Trigger the modulator (restart from beginning)
+    void trigger(double velocity = 1.0) {
+        phase.store(phaseOffset);
+        triggered.store(true);
+        playing.store(true);
+        
+        if (velocityToDepth) {
+            velocityDepthScale = velocity;
+        }
+    }
+
+    // Advance phase by delta time
     void advancePhase(double deltaSeconds, double bpm) {
-        if (!enabled.load() || source != ModSource::LFO) return;
+        if (!enabled.load()) return;
+
+        // Free mode always plays, other modes need trigger
+        if (triggerMode != TriggerMode::Free && !playing.load()) return;
 
         double cyclesPerSecond;
         if (rateMode == RateMode::FreeHz) {
@@ -154,53 +203,98 @@ public:
         }
 
         double newPhase = phase.load() + deltaSeconds * cyclesPerSecond;
-        newPhase = newPhase - std::floor(newPhase);
+
+        if (playbackMode == PlaybackMode::Loop) {
+            newPhase = newPhase - std::floor(newPhase);
+        } else {
+            // One-shot: clamp at 1.0
+            if (newPhase >= 1.0) {
+                newPhase = 1.0;
+                playing.store(false);
+            }
+        }
+
         phase.store(newPhase);
     }
 
-    // Update envelope follower (call with current peak value)
-    void updateEnvelope(double peak, double deltaSeconds) {
-        if (!enabled.load() || source != ModSource::AudioEnvelope) return;
-
-        double current = envelopeValue.load();
-        double attackCoef = 1.0 - std::exp(-deltaSeconds * 1000.0 / attackMs);
-        double releaseCoef = 1.0 - std::exp(-deltaSeconds * 1000.0 / releaseMs);
-
-        double newValue;
-        if (peak > current) {
-            newValue = current + (peak - current) * attackCoef;
-        } else {
-            newValue = current + (peak - current) * releaseCoef;
+    // Check audio trigger
+    bool checkAudioTrigger(double peak, double currentTime) {
+        if (triggerMode == TriggerMode::AudioLevel) {
+            bool shouldTrigger = peak > audioThreshold && 
+                                 lastPeakValue <= audioThreshold &&
+                                 (currentTime - lastTriggerTime) * 1000.0 > retriggerDelayMs;
+            lastPeakValue = peak;
+            if (shouldTrigger) {
+                lastTriggerTime = currentTime;
+                return true;
+            }
         }
-        envelopeValue.store(newValue);
-    }
-
-    // Update MIDI CC value
-    void updateMidiCC(int cc, int value) {
-        if (source != ModSource::MidiCC || cc != midiCC) return;
-        midiValue.store(value / 127.0);
-    }
-
-    // Update MIDI note
-    void updateMidiNote(int note, int velocity, bool noteOn) {
-        if (source != ModSource::MidiNote) return;
-        if (midiNote >= 0 && note != midiNote) return;  // Filter by note number
-
-        if (noteOn) {
-            midiVelocity.store(velocity / 127.0);
-            midiNoteOn.store(true);
-        } else {
-            midiNoteOn.store(false);
+        else if (triggerMode == TriggerMode::AudioTransient) {
+            // Simple transient detection: rising edge above threshold
+            double diff = peak - lastPeakValue;
+            bool shouldTrigger = diff > audioThreshold &&
+                                 (currentTime - lastTriggerTime) * 1000.0 > retriggerDelayMs;
+            lastPeakValue = peak;
+            if (shouldTrigger) {
+                lastTriggerTime = currentTime;
+                return true;
+            }
         }
+        return false;
     }
 
-    void resetPhase() {
+    // Check MIDI trigger
+    bool checkMidiTrigger(int channel, int note, int velocity) {
+        if (triggerMode != TriggerMode::MidiNote) return false;
+        if (midiChannel >= 0 && midiChannel != channel) return false;
+        if (midiNote >= 0 && midiNote != note) return false;
+
+        velocityDepthScale = velocityToDepth ? (velocity / 127.0) : 1.0;
+        return true;
+    }
+
+    // Record a point
+    void recordPoint(double time, double value) {
+        if (!recording.load()) return;
+        std::lock_guard<std::mutex> lock(recordMutex);
+        recordedPoints.push_back({time, value});
+    }
+
+    // Start recording
+    void startRecording(double startTime, double endTime, double resolution = 0.01) {
+        std::lock_guard<std::mutex> lock(recordMutex);
+        recordedPoints.clear();
+        recordStartTime = startTime;
+        recordEndTime = endTime;
+        recordResolution = resolution;
+        recording.store(true);
+    }
+
+    // Stop recording
+    void stopRecording() {
+        recording.store(false);
+    }
+
+    // Get recorded points (for printing to automation)
+    std::vector<AutomationPoint> getRecordedPoints() {
+        std::lock_guard<std::mutex> lock(recordMutex);
+        return recordedPoints;
+    }
+
+    // Reset
+    void reset() {
         phase.store(phaseOffset);
-        envelopeValue.store(0.0);
+        triggered.store(false);
+        playing.store(triggerMode == TriggerMode::Free);
+        velocityDepthScale = 1.0;
+        lastPeakValue = 0.0;
     }
 };
 
-// Modulator manager - thread-safe storage of all modulators
+//------------------------------------------------------------------------------
+// Modulator Manager
+//------------------------------------------------------------------------------
+
 class ModulatorManager {
 public:
     static ModulatorManager& instance() {
@@ -208,19 +302,11 @@ public:
         return mgr;
     }
 
-    // Create a new modulator, returns ID
     int createModulator(const std::string& name = "");
-
-    // Destroy a modulator
     void destroyModulator(int id);
-
-    // Get modulator by ID (nullptr if not found)
     Modulator* getModulator(int id);
-
-    // Get all active modulators for audio processing
     std::vector<Modulator*> getActiveModulators();
 
-    // Lock for iteration (use RAII)
     std::unique_lock<std::mutex> lock() {
         return std::unique_lock<std::mutex>(mutex_);
     }
@@ -237,4 +323,3 @@ private:
 };
 
 } // namespace sidefx
-

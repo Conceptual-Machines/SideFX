@@ -20,6 +20,12 @@ static void (*ShowConsoleMsg)(const char* msg);
 static double (*Track_GetPeakInfo)(MediaTrack* track, int chan);
 static int (*MIDI_GetRecentInputEvents)(int idx, char* buf, int buf_sz);
 
+// Envelope/Automation APIs
+static TrackEnvelope* (*GetFXEnvelope)(MediaTrack* track, int fxidx, int parmidx, bool create);
+static bool (*InsertEnvelopePoint)(TrackEnvelope* env, double time, double value, int shape, double tension, bool selected, bool* noSortIn);
+static bool (*DeleteEnvelopePointRange)(TrackEnvelope* env, double time_start, double time_end);
+static bool (*Envelope_SortPoints)(TrackEnvelope* env);
+
 // Action command ID
 static int g_commandId = 0;
 
@@ -147,7 +153,7 @@ static void SideFX_Mod_SetPhaseOffset(int id, double phase) {
     auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
     if (mod) {
         mod->phaseOffset = phase - std::floor(phase);
-        mod->resetPhase();
+        mod->reset();
     }
 }
 
@@ -157,7 +163,7 @@ static void SideFX_Mod_SetEnabled(int id, bool enabled) {
     if (mod) {
         mod->enabled.store(enabled);
         if (enabled) {
-            mod->resetPhase();
+            mod->reset();
         }
     }
 }
@@ -188,43 +194,48 @@ static void SideFX_Mod_SetBipolar(int id, bool bipolar) {
     }
 }
 
-// Set source type: 0=LFO, 1=AudioEnvelope, 2=MidiCC, 3=MidiNote
-static void SideFX_Mod_SetSource(int id, int sourceType) {
+//------------------------------------------------------------------------------
+// Trigger Settings
+//------------------------------------------------------------------------------
+
+// Set trigger mode: 0=Free, 1=AudioLevel, 2=AudioTransient, 3=MidiNote, 4=Manual
+static void SideFX_Mod_SetTriggerMode(int id, int mode) {
     auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
-    if (mod && sourceType >= 0 && sourceType <= 3) {
-        mod->source = static_cast<sidefx::ModSource>(sourceType);
+    if (mod && mode >= 0 && mode <= 4) {
+        mod->triggerMode = static_cast<sidefx::TriggerMode>(mode);
+        mod->reset();
     }
 }
 
-// Set envelope follower source track
-static void SideFX_Mod_SetEnvTrack(int id, MediaTrack* track) {
+// Set playback mode: 0=Loop (LFO), 1=OneShot (envelope)
+static void SideFX_Mod_SetPlaybackMode(int id, int mode) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    if (mod && mode >= 0 && mode <= 1) {
+        mod->playbackMode = static_cast<sidefx::PlaybackMode>(mode);
+    }
+}
+
+// Set trigger source track (for audio triggers)
+static void SideFX_Mod_SetTriggerTrack(int id, MediaTrack* track) {
     auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
     if (mod) {
-        mod->sourceTrack = track;
+        mod->triggerTrack = track;
     }
 }
 
-// Set envelope attack time in ms
-static void SideFX_Mod_SetEnvAttack(int id, double attackMs) {
+// Set audio trigger threshold (0-1)
+static void SideFX_Mod_SetAudioThreshold(int id, double threshold) {
     auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
     if (mod) {
-        mod->attackMs = attackMs > 0.1 ? attackMs : 0.1;
+        mod->audioThreshold = clamp01(threshold);
     }
 }
 
-// Set envelope release time in ms
-static void SideFX_Mod_SetEnvRelease(int id, double releaseMs) {
+// Set retrigger delay in ms
+static void SideFX_Mod_SetRetriggerDelay(int id, double delayMs) {
     auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
     if (mod) {
-        mod->releaseMs = releaseMs > 0.1 ? releaseMs : 0.1;
-    }
-}
-
-// Set MIDI CC number (0-127)
-static void SideFX_Mod_SetMidiCC(int id, int cc) {
-    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
-    if (mod && cc >= 0 && cc <= 127) {
-        mod->midiCC = cc;
+        mod->retriggerDelayMs = delayMs > 0 ? delayMs : 0;
     }
 }
 
@@ -244,22 +255,95 @@ static void SideFX_Mod_SetMidiNote(int id, int note) {
     }
 }
 
-// Get current envelope value (for UI display)
-static double SideFX_Mod_GetEnvValue(int id) {
+// Set velocity to depth mapping
+static void SideFX_Mod_SetVelocityToDepth(int id, bool enabled) {
     auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
-    return mod ? mod->envelopeValue.load() : 0.0;
+    if (mod) {
+        mod->velocityToDepth = enabled;
+    }
 }
 
-// Get current MIDI value (for UI display)
-static double SideFX_Mod_GetMidiValue(int id) {
+// Manual trigger
+static void SideFX_Mod_Trigger(int id, double velocity) {
     auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
-    return mod ? mod->midiValue.load() : 0.0;
+    if (mod) {
+        mod->trigger(velocity);
+    }
 }
 
-// Check if MIDI note is currently on
-static bool SideFX_Mod_GetMidiNoteOn(int id) {
+// Check if modulator is currently playing
+static bool SideFX_Mod_IsPlaying(int id) {
     auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
-    return mod ? mod->midiNoteOn.load() : false;
+    return mod ? mod->playing.load() : false;
+}
+
+//------------------------------------------------------------------------------
+// Recording & Automation
+//------------------------------------------------------------------------------
+
+// Start recording modulation values
+static void SideFX_Mod_StartRecording(int id, double startTime, double endTime, double resolution) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    if (mod) {
+        mod->startRecording(startTime, endTime, resolution > 0 ? resolution : 0.01);
+    }
+}
+
+// Stop recording
+static void SideFX_Mod_StopRecording(int id) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    if (mod) {
+        mod->stopRecording();
+    }
+}
+
+// Check if recording
+static bool SideFX_Mod_IsRecording(int id) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    return mod ? mod->recording.load() : false;
+}
+
+// Print recorded modulation to track automation
+static int SideFX_Mod_PrintToAutomation(int id, int shape) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    if (!mod || !mod->target.isValid()) return 0;
+
+    if (!GetFXEnvelope || !InsertEnvelopePoint || !DeleteEnvelopePointRange || !Envelope_SortPoints) {
+        return -1;  // API not available
+    }
+
+    // Get or create the envelope for the target parameter
+    TrackEnvelope* env = GetFXEnvelope(mod->target.track, mod->target.fx_index, 
+                                        mod->target.param_index, true);
+    if (!env) return -2;
+
+    // Get recorded points
+    auto points = mod->getRecordedPoints();
+    if (points.empty()) return 0;
+
+    // Delete existing points in range
+    double startTime = points.front().time;
+    double endTime = points.back().time;
+    DeleteEnvelopePointRange(env, startTime, endTime);
+
+    // Insert new points
+    bool noSort = true;
+    for (const auto& pt : points) {
+        InsertEnvelopePoint(env, pt.time, pt.value, shape, 0.0, false, &noSort);
+    }
+
+    // Sort after batch insert
+    Envelope_SortPoints(env);
+
+    return (int)points.size();
+}
+
+// Get number of recorded points
+static int SideFX_Mod_GetRecordedPointCount(int id) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    if (!mod) return 0;
+    auto points = mod->getRecordedPoints();
+    return (int)points.size();
 }
 
 //------------------------------------------------------------------------------
@@ -393,39 +477,34 @@ static void registerAPI() {
         (void*)"void\0int,bool\0id,bipolar\0"
         "Set bipolar mode (true: modulates around offset, false: 0 to depth).");
 
-    // Source type selection
-    plugin_register("API_SideFX_Mod_SetSource", (void*)&SideFX_Mod_SetSource);
-    plugin_register("APIdef_SideFX_Mod_SetSource",
-        (void*)"void\0int,int\0id,source\0"
-        "Set modulation source: 0=LFO, 1=AudioEnvelope, 2=MidiCC, 3=MidiNote.");
+    // Trigger mode
+    plugin_register("API_SideFX_Mod_SetTriggerMode", (void*)&SideFX_Mod_SetTriggerMode);
+    plugin_register("APIdef_SideFX_Mod_SetTriggerMode",
+        (void*)"void\0int,int\0id,mode\0"
+        "Set trigger mode: 0=Free, 1=AudioLevel, 2=AudioTransient, 3=MidiNote, 4=Manual.");
 
-    // Envelope follower settings
-    plugin_register("API_SideFX_Mod_SetEnvTrack", (void*)&SideFX_Mod_SetEnvTrack);
-    plugin_register("APIdef_SideFX_Mod_SetEnvTrack",
+    plugin_register("API_SideFX_Mod_SetPlaybackMode", (void*)&SideFX_Mod_SetPlaybackMode);
+    plugin_register("APIdef_SideFX_Mod_SetPlaybackMode",
+        (void*)"void\0int,int\0id,mode\0"
+        "Set playback mode: 0=Loop (LFO), 1=OneShot (envelope).");
+
+    // Audio trigger settings
+    plugin_register("API_SideFX_Mod_SetTriggerTrack", (void*)&SideFX_Mod_SetTriggerTrack);
+    plugin_register("APIdef_SideFX_Mod_SetTriggerTrack",
         (void*)"void\0int,MediaTrack*\0id,track\0"
-        "Set source track for envelope follower.");
+        "Set source track for audio triggers.");
 
-    plugin_register("API_SideFX_Mod_SetEnvAttack", (void*)&SideFX_Mod_SetEnvAttack);
-    plugin_register("APIdef_SideFX_Mod_SetEnvAttack",
-        (void*)"void\0int,double\0id,attack_ms\0"
-        "Set envelope attack time in milliseconds.");
+    plugin_register("API_SideFX_Mod_SetAudioThreshold", (void*)&SideFX_Mod_SetAudioThreshold);
+    plugin_register("APIdef_SideFX_Mod_SetAudioThreshold",
+        (void*)"void\0int,double\0id,threshold\0"
+        "Set audio trigger threshold (0-1).");
 
-    plugin_register("API_SideFX_Mod_SetEnvRelease", (void*)&SideFX_Mod_SetEnvRelease);
-    plugin_register("APIdef_SideFX_Mod_SetEnvRelease",
-        (void*)"void\0int,double\0id,release_ms\0"
-        "Set envelope release time in milliseconds.");
+    plugin_register("API_SideFX_Mod_SetRetriggerDelay", (void*)&SideFX_Mod_SetRetriggerDelay);
+    plugin_register("APIdef_SideFX_Mod_SetRetriggerDelay",
+        (void*)"void\0int,double\0id,delay_ms\0"
+        "Set minimum time between triggers in milliseconds.");
 
-    plugin_register("API_SideFX_Mod_GetEnvValue", (void*)&SideFX_Mod_GetEnvValue);
-    plugin_register("APIdef_SideFX_Mod_GetEnvValue",
-        (void*)"double\0int\0id\0"
-        "Get current envelope follower value (0-1).");
-
-    // MIDI settings
-    plugin_register("API_SideFX_Mod_SetMidiCC", (void*)&SideFX_Mod_SetMidiCC);
-    plugin_register("APIdef_SideFX_Mod_SetMidiCC",
-        (void*)"void\0int,int\0id,cc\0"
-        "Set MIDI CC number to listen for (0-127).");
-
+    // MIDI trigger settings
     plugin_register("API_SideFX_Mod_SetMidiChannel", (void*)&SideFX_Mod_SetMidiChannel);
     plugin_register("APIdef_SideFX_Mod_SetMidiChannel",
         (void*)"void\0int,int\0id,channel\0"
@@ -434,17 +513,49 @@ static void registerAPI() {
     plugin_register("API_SideFX_Mod_SetMidiNote", (void*)&SideFX_Mod_SetMidiNote);
     plugin_register("APIdef_SideFX_Mod_SetMidiNote",
         (void*)"void\0int,int\0id,note\0"
-        "Set MIDI note filter for MidiNote source (-1=any, 0-127=specific).");
+        "Set MIDI note filter (-1=any, 0-127=specific).");
 
-    plugin_register("API_SideFX_Mod_GetMidiValue", (void*)&SideFX_Mod_GetMidiValue);
-    plugin_register("APIdef_SideFX_Mod_GetMidiValue",
-        (void*)"double\0int\0id\0"
-        "Get current MIDI CC value (0-1).");
+    plugin_register("API_SideFX_Mod_SetVelocityToDepth", (void*)&SideFX_Mod_SetVelocityToDepth);
+    plugin_register("APIdef_SideFX_Mod_SetVelocityToDepth",
+        (void*)"void\0int,bool\0id,enabled\0"
+        "Enable velocity-to-depth mapping for MIDI triggers.");
 
-    plugin_register("API_SideFX_Mod_GetMidiNoteOn", (void*)&SideFX_Mod_GetMidiNoteOn);
-    plugin_register("APIdef_SideFX_Mod_GetMidiNoteOn",
+    // Manual trigger
+    plugin_register("API_SideFX_Mod_Trigger", (void*)&SideFX_Mod_Trigger);
+    plugin_register("APIdef_SideFX_Mod_Trigger",
+        (void*)"void\0int,double\0id,velocity\0"
+        "Manually trigger the modulator (velocity 0-1).");
+
+    plugin_register("API_SideFX_Mod_IsPlaying", (void*)&SideFX_Mod_IsPlaying);
+    plugin_register("APIdef_SideFX_Mod_IsPlaying",
         (void*)"bool\0int\0id\0"
-        "Check if MIDI note is currently on (for MidiNote source).");
+        "Check if modulator is currently playing.");
+
+    // Recording & Automation
+    plugin_register("API_SideFX_Mod_StartRecording", (void*)&SideFX_Mod_StartRecording);
+    plugin_register("APIdef_SideFX_Mod_StartRecording",
+        (void*)"void\0int,double,double,double\0id,start_time,end_time,resolution\0"
+        "Start recording modulation values. Resolution in seconds (e.g. 0.01 = 10ms).");
+
+    plugin_register("API_SideFX_Mod_StopRecording", (void*)&SideFX_Mod_StopRecording);
+    plugin_register("APIdef_SideFX_Mod_StopRecording",
+        (void*)"void\0int\0id\0"
+        "Stop recording modulation values.");
+
+    plugin_register("API_SideFX_Mod_IsRecording", (void*)&SideFX_Mod_IsRecording);
+    plugin_register("APIdef_SideFX_Mod_IsRecording",
+        (void*)"bool\0int\0id\0"
+        "Check if modulator is currently recording.");
+
+    plugin_register("API_SideFX_Mod_PrintToAutomation", (void*)&SideFX_Mod_PrintToAutomation);
+    plugin_register("APIdef_SideFX_Mod_PrintToAutomation",
+        (void*)"int\0int,int\0id,shape\0"
+        "Print recorded modulation to track automation. Shape: 0=linear, 1=square, etc. Returns point count.");
+
+    plugin_register("API_SideFX_Mod_GetRecordedPointCount", (void*)&SideFX_Mod_GetRecordedPointCount);
+    plugin_register("APIdef_SideFX_Mod_GetRecordedPointCount",
+        (void*)"int\0int\0id\0"
+        "Get number of recorded automation points.");
 }
 
 //------------------------------------------------------------------------------
@@ -485,6 +596,12 @@ REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
     *((void**)&ShowConsoleMsg) = rec->GetFunc("ShowConsoleMsg");
     *((void**)&Track_GetPeakInfo) = rec->GetFunc("Track_GetPeakInfo");
     *((void**)&MIDI_GetRecentInputEvents) = rec->GetFunc("MIDI_GetRecentInputEvents");
+    
+    // Envelope/Automation APIs
+    *((void**)&GetFXEnvelope) = rec->GetFunc("GetFXEnvelope");
+    *((void**)&InsertEnvelopePoint) = rec->GetFunc("InsertEnvelopePoint");
+    *((void**)&DeleteEnvelopePointRange) = rec->GetFunc("DeleteEnvelopePointRange");
+    *((void**)&Envelope_SortPoints) = rec->GetFunc("Envelope_SortPoints");
 
     if (!plugin_register) {
         return 0;
