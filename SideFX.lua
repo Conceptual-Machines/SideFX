@@ -467,6 +467,385 @@ local function draw_plugin_browser(ctx)
 end
 
 --------------------------------------------------------------------------------
+-- FX Move/Drop Helpers
+--------------------------------------------------------------------------------
+
+-- Build path of container GUIDs from root to target container
+local function get_container_path(container)
+    local path = {}
+    while container do
+        table.insert(path, 1, container:get_guid())
+        container = container:get_parent_container()
+    end
+    return path
+end
+
+-- Move FX through a container path (one level at a time)
+local function move_fx_through_path(fx_guid, target_path)
+    for _, container_guid in ipairs(target_path) do
+        local fx = state.track:find_fx_by_guid(fx_guid)
+        if not fx then return false end
+        
+        local current_parent = fx:get_parent_container()
+        local current_parent_guid = current_parent and current_parent:get_guid() or nil
+        
+        if current_parent_guid ~= container_guid then
+            local c = state.track:find_fx_by_guid(container_guid)
+            if c then
+                c:add_fx_to_container(fx)
+            end
+        end
+    end
+    return true
+end
+
+-- Move FX to track level (out of all containers)
+local function move_fx_to_track_level(fx_guid)
+    local fx = state.track:find_fx_by_guid(fx_guid)
+    if not fx then return false end
+    
+    while fx:get_parent_container() do
+        fx:move_out_of_container()
+        fx = state.track:find_fx_by_guid(fx_guid)
+        if not fx then return false end
+    end
+    return true
+end
+
+-- Add plugin and move to target container
+local function add_plugin_to_container(plugin_name, target_container_guid)
+    local new_fx = state.track:add_fx_by_name(plugin_name, false, -1)
+    if not new_fx then return nil end
+    
+    if target_container_guid then
+        local target_container = state.track:find_fx_by_guid(target_container_guid)
+        if target_container then
+            local target_path = get_container_path(target_container)
+            move_fx_through_path(new_fx:get_guid(), target_path)
+        end
+    end
+    return new_fx
+end
+
+--------------------------------------------------------------------------------
+-- UI: FX List Column Components
+--------------------------------------------------------------------------------
+
+-- Draw the drop zone at top of column
+local function draw_column_drop_zone(ctx, depth, column_title, parent_container_guid)
+    local has_fx_payload = ctx:get_drag_drop_payload("FX_GUID")
+    local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_NAME")
+    
+    if not (has_fx_payload or has_plugin_payload) then return end
+    
+    local drop_label = depth == 1 and "Drop to add to track" or ("Drop to add to " .. column_title)
+    ctx:push_style_color(imgui.Col.Button(), 0x4488FF88)
+    ctx:button(drop_label .. "##drop" .. depth, -1, 24)
+    ctx:pop_style_color()
+    
+    if not ctx:begin_drag_drop_target() then return end
+    
+    -- Handle FX move
+    local accepted, guid = ctx:accept_drag_drop_payload("FX_GUID")
+    if accepted and guid then
+        local fx = state.track:find_fx_by_guid(guid)
+        if fx then
+            local fx_parent = fx:get_parent_container()
+            local fx_parent_guid = fx_parent and fx_parent:get_guid() or nil
+            
+            if depth == 1 then
+                if fx_parent then
+                    move_fx_to_track_level(guid)
+                    refresh_fx_list()
+                end
+            elseif parent_container_guid and fx_parent_guid ~= parent_container_guid then
+                local target_container = state.track:find_fx_by_guid(parent_container_guid)
+                if target_container then
+                    local target_path = get_container_path(target_container)
+                    move_fx_through_path(guid, target_path)
+                    refresh_fx_list()
+                end
+            end
+        end
+    end
+    
+    -- Handle plugin drop from browser
+    local plugin_accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_NAME")
+    if plugin_accepted and plugin_name and state.track then
+        local target_guid = depth == 1 and nil or parent_container_guid
+        if add_plugin_to_container(plugin_name, target_guid) then
+            refresh_fx_list()
+        end
+    end
+    
+    ctx:end_drag_drop_target()
+end
+
+-- Handle drops on individual FX items
+local function handle_fx_item_drop(ctx, target_fx, target_guid, is_container)
+    if not ctx:begin_drag_drop_target() then return end
+    
+    -- Handle existing FX moves
+    local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
+    if accepted and payload and payload ~= target_guid then
+        local drag_fx = state.track:find_fx_by_guid(payload)
+        if drag_fx then
+            if is_container then
+                drag_fx:move_to_container(target_fx)
+            else
+                -- Dropping onto a non-container FX: reorder
+                local drag_parent = drag_fx:get_parent_container()
+                local target_parent = target_fx:get_parent_container()
+                local drag_parent_guid = drag_parent and drag_parent:get_guid() or nil
+                local target_parent_guid = target_parent and target_parent:get_guid() or nil
+                
+                if drag_parent_guid == target_parent_guid then
+                    -- Same container: reorder
+                    local drag_pos = drag_fx.pointer
+                    local target_pos = target_fx.pointer
+                    
+                    if target_parent then
+                        local children = {}
+                        for child in target_parent:iter_container_children() do
+                            children[#children + 1] = child
+                        end
+                        for idx, child in ipairs(children) do
+                            if child:get_guid() == payload then drag_pos = idx - 1 end
+                            if child:get_guid() == target_guid then target_pos = idx - 1 end
+                        end
+                    end
+                    
+                    if drag_pos ~= target_pos then
+                        r.TrackFX_CopyToTrack(
+                            state.track.pointer, drag_fx.pointer,
+                            state.track.pointer, target_fx.pointer,
+                            true
+                        )
+                    end
+                else
+                    -- Different containers
+                    if target_parent then
+                        local target_pos = 0
+                        for child in target_parent:iter_container_children() do
+                            if child:get_guid() == target_guid then break end
+                            target_pos = target_pos + 1
+                        end
+                        target_parent:add_fx_to_container(drag_fx, target_pos)
+                    else
+                        drag_fx:move_out_of_container()
+                    end
+                end
+            end
+            refresh_fx_list()
+        end
+    end
+    
+    -- Handle plugin drops onto containers
+    local plugin_accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_NAME")
+    if plugin_accepted and plugin_name and is_container then
+        if add_plugin_to_container(plugin_name, target_guid) then
+            refresh_fx_list()
+        end
+    end
+    
+    ctx:end_drag_drop_target()
+end
+
+-- Draw the rename input or selectable name
+local function draw_fx_name_area(ctx, fx, guid, depth, i, name_w, is_container)
+    local highlight = state.expanded_path[depth] == guid or state.selected_fx == guid or state.multi_select[guid]
+    local is_renaming = state.renaming_fx == guid
+    
+    if is_renaming then
+        ctx:set_next_item_width(name_w)
+        local changed, new_text = ctx:input_text("##rename" .. i, state.rename_text, imgui.InputTextFlags.EnterReturnsTrue())
+        if changed then
+            state.rename_text = new_text
+            if state.rename_text ~= "" then
+                fx:set_named_config_param("renamed_name", state.rename_text)
+            end
+            state.renaming_fx = nil
+            state.rename_text = ""
+        end
+        if r.ImGui_IsItemDeactivatedAfterEdit(ctx.ctx) then
+            if state.rename_text ~= "" then
+                fx:set_named_config_param("renamed_name", state.rename_text)
+            end
+            state.renaming_fx = nil
+            state.rename_text = ""
+        end
+        if ctx:is_key_pressed(r.ImGui_Key_Escape()) then
+            state.renaming_fx = nil
+            state.rename_text = ""
+        end
+    else
+        local name = get_fx_display_name(fx)
+        local max_chars = math.floor(name_w / 7)
+        if #name > max_chars then
+            name = string.sub(name, 1, max_chars - 2) .. ".."
+        end
+
+        if ctx:selectable(name .. "##sel" .. i, highlight, 0, name_w, 0) then
+            if ctx:is_shift_down() then
+                if state.selected_fx and get_multi_select_count() == 0 then
+                    state.multi_select[state.selected_fx] = true
+                end
+                if state.multi_select[guid] then
+                    state.multi_select[guid] = nil
+                else
+                    state.multi_select[guid] = true
+                end
+                state.selected_fx = nil
+            else
+                clear_multi_select()
+                if is_container then
+                    toggle_container(guid, depth)
+                else
+                    toggle_fx_detail(guid)
+                end
+            end
+        end
+    end
+end
+
+-- Draw FX context menu
+local function draw_fx_context_menu(ctx, fx, depth, i, is_container, enabled, guid)
+    if not ctx:begin_popup_context_item("fxmenu" .. i) then return end
+    
+    if ctx:menu_item("Open FX Window") then
+        fx:show(3)
+    end
+    if ctx:menu_item(enabled and "Bypass" or "Enable") then
+        fx:set_enabled(not enabled)
+    end
+    ctx:separator()
+    
+    if ctx:menu_item("Rename") then
+        state.renaming_fx = guid
+        state.rename_text = get_fx_display_name(fx)
+    end
+    ctx:separator()
+    
+    local parent = fx:get_parent_container()
+    if parent then
+        if ctx:menu_item("Remove from Container") then
+            fx:move_out_of_container()
+            collapse_from_depth(depth)
+            refresh_fx_list()
+        end
+        ctx:separator()
+    end
+    
+    if is_container then
+        if ctx:menu_item("Dissolve Container") then
+            dissolve_container(fx)
+            collapse_from_depth(depth)
+            refresh_fx_list()
+        end
+        ctx:separator()
+    end
+    
+    if ctx:menu_item("Delete") then
+        fx:delete()
+        collapse_from_depth(depth)
+        refresh_fx_list()
+    end
+    ctx:separator()
+    
+    local sel_count = get_multi_select_count()
+    if sel_count > 0 then
+        if ctx:menu_item("Add Selected to Container (" .. sel_count .. ")") then
+            add_to_new_container(get_multi_selected_fx())
+            clear_multi_select()
+        end
+    else
+        if ctx:menu_item("Add to New Container") then
+            add_to_new_container({fx})
+        end
+    end
+    ctx:end_popup()
+end
+
+-- Draw FX controls (wet/dry + bypass)
+local function draw_fx_controls(ctx, fx, i, controls_x, wet_w, enabled)
+    ctx:same_line_ex(controls_x)
+    
+    local wet_idx = fx:get_param_from_ident(":wet")
+    if wet_idx >= 0 then
+        local wet_val = fx:get_param(wet_idx)
+        ctx:set_next_item_width(wet_w - 5)
+        local wet_changed, new_wet = ctx:slider_double("##wet" .. i, wet_val, 0, 1, "%.0f%%")
+        if wet_changed then
+            fx:set_param(wet_idx, new_wet)
+        end
+        if ctx:is_item_hovered() then ctx:set_tooltip("Wet: " .. string.format("%.0f%%", wet_val * 100)) end
+        ctx:same_line()
+    end
+
+    if enabled then
+        ctx:push_style_color(imgui.Col.Button(), 0x44AA44FF)
+    else
+        ctx:push_style_color(imgui.Col.Button(), 0xAA4444FF)
+    end
+    if ctx:small_button(enabled and "ON##" .. i or "OFF##" .. i) then
+        fx:set_enabled(not enabled)
+    end
+    ctx:pop_style_color()
+end
+
+-- Draw a single FX item row
+local function draw_fx_item(ctx, fx, depth, i, width)
+    local guid = fx:get_guid()
+    if not guid then return end
+
+    ctx:push_id(depth * 1000 + i)
+
+    local is_container = fx:is_container()
+    local is_expanded = state.expanded_path[depth] == guid
+    local enabled = fx:get_enabled()
+
+    -- Layout constants
+    local icon_w = 24
+    local btn_w = 34
+    local wet_w = 52
+    local controls_w = btn_w + wet_w + 8
+    local name_w = width - icon_w - controls_w - 30
+    local controls_x = width - controls_w - 8
+    
+    -- Icon
+    if icon_font then r.ImGui_PushFont(ctx.ctx, icon_font, icon_size) end
+    local icon = is_container
+        and (is_expanded and icon_text(Icons.folder_open) or icon_text(Icons.folder_closed))
+        or icon_text(Icons.plug)
+    ctx:text(icon)
+    if icon_font then r.ImGui_PopFont(ctx.ctx) end
+
+    -- Name area
+    ctx:same_line()
+    draw_fx_name_area(ctx, fx, guid, depth, i, name_w, is_container)
+    
+    -- Drag source
+    if ctx:begin_drag_drop_source() then
+        ctx:set_drag_drop_payload("FX_GUID", guid)
+        ctx:text("Moving: " .. get_fx_display_name(fx))
+        ctx:end_drag_drop_source()
+    end
+
+    -- Drop target
+    handle_fx_item_drop(ctx, fx, guid, is_container)
+
+    -- Context menu
+    draw_fx_context_menu(ctx, fx, depth, i, is_container, enabled, guid)
+    
+    if ctx:is_item_hovered() then ctx:set_tooltip(get_fx_display_name(fx)) end
+
+    -- Controls
+    draw_fx_controls(ctx, fx, i, controls_x, wet_w, enabled)
+
+    ctx:pop_id()
+end
+
+--------------------------------------------------------------------------------
 -- UI: FX List Column (reusable for any level)
 --------------------------------------------------------------------------------
 
@@ -475,115 +854,7 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
         ctx:text(column_title)
         ctx:separator()
         
-        -- Drop zone for this column (accepts FX moves and plugin additions)
-        local has_fx_payload = ctx:get_drag_drop_payload("FX_GUID")
-        local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_NAME")
-        if has_fx_payload or has_plugin_payload then
-            local drop_label = depth == 1 and "Drop to add to track" or ("Drop to add to " .. column_title)
-            ctx:push_style_color(imgui.Col.Button(), 0x4488FF88)
-            ctx:button(drop_label .. "##drop" .. depth, -1, 24)
-            ctx:pop_style_color()
-            if ctx:begin_drag_drop_target() then
-                -- Handle FX move
-                local accepted, guid = ctx:accept_drag_drop_payload("FX_GUID")
-                if accepted and guid then
-                    local fx = state.track:find_fx_by_guid(guid)
-                    if fx then
-                        local fx_parent = fx:get_parent_container()
-                        local fx_parent_guid = fx_parent and fx_parent:get_guid() or nil
-                        
-                        if depth == 1 then
-                            -- Move to track level (only if FX is in a container)
-                            if fx_parent then
-                                while fx:get_parent_container() do
-                                    fx:move_out_of_container()
-                                    fx = state.track:find_fx_by_guid(guid)
-                                    if not fx then break end
-                                end
-                                refresh_fx_list()
-                            end
-                        elseif parent_container_guid then
-                            -- Move into this column's container (if not already there)
-                            if fx_parent_guid ~= parent_container_guid then
-                                local target_container = state.track:find_fx_by_guid(parent_container_guid)
-                                if target_container then
-                                    -- Build path from FX to target container
-                                    -- We need to move through intermediate containers
-                                    local target_path = {}  -- GUIDs from root to target
-                                    local container = target_container
-                                    while container do
-                                        table.insert(target_path, 1, container:get_guid())
-                                        container = container:get_parent_container()
-                                    end
-                                    
-                                    -- Move FX through each level
-                                    for _, container_guid in ipairs(target_path) do
-                                        fx = state.track:find_fx_by_guid(guid)
-                                        if not fx then break end
-                                        
-                                        local current_parent = fx:get_parent_container()
-                                        local current_parent_guid = current_parent and current_parent:get_guid() or nil
-                                        
-                                        if current_parent_guid ~= container_guid then
-                                            local c = state.track:find_fx_by_guid(container_guid)
-                                            if c then
-                                                c:add_fx_to_container(fx)
-                                            end
-                                        end
-                                    end
-                                    refresh_fx_list()
-                                end
-                            end
-                        end
-                    end
-                end
-                
-                -- Handle plugin drop from browser
-                local plugin_accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_NAME")
-                if plugin_accepted and plugin_name and state.track then
-                    if depth == 1 then
-                        -- Add to track level
-                        local new_fx = state.track:add_fx_by_name(plugin_name, false, -1)
-                        if new_fx then
-                            refresh_fx_list()
-                        end
-                    elseif parent_container_guid then
-                        -- Add to container: first add to track, then move into container
-                        local new_fx = state.track:add_fx_by_name(plugin_name, false, -1)
-                        if new_fx then
-                            local target_container = state.track:find_fx_by_guid(parent_container_guid)
-                            if target_container then
-                                -- Build path and move through levels
-                                local target_path = {}
-                                local container = target_container
-                                while container do
-                                    table.insert(target_path, 1, container:get_guid())
-                                    container = container:get_parent_container()
-                                end
-                                
-                                local new_guid = new_fx:get_guid()
-                                for _, container_guid in ipairs(target_path) do
-                                    new_fx = state.track:find_fx_by_guid(new_guid)
-                                    if not new_fx then break end
-                                    
-                                    local current_parent = new_fx:get_parent_container()
-                                    local current_parent_guid = current_parent and current_parent:get_guid() or nil
-                                    
-                                    if current_parent_guid ~= container_guid then
-                                        local c = state.track:find_fx_by_guid(container_guid)
-                                        if c then
-                                            c:add_fx_to_container(new_fx)
-                                        end
-                                    end
-                                end
-                            end
-                            refresh_fx_list()
-                        end
-                    end
-                end
-                ctx:end_drag_drop_target()
-            end
-        end
+        draw_column_drop_zone(ctx, depth, column_title, parent_container_guid)
 
         if #fx_list == 0 then
             ctx:text_disabled("Empty")
@@ -594,288 +865,7 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
         local i = 0
         for fx in helpers.iter(fx_list) do
             i = i + 1
-            local guid = fx:get_guid()
-            if not guid then goto continue end
-
-            -- Use depth + index for unique IDs across columns
-            ctx:push_id(depth * 1000 + i)
-
-            local is_container = fx:is_container()
-            local is_expanded = state.expanded_path[depth] == guid
-            local is_selected = state.selected_fx == guid
-            local is_multi = state.multi_select[guid] ~= nil
-            local enabled = fx:get_enabled()
-
-            -- Layout constants (relative to column width)
-            local icon_w = 24
-            local btn_w = 34
-            local wet_w = 52
-            local controls_w = btn_w + wet_w + 8
-            local name_w = width - icon_w - controls_w - 30  -- 30px gap
-            local controls_x = width - controls_w - 8
-            
-            -- Icon with emoji font
-            if icon_font then r.ImGui_PushFont(ctx.ctx, icon_font, icon_size) end
-            local icon = is_container
-                and (is_expanded and icon_text(Icons.folder_open) or icon_text(Icons.folder_closed))
-                or icon_text(Icons.plug)
-            ctx:text(icon)
-            if icon_font then r.ImGui_PopFont(ctx.ctx) end
-
-            -- Name as selectable (or input text if renaming)
-            ctx:same_line()
-            local highlight = is_expanded or is_selected or is_multi
-            local is_renaming = state.renaming_fx == guid
-            
-            if is_renaming then
-                -- Inline rename input
-                ctx:set_next_item_width(name_w)
-                local changed, new_text = ctx:input_text("##rename" .. i, state.rename_text, imgui.InputTextFlags.EnterReturnsTrue())
-                if changed then
-                    state.rename_text = new_text
-                    -- If Enter was pressed (EnterReturnsTrue flag), save and finish
-                    if state.rename_text ~= "" then
-                        -- Save renamed name
-                        fx:set_named_config_param("renamed_name", state.rename_text)
-                    end
-                    state.renaming_fx = nil
-                    state.rename_text = ""
-                end
-                -- Check if item was deactivated after edit (clicked away)
-                if r.ImGui_IsItemDeactivatedAfterEdit(ctx.ctx) then
-                    if state.rename_text ~= "" then
-                        -- Save renamed name
-                        fx:set_named_config_param("renamed_name", state.rename_text)
-                    end
-                    state.renaming_fx = nil
-                    state.rename_text = ""
-                end
-                -- Cancel on Escape
-                if ctx:is_key_pressed(r.ImGui_Key_Escape()) then
-                    -- Cancel rename
-                    state.renaming_fx = nil
-                    state.rename_text = ""
-                end
-            else
-                local name = get_fx_display_name(fx)
-                -- Truncate based on available width (approx 7px per char)
-                local max_chars = math.floor(name_w / 7)
-                if #name > max_chars then
-                    name = string.sub(name, 1, max_chars - 2) .. ".."
-                end
-
-                if ctx:selectable(name .. "##sel" .. i, highlight, 0, name_w, 0) then
-                    if ctx:is_shift_down() then
-                        if state.selected_fx and get_multi_select_count() == 0 then
-                            state.multi_select[state.selected_fx] = true
-                        end
-                        if state.multi_select[guid] then
-                            state.multi_select[guid] = nil
-                        else
-                            state.multi_select[guid] = true
-                        end
-                        state.selected_fx = nil
-                    else
-                        clear_multi_select()
-                        if is_container then
-                            toggle_container(guid, depth)
-                        else
-                            toggle_fx_detail(guid)
-                        end
-                    end
-                end
-            end
-            
-            -- Drag source for moving FX (must be right after selectable)
-            if ctx:begin_drag_drop_source() then
-                ctx:set_drag_drop_payload("FX_GUID", guid)
-                ctx:text("Moving: " .. get_fx_display_name(fx))
-                ctx:end_drag_drop_source()
-            end
-
-            -- Drop target for ALL FX items (reordering, container drops, and plugin drops)
-            if ctx:begin_drag_drop_target() then
-                -- Handle existing FX moves
-                local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
-                if accepted and payload and payload ~= guid then
-                    local drag_fx = state.track:find_fx_by_guid(payload)
-                    if drag_fx then
-                        if is_container then
-                            -- Dropping onto a container: move into it
-                            drag_fx:move_to_container(fx)
-                        else
-                            -- Dropping onto a non-container FX: reorder
-                            local drag_parent = drag_fx:get_parent_container()
-                            local target_parent = fx:get_parent_container()
-                            local drag_parent_guid = drag_parent and drag_parent:get_guid() or nil
-                            local target_parent_guid = target_parent and target_parent:get_guid() or nil
-                            
-                            if drag_parent_guid == target_parent_guid then
-                                -- Same container: reorder using REAPER's swap
-                                -- Get positions
-                                local drag_pos = drag_fx.pointer
-                                local target_pos = fx.pointer
-                                
-                                if target_parent then
-                                    -- Inside a container - use container child positions
-                                    local children = {}
-                                    for child in target_parent:iter_container_children() do
-                                        children[#children + 1] = child
-                                    end
-                                    for idx, child in ipairs(children) do
-                                        if child:get_guid() == payload then drag_pos = idx - 1 end
-                                        if child:get_guid() == guid then target_pos = idx - 1 end
-                                    end
-                                end
-                                
-                                -- Swap using TrackFX_CopyToTrack
-                                if drag_pos ~= target_pos then
-                                    r.TrackFX_CopyToTrack(
-                                        state.track.pointer, drag_fx.pointer,
-                                        state.track.pointer, fx.pointer,
-                                        true
-                                    )
-                                end
-                            else
-                                -- Different containers: move to target's container at target's position
-                                if target_parent then
-                                    -- Find target's position in its container
-                                    local target_pos = 0
-                                    for child in target_parent:iter_container_children() do
-                                        if child:get_guid() == guid then break end
-                                        target_pos = target_pos + 1
-                                    end
-                                    target_parent:add_fx_to_container(drag_fx, target_pos)
-                                else
-                                    -- Target is at track level
-                                    drag_fx:move_out_of_container()
-                                end
-                            end
-                        end
-                        refresh_fx_list()
-                    end
-                end
-                
-                -- Handle plugin drops from browser onto containers
-                local plugin_accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_NAME")
-                if plugin_accepted and plugin_name and is_container then
-                    -- Add plugin directly to this container
-                    local new_fx = state.track:add_fx_by_name(plugin_name, false, -1)
-                    if new_fx then
-                        -- Move new FX into the container through the path
-                        local target_path = {}
-                        local container = fx
-                        while container do
-                            table.insert(target_path, 1, container:get_guid())
-                            container = container:get_parent_container()
-                        end
-                        
-                        local new_guid = new_fx:get_guid()
-                        for _, container_guid in ipairs(target_path) do
-                            new_fx = state.track:find_fx_by_guid(new_guid)
-                            if not new_fx then break end
-                            
-                            local current_parent = new_fx:get_parent_container()
-                            local current_parent_guid = current_parent and current_parent:get_guid() or nil
-                            
-                            if current_parent_guid ~= container_guid then
-                                local c = state.track:find_fx_by_guid(container_guid)
-                                if c then
-                                    c:add_fx_to_container(new_fx)
-                                end
-                            end
-                        end
-                        refresh_fx_list()
-                    end
-                end
-                ctx:end_drag_drop_target()
-            end
-
-            -- Right-click context menu (must be right after selectable)
-            if ctx:begin_popup_context_item("fxmenu" .. i) then
-                if ctx:menu_item("Open FX Window") then
-                    fx:show(3)
-                end
-                if ctx:menu_item(enabled and "Bypass" or "Enable") then
-                    fx:set_enabled(not enabled)
-                end
-                ctx:separator()
-                if ctx:menu_item("Rename") then
-                    state.renaming_fx = guid
-                    state.rename_text = get_fx_display_name(fx)
-                end
-                ctx:separator()
-                -- Remove from container option (only if inside a container)
-                local parent = fx:get_parent_container()
-                if parent then
-                    if ctx:menu_item("Remove from Container") then
-                        fx:move_out_of_container()
-                        collapse_from_depth(depth)
-                        refresh_fx_list()
-                    end
-                    ctx:separator()
-                end
-                -- Dissolve container option (only for containers)
-                if is_container then
-                    if ctx:menu_item("Dissolve Container") then
-                        dissolve_container(fx)
-                        collapse_from_depth(depth)
-                        refresh_fx_list()
-                    end
-                    ctx:separator()
-                end
-                if ctx:menu_item("Delete") then
-                    fx:delete()
-                    collapse_from_depth(depth)
-                    refresh_fx_list()
-                end
-                ctx:separator()
-                local sel_count = get_multi_select_count()
-                if sel_count > 0 then
-                    if ctx:menu_item("Add Selected to Container (" .. sel_count .. ")") then
-                        add_to_new_container(get_multi_selected_fx())
-                        clear_multi_select()
-                    end
-                else
-                    -- Single item - add to new container (works for FX and containers)
-                    if ctx:menu_item("Add to New Container") then
-                        add_to_new_container({fx})
-                    end
-                end
-                ctx:end_popup()
-            end
-            
-            if ctx:is_item_hovered() then ctx:set_tooltip(get_fx_display_name(fx)) end
-
-            -- Controls on the right
-            ctx:same_line_ex(controls_x)
-            
-            -- Wet/Dry slider
-            local wet_idx = fx:get_param_from_ident(":wet")
-            if wet_idx >= 0 then
-                local wet_val = fx:get_param(wet_idx)
-                ctx:set_next_item_width(wet_w - 5)
-                local wet_changed, new_wet = ctx:slider_double("##wet" .. i, wet_val, 0, 1, "%.0f%%")
-                if wet_changed then
-                    fx:set_param(wet_idx, new_wet)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("Wet: " .. string.format("%.0f%%", wet_val * 100)) end
-                ctx:same_line()
-            end
-
-            -- Bypass button (colored)
-            if enabled then
-                ctx:push_style_color(imgui.Col.Button(), 0x44AA44FF)
-            else
-                ctx:push_style_color(imgui.Col.Button(), 0xAA4444FF)
-            end
-            if ctx:small_button(enabled and "ON##" .. i or "OFF##" .. i) then
-                fx:set_enabled(not enabled)
-            end
-            ctx:pop_style_color()
-
-            ctx:pop_id()
-            ::continue::
+            draw_fx_item(ctx, fx, depth, i, width)
         end
 
         ctx:end_child()
