@@ -993,14 +993,15 @@ end
 
 local function draw_toolbar(ctx)
     -- Browser toggle button
+    local browser_was_visible = state.browser.visible
     if icon_font then r.ImGui_PushFont(ctx.ctx, icon_font, icon_size) end
-    if state.browser.visible then
+    if browser_was_visible then
         ctx:push_style_color(imgui.Col.Button(), 0x44AA44FF)
     end
     if ctx:button(icon_text(Icons.plug) .. "##browser_toggle") then
         state.browser.visible = not state.browser.visible
     end
-    if state.browser.visible then
+    if browser_was_visible then
         ctx:pop_style_color()
     end
     if icon_font then r.ImGui_PopFont(ctx.ctx) end
