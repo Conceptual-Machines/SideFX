@@ -9,7 +9,9 @@
 #include <string>
 
 // REAPER API function pointers we need
+// Note: plugin_register should come from rec->Register, not GetFunc
 static int (*plugin_register)(const char* name, void* infostruct);
+static reaper_plugin_info_t* g_rec = nullptr;  // Store rec for API registration
 static int (*Audio_RegHardwareHook)(bool isAdd, audio_hook_register_t* reg);
 static bool (*TrackFX_SetParamNormalized)(MediaTrack* track, int fx, int param, double value);
 static int (*GetPlayState)();
@@ -41,18 +43,22 @@ static inline double clamp01(double v) {
 }
 
 //------------------------------------------------------------------------------
-// Lua API Functions
+// Lua API Functions (extern "C" for ReaScript binding)
 //------------------------------------------------------------------------------
 
+extern "C" {
+
 // Create a new modulator, returns ID
-static int SideFX_Mod_Create(const char* name) {
+int SideFX_Mod_Create(const char* name) {
     return sidefx::ModulatorManager::instance().createModulator(name ? name : "");
 }
 
 // Destroy a modulator
-static void SideFX_Mod_Destroy(int id) {
+void SideFX_Mod_Destroy(int id) {
     sidefx::ModulatorManager::instance().destroyModulator(id);
 }
+
+} // extern "C" - end of ReaScript API functions
 
 // Set Bezier curve from 8 doubles [x0,y0, x1,y1, x2,y2, x3,y3]
 static bool SideFX_Mod_SetCurve(int id, double x0, double y0,
@@ -396,7 +402,12 @@ static bool hookCommandProc2(KbdSectionInfo* sec, int command, int val, int valh
 //------------------------------------------------------------------------------
 
 static void registerAPI() {
-    plugin_register("API_SideFX_Mod_Create", (void*)&SideFX_Mod_Create);
+    int ret = plugin_register("API_SideFX_Mod_Create", (void*)&SideFX_Mod_Create);
+    if (ShowConsoleMsg) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "[SideFX Mod] API_SideFX_Mod_Create register returned: %d\n", ret);
+        ShowConsoleMsg(buf);
+    }
     plugin_register("APIdef_SideFX_Mod_Create",
         (void*)"int\0const char*\0name\0"
         "Create a new SideFX modulator. Returns modulator ID.");
@@ -585,8 +596,11 @@ REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
         return 0;
     }
 
+    // Store rec for later use and get Register function directly
+    g_rec = rec;
+    plugin_register = rec->Register;  // Use rec->Register directly, not GetFunc
+    
     // Load required API functions
-    *((void**)&plugin_register) = rec->GetFunc("plugin_register");
     *((void**)&Audio_RegHardwareHook) = rec->GetFunc("Audio_RegHardwareHook");
     *((void**)&TrackFX_SetParamNormalized) = rec->GetFunc("TrackFX_SetParamNormalized");
     *((void**)&GetPlayState) = rec->GetFunc("GetPlayState");
@@ -607,6 +621,11 @@ REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
         return 0;
     }
 
+    // Debug: log that we're loading
+    if (ShowConsoleMsg) {
+        ShowConsoleMsg("[SideFX Mod] Extension loading...\n");
+    }
+
     // Register test action
     static custom_action_register_t action = {
         0,          // section (main)
@@ -615,15 +634,42 @@ REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
         nullptr     // extra (not used)
     };
     g_commandId = plugin_register("custom_action", &action);
+    
+    if (ShowConsoleMsg) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "[SideFX Mod] Registered action ID: %d\n", g_commandId);
+        ShowConsoleMsg(buf);
+    }
+    
     if (g_commandId) {
         plugin_register("hookcommand2", (void*)hookCommandProc2);
     }
 
     // Register our API functions
+    if (ShowConsoleMsg) {
+        ShowConsoleMsg("[SideFX Mod] Registering API functions...\n");
+    }
     registerAPI();
+    
+    // Verify first API registered
+    if (ShowConsoleMsg) {
+        // Try to get our own function back to verify
+        void* testFunc = rec->GetFunc ? rec->GetFunc("SideFX_Mod_Create") : nullptr;
+        char buf[256];
+        snprintf(buf, sizeof(buf), "[SideFX Mod] API SideFX_Mod_Create ptr: %p\n", testFunc);
+        ShowConsoleMsg(buf);
+    }
 
     // Initialize audio hook for sample-accurate modulation
     sidefx::initAudioHook();
+    
+    if (ShowConsoleMsg) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "[SideFX Mod] Audio hook active: %s\n", 
+                 sidefx::isAudioHookActive() ? "YES" : "NO");
+        ShowConsoleMsg(buf);
+        ShowConsoleMsg("[SideFX Mod] Extension loaded successfully!\n");
+    }
 
     return 1;  // Success
 }
