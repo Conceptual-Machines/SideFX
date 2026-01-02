@@ -32,10 +32,37 @@ static bool (*Envelope_SortPoints)(TrackEnvelope* env);
 // Action command IDs
 static int g_commandId = 0;           // Test action
 static int g_windowCommandId = 0;     // Window toggle action
+static int g_menuCommandId = 0;       // Menu entry command ID
 
 // Global plugin handle
 REAPER_PLUGIN_HINSTANCE g_hInst;
 HWND g_hwndParent;
+
+// Menu item info
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include "swell/swell.h"
+#endif
+
+#ifndef MIIM_TYPE
+#define MIIM_TYPE 0x10
+#endif
+#ifndef MIIM_ID
+#define MIIM_ID 0x02
+#endif
+#ifndef MIIM_STATE
+#define MIIM_STATE 0x01
+#endif
+#ifndef MIIM_SUBMENU
+#define MIIM_SUBMENU 0x04
+#endif
+#ifndef MFT_STRING
+#define MFT_STRING 0x00
+#endif
+#ifndef MFS_ENABLED
+#define MFS_ENABLED 0x00
+#endif
 
 // Clamp helper to avoid SWELL macro conflicts
 static inline double clamp01(double v) {
@@ -602,6 +629,47 @@ static void registerAPI() {
 }
 
 //------------------------------------------------------------------------------
+// Menu Hook - Add SideFX to Extensions menu
+//------------------------------------------------------------------------------
+
+static void menuHook(const char* menuidstr, HMENU menu, int flag) {
+    if (!menuidstr || !menu) return;
+    
+    // Add to "Main extensions" menu when flag is 0 (building menu)
+    if (strcmp(menuidstr, "Main extensions") == 0 && flag == 0) {
+        HMENU hMenu = menu;
+        
+        // Create SideFX submenu
+        HMENU hSubMenu = CreatePopupMenu();
+        if (!hSubMenu) return;
+        
+        // Add "Open Window" item
+        MENUITEMINFO subMi = {sizeof(MENUITEMINFO)};
+        subMi.fMask = MIIM_TYPE | MIIM_ID | MIIM_STATE;
+        subMi.fType = MFT_STRING;
+        subMi.fState = MFS_ENABLED;
+        subMi.wID = g_windowCommandId;
+        subMi.dwTypeData = (char*)"Open Window";
+        InsertMenuItem(hSubMenu, GetMenuItemCount(hSubMenu), true, &subMi);
+        
+        // Add "Test Modulation Engine" item
+        subMi.wID = g_commandId;
+        subMi.dwTypeData = (char*)"Test Modulation Engine";
+        InsertMenuItem(hSubMenu, GetMenuItemCount(hSubMenu), true, &subMi);
+        
+        // Add "SideFX" menu with submenu to Main extensions
+        MENUITEMINFO mi = {sizeof(MENUITEMINFO)};
+        mi.fMask = MIIM_TYPE | MIIM_ID | MIIM_STATE | MIIM_SUBMENU;
+        mi.fType = MFT_STRING;
+        mi.fState = MFS_ENABLED;
+        mi.hSubMenu = hSubMenu;
+        mi.wID = g_menuCommandId;
+        mi.dwTypeData = (char*)"SideFX";
+        InsertMenuItem(hMenu, GetMenuItemCount(hMenu), true, &mi);
+    }
+}
+
+//------------------------------------------------------------------------------
 // Plugin Entry Point
 //------------------------------------------------------------------------------
 
@@ -682,15 +750,33 @@ REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
     };
     g_windowCommandId = plugin_register("custom_action", &windowAction);
     
+    // Get a command ID for menu use
+    g_menuCommandId = plugin_register("command_id", (void*)"SIDEFX_Menu");
+    
     if (ShowConsoleMsg) {
         char buf[128];
-        snprintf(buf, sizeof(buf), "[SideFX Mod] Registered action IDs: test=%d, window=%d\n", 
-                 g_commandId, g_windowCommandId);
+        snprintf(buf, sizeof(buf), "[SideFX Mod] Registered action IDs: test=%d, window=%d, menu=%d\n", 
+                 g_commandId, g_windowCommandId, g_menuCommandId);
         ShowConsoleMsg(buf);
     }
     
     if (g_commandId || g_windowCommandId) {
         plugin_register("hookcommand2", (void*)hookCommandProc2);
+    }
+    
+    // Ensure Extensions menu exists
+    typedef bool (*AddExtensionsMainMenuFunc)();
+    AddExtensionsMainMenuFunc AddExtensionsMainMenu = 
+        (AddExtensionsMainMenuFunc)rec->GetFunc("AddExtensionsMainMenu");
+    if (AddExtensionsMainMenu) {
+        AddExtensionsMainMenu();
+    }
+    
+    // Register menu hook to add SideFX to Extensions menu
+    if (plugin_register("hookcustommenu", (void*)menuHook)) {
+        if (ShowConsoleMsg) {
+            ShowConsoleMsg("[SideFX Mod] Menu registered in Extensions menu\n");
+        }
     }
 
     // Register our API functions
