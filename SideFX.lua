@@ -480,6 +480,18 @@ local function get_container_path(container)
     return path
 end
 
+-- Get the depth of an FX (1 = track level, 2 = in first container, etc.)
+local function get_fx_depth(fx)
+    if not fx then return 1 end
+    local depth = 1
+    local parent = fx:get_parent_container()
+    while parent do
+        depth = depth + 1
+        parent = parent:get_parent_container()
+    end
+    return depth
+end
+
 -- Move FX through a container path (one level at a time)
 local function move_fx_through_path(fx_guid, target_path)
     for _, container_guid in ipairs(target_path) do
@@ -541,7 +553,32 @@ local function draw_column_drop_zone(ctx, depth, column_title, parent_container_
     
     if not (has_fx_payload or has_plugin_payload) then return end
     
-    local drop_label = depth == 1 and "Drop to add to track" or ("Drop to add to " .. column_title)
+    -- For FX drags, check if this column is a valid drop target
+    if has_fx_payload and state.track then
+        local dragged_fx = state.track:find_fx_by_guid(has_fx_payload)
+        if dragged_fx then
+            local fx_depth = get_fx_depth(dragged_fx)
+            local fx_parent = dragged_fx:get_parent_container()
+            local fx_parent_guid = fx_parent and fx_parent:get_guid() or nil
+            
+            -- Don't show drop zone if FX is already in this column's container
+            if fx_parent_guid == parent_container_guid then return end
+            
+            -- Only show zones in valid directions:
+            -- - If FX is nested (depth > 1), show zones to the LEFT (shallower, depth < fx_depth)
+            -- - If FX is at track level (depth = 1), show zones to the RIGHT (deeper, depth > 1)
+            -- - Also show zones at same depth but different container (sibling containers)
+            if fx_depth == 1 then
+                -- FX at track level: only show deeper columns (moving INTO containers)
+                if depth <= 1 then return end
+            else
+                -- FX is nested: show shallower columns (moving OUT) or sibling containers
+                -- Allow drop at any depth except same container
+            end
+        end
+    end
+    
+    local drop_label = depth == 1 and "Drop to move to track" or ("Drop to add to " .. column_title)
     ctx:push_style_color(imgui.Col.Button(), 0x4488FF88)
     ctx:button(drop_label .. "##drop" .. depth, -1, 24)
     ctx:pop_style_color()
@@ -572,7 +609,7 @@ local function draw_column_drop_zone(ctx, depth, column_title, parent_container_
         end
     end
     
-    -- Handle plugin drop from browser
+    -- Handle plugin drop from browser (always show all zones)
     local plugin_accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_NAME")
     if plugin_accepted and plugin_name and state.track then
         local target_guid = depth == 1 and nil or parent_container_guid
