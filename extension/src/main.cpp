@@ -16,6 +16,10 @@ static bool (*TrackFX_SetParamNormalized)(MediaTrack* track, int fx, int param, 
 static int (*GetPlayState)();
 static double (*GetPlayPosition)();
 static double (*TimeMap_GetDividedBpmAtTime)(double time);
+static int (*ShowMessageBox)(const char* msg, const char* title, int type);
+
+// Action command ID
+static int g_commandId = 0;
 
 // Global plugin handle
 REAPER_PLUGIN_HINSTANCE g_hInst;
@@ -183,6 +187,52 @@ static void SideFX_Mod_SetBipolar(int id, bool bipolar) {
 }
 
 //------------------------------------------------------------------------------
+// Test Action
+//------------------------------------------------------------------------------
+
+static bool onTestAction() {
+    // Create a test modulator
+    int id = sidefx::ModulatorManager::instance().createModulator("Test Modulator");
+    
+    // Get info
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    
+    char msg[512];
+    snprintf(msg, sizeof(msg),
+        "SideFX Modulation Engine v0.1.0\n\n"
+        "Extension loaded successfully!\n\n"
+        "Created test modulator ID: %d\n"
+        "Audio hook active: %s\n\n"
+        "API functions available:\n"
+        "- SideFX_Mod_Create/Destroy\n"
+        "- SideFX_Mod_SetCurve/SetPreset\n"
+        "- SideFX_Mod_Link/Unlink\n"
+        "- SideFX_Mod_SetRateHz/SetRateSync\n"
+        "- SideFX_Mod_SetDepth/Offset/Enabled\n"
+        "- SideFX_Mod_GetPhase/GetValue",
+        id,
+        sidefx::isAudioHookActive() ? "YES" : "NO"
+    );
+    
+    if (ShowMessageBox) {
+        ShowMessageBox(msg, "SideFX Modulation Engine", 0);
+    }
+    
+    // Cleanup test modulator
+    sidefx::ModulatorManager::instance().destroyModulator(id);
+    
+    return true;
+}
+
+static bool hookCommandProc(int command, int flag) {
+    if (command == g_commandId) {
+        onTestAction();
+        return true;
+    }
+    return false;
+}
+
+//------------------------------------------------------------------------------
 // Plugin Registration
 //------------------------------------------------------------------------------
 
@@ -304,9 +354,17 @@ REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
     *((void**)&GetPlayState) = rec->GetFunc("GetPlayState");
     *((void**)&GetPlayPosition) = rec->GetFunc("GetPlayPosition");
     *((void**)&TimeMap_GetDividedBpmAtTime) = rec->GetFunc("TimeMap_GetDividedBpmAtTime");
+    *((void**)&ShowMessageBox) = rec->GetFunc("ShowMessageBox");
 
     if (!plugin_register) {
         return 0;
+    }
+
+    // Register test action
+    g_commandId = plugin_register("command_id", nullptr);
+    if (g_commandId) {
+        plugin_register("gaccel", new gaccel_register_t{{0, 0, (unsigned short)g_commandId}, "SideFX: Test Modulation Engine"});
+        plugin_register("hookcommand", (void*)hookCommandProc);
     }
 
     // Register our API functions
