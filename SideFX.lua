@@ -122,6 +122,7 @@ local state = {
 
     -- Plugin browser state
     browser = {
+        visible = true,  -- Toggle visibility
         search = "",
         filter = "all",
         plugins = {},
@@ -448,8 +449,15 @@ local function draw_plugin_browser(ctx)
                 add_plugin_to_track(plugin)
             end
 
+            -- Drag source for adding plugin to FX chain
+            if ctx:begin_drag_drop_source() then
+                ctx:set_drag_drop_payload("PLUGIN_NAME", plugin.full_name)
+                ctx:text("Add: " .. plugin.name)
+                ctx:end_drag_drop_source()
+            end
+
             if ctx:is_item_hovered() then
-                ctx:set_tooltip(plugin.full_name)
+                ctx:set_tooltip(plugin.full_name .. "\n(Drag to add)")
             end
 
             ctx:pop_id()
@@ -467,14 +475,16 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
         ctx:text(column_title)
         ctx:separator()
         
-        -- Drop zone for this column
-        local has_payload = ctx:get_drag_drop_payload("FX_GUID")
-        if has_payload then
-            local drop_label = depth == 1 and "Drop to move to track" or ("Drop to add to " .. column_title)
+        -- Drop zone for this column (accepts FX moves and plugin additions)
+        local has_fx_payload = ctx:get_drag_drop_payload("FX_GUID")
+        local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_NAME")
+        if has_fx_payload or has_plugin_payload then
+            local drop_label = depth == 1 and "Drop to add to track" or ("Drop to add to " .. column_title)
             ctx:push_style_color(imgui.Col.Button(), 0x4488FF88)
             ctx:button(drop_label .. "##drop" .. depth, -1, 24)
             ctx:pop_style_color()
             if ctx:begin_drag_drop_target() then
+                -- Handle FX move
                 local accepted, guid = ctx:accept_drag_drop_payload("FX_GUID")
                 if accepted and guid then
                     local fx = state.track:find_fx_by_guid(guid)
@@ -524,6 +534,50 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
                                     refresh_fx_list()
                                 end
                             end
+                        end
+                    end
+                end
+                
+                -- Handle plugin drop from browser
+                local plugin_accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_NAME")
+                if plugin_accepted and plugin_name and state.track then
+                    if depth == 1 then
+                        -- Add to track level
+                        local new_fx = state.track:add_fx_by_name(plugin_name, false, -1)
+                        if new_fx then
+                            refresh_fx_list()
+                        end
+                    elseif parent_container_guid then
+                        -- Add to container: first add to track, then move into container
+                        local new_fx = state.track:add_fx_by_name(plugin_name, false, -1)
+                        if new_fx then
+                            local target_container = state.track:find_fx_by_guid(parent_container_guid)
+                            if target_container then
+                                -- Build path and move through levels
+                                local target_path = {}
+                                local container = target_container
+                                while container do
+                                    table.insert(target_path, 1, container:get_guid())
+                                    container = container:get_parent_container()
+                                end
+                                
+                                local new_guid = new_fx:get_guid()
+                                for _, container_guid in ipairs(target_path) do
+                                    new_fx = state.track:find_fx_by_guid(new_guid)
+                                    if not new_fx then break end
+                                    
+                                    local current_parent = new_fx:get_parent_container()
+                                    local current_parent_guid = current_parent and current_parent:get_guid() or nil
+                                    
+                                    if current_parent_guid ~= container_guid then
+                                        local c = state.track:find_fx_by_guid(container_guid)
+                                        if c then
+                                            c:add_fx_to_container(new_fx)
+                                        end
+                                    end
+                                end
+                            end
+                            refresh_fx_list()
                         end
                     end
                 end
@@ -639,8 +693,9 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
                 ctx:end_drag_drop_source()
             end
 
-            -- Drop target for ALL FX items (reordering and container drops)
+            -- Drop target for ALL FX items (reordering, container drops, and plugin drops)
             if ctx:begin_drag_drop_target() then
+                -- Handle existing FX moves
                 local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
                 if accepted and payload and payload ~= guid then
                     local drag_fx = state.track:find_fx_by_guid(payload)
@@ -694,6 +749,39 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
                                 else
                                     -- Target is at track level
                                     drag_fx:move_out_of_container()
+                                end
+                            end
+                        end
+                        refresh_fx_list()
+                    end
+                end
+                
+                -- Handle plugin drops from browser onto containers
+                local plugin_accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_NAME")
+                if plugin_accepted and plugin_name and is_container then
+                    -- Add plugin directly to this container
+                    local new_fx = state.track:add_fx_by_name(plugin_name, false, -1)
+                    if new_fx then
+                        -- Move new FX into the container through the path
+                        local target_path = {}
+                        local container = fx
+                        while container do
+                            table.insert(target_path, 1, container:get_guid())
+                            container = container:get_parent_container()
+                        end
+                        
+                        local new_guid = new_fx:get_guid()
+                        for _, container_guid in ipairs(target_path) do
+                            new_fx = state.track:find_fx_by_guid(new_guid)
+                            if not new_fx then break end
+                            
+                            local current_parent = new_fx:get_parent_container()
+                            local current_parent_guid = current_parent and current_parent:get_guid() or nil
+                            
+                            if current_parent_guid ~= container_guid then
+                                local c = state.track:find_fx_by_guid(container_guid)
+                                if c then
+                                    c:add_fx_to_container(new_fx)
                                 end
                             end
                         end
@@ -914,6 +1002,22 @@ end
 --------------------------------------------------------------------------------
 
 local function draw_toolbar(ctx)
+    -- Browser toggle button
+    if icon_font then r.ImGui_PushFont(ctx.ctx, icon_font, icon_size) end
+    if state.browser.visible then
+        ctx:push_style_color(imgui.Col.Button(), 0x44AA44FF)
+    end
+    if ctx:button(icon_text(Icons.plug) .. "##browser_toggle") then
+        state.browser.visible = not state.browser.visible
+    end
+    if state.browser.visible then
+        ctx:pop_style_color()
+    end
+    if icon_font then r.ImGui_PopFont(ctx.ctx) end
+    if ctx:is_item_hovered() then ctx:set_tooltip(state.browser.visible and "Hide Browser" or "Show Browser") end
+
+    ctx:same_line()
+
     -- Refresh button (icon only)
     if icon_font then r.ImGui_PushFont(ctx.ctx, icon_font, icon_size) end
     if ctx:button(icon_text(Icons.arrows_counterclockwise)) then
@@ -1058,15 +1162,16 @@ local function main()
                 end
             end
 
-            -- Plugin Browser (fixed left)
-            if ctx:begin_child("Browser", browser_w, 0, imgui.ChildFlags.Border()) then
-                ctx:text("Plugins")
-                ctx:separator()
-                draw_plugin_browser(ctx)
-                ctx:end_child()
+            -- Plugin Browser (fixed left, toggleable)
+            if state.browser.visible then
+                if ctx:begin_child("Browser", browser_w, 0, imgui.ChildFlags.Border()) then
+                    ctx:text("Plugins")
+                    ctx:separator()
+                    draw_plugin_browser(ctx)
+                    ctx:end_child()
+                end
+                ctx:same_line()
             end
-
-            ctx:same_line()
 
             -- Scrollable columns area for FX chain + containers
             local flags = r.ImGui_WindowFlags_AlwaysHorizontalScrollbar()
