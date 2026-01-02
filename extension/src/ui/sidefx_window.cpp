@@ -25,7 +25,7 @@ static bool (*TrackFX_GetNamedConfigParm)(MediaTrack* track, int fx, const char*
 static int (*TrackFX_AddByName)(MediaTrack* track, const char* fxname, bool recFX, int instantiate) = nullptr;
 static bool (*TrackFX_CopyToTrack)(MediaTrack* srcTrack, int srcFX, MediaTrack* destTrack, int destFX, bool is_move) = nullptr;
 static int (*TrackFX_GetRecCount)(MediaTrack* track) = nullptr;
-static int (*EnumInstalledFX)(int index, char* buf, int buf_sz) = nullptr;
+static int (*EnumInstalledFX)(int index, const char** nameOut, const char** identOut) = nullptr;
 
 // Layout constants
 static const double COLUMN_WIDTH = 280.0;
@@ -70,7 +70,7 @@ bool SideFXWindow::Initialize(reaper_plugin_info_t* rec) {
     TrackFX_AddByName = (int (*)(MediaTrack*, const char*, bool, int))rec->GetFunc("TrackFX_AddByName");
     TrackFX_CopyToTrack = (bool (*)(MediaTrack*, int, MediaTrack*, int, bool))rec->GetFunc("TrackFX_CopyToTrack");
     TrackFX_GetRecCount = (int (*)(MediaTrack*))rec->GetFunc("TrackFX_GetRecCount");
-    EnumInstalledFX = (int (*)(int, char*, int))rec->GetFunc("EnumInstalledFX");
+    EnumInstalledFX = (int (*)(int, const char**, const char**))rec->GetFunc("EnumInstalledFX");
 
     m_available = true;
     return true;
@@ -141,16 +141,19 @@ void SideFXWindow::ScanPlugins() {
     
     m_allPlugins.clear();
     
-    char buf[512];
+    const char* name = nullptr;
+    const char* ident = nullptr;
     int idx = 0;
     
-    while (EnumInstalledFX(idx++, buf, sizeof(buf))) {
+    while (EnumInstalledFX(idx++, &name, &ident)) {
+        if (!name) continue;
+        
         PluginInfo info;
-        info.fullName = buf;
+        info.fullName = ident ? ident : name;
         
         // Parse plugin name and type
         // Format is typically: "VST: PluginName (Manufacturer)" or "VST3: ..." or "AU: ..." or "JS: ..."
-        std::string s = buf;
+        std::string s = name;
         
         // Determine type
         if (s.find("VST3:") == 0 || s.find("VST3i:") == 0) {
