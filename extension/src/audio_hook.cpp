@@ -6,8 +6,7 @@
 #include <cmath>
 
 // External function pointers from main.cpp
-extern void* getAudioRegHookAdd();
-extern void* getAudioRegHookRemove();
+extern void* getAudioRegHardwareHook();
 extern void* getTrackFXSetParamNormalized();
 extern void* getGetPlayState();
 extern void* getGetPlayPosition();
@@ -71,23 +70,23 @@ static void audioHookCallback(bool isPost, int len, double srate,
 void initAudioHook() {
     if (g_audioHookActive.load()) return;
 
-    auto Audio_RegHookAdd = (void (*)(audio_hook_register_t*))getAudioRegHookAdd();
-    if (!Audio_RegHookAdd) return;
+    auto Audio_RegHardwareHook = (int (*)(bool, audio_hook_register_t*))getAudioRegHardwareHook();
+    if (!Audio_RegHardwareHook) return;
 
     g_audioHook.OnAudioBuffer = audioHookCallback;
     g_audioHook.userdata1 = nullptr;
     g_audioHook.userdata2 = nullptr;
 
-    Audio_RegHookAdd(&g_audioHook);
+    Audio_RegHardwareHook(true, &g_audioHook);  // true = add
     g_audioHookActive.store(true);
 }
 
 void cleanupAudioHook() {
     if (!g_audioHookActive.load()) return;
 
-    auto Audio_RegHookRemove = (void (*)(audio_hook_register_t*))getAudioRegHookRemove();
-    if (Audio_RegHookRemove) {
-        Audio_RegHookRemove(&g_audioHook);
+    auto Audio_RegHardwareHook = (int (*)(bool, audio_hook_register_t*))getAudioRegHardwareHook();
+    if (Audio_RegHardwareHook) {
+        Audio_RegHardwareHook(false, &g_audioHook);  // false = remove
     }
     g_audioHookActive.store(false);
 }

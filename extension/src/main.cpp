@@ -10,13 +10,13 @@
 
 // REAPER API function pointers we need
 static int (*plugin_register)(const char* name, void* infostruct);
-static void (*Audio_RegHookAdd)(audio_hook_register_t* hook);
-static void (*Audio_RegHookRemove)(audio_hook_register_t* hook);
+static int (*Audio_RegHardwareHook)(bool isAdd, audio_hook_register_t* reg);
 static bool (*TrackFX_SetParamNormalized)(MediaTrack* track, int fx, int param, double value);
 static int (*GetPlayState)();
 static double (*GetPlayPosition)();
 static double (*TimeMap_GetDividedBpmAtTime)(double time);
 static int (*ShowMessageBox)(const char* msg, const char* title, int type);
+static void (*ShowConsoleMsg)(const char* msg);
 
 // Action command ID
 static int g_commandId = 0;
@@ -194,26 +194,24 @@ static bool onTestAction() {
     // Create a test modulator
     int id = sidefx::ModulatorManager::instance().createModulator("Test Modulator");
     
-    // Get info
-    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
-    
     char msg[512];
     snprintf(msg, sizeof(msg),
-        "SideFX Modulation Engine v0.1.0\n\n"
-        "Extension loaded successfully!\n\n"
+        "=== SideFX Modulation Engine v0.1.0 ===\n"
+        "Extension loaded successfully!\n"
         "Created test modulator ID: %d\n"
-        "Audio hook active: %s\n\n"
-        "API functions available:\n"
-        "- SideFX_Mod_Create/Destroy\n"
-        "- SideFX_Mod_SetCurve/SetPreset\n"
-        "- SideFX_Mod_Link/Unlink\n"
-        "- SideFX_Mod_SetRateHz/SetRateSync\n"
-        "- SideFX_Mod_SetDepth/Offset/Enabled\n"
-        "- SideFX_Mod_GetPhase/GetValue",
+        "Audio hook active: %s\n"
+        "API functions: SideFX_Mod_Create, SetCurve, Link, etc.\n"
+        "=====================================\n",
         id,
         sidefx::isAudioHookActive() ? "YES" : "NO"
     );
     
+    // Try console first (more reliable)
+    if (ShowConsoleMsg) {
+        ShowConsoleMsg(msg);
+    }
+    
+    // Also show message box
     if (ShowMessageBox) {
         ShowMessageBox(msg, "SideFX Modulation Engine", 0);
     }
@@ -224,8 +222,9 @@ static bool onTestAction() {
     return true;
 }
 
-static bool hookCommandProc(int command, int flag) {
-    if (command == g_commandId) {
+// hookcommand2 is needed for custom_action (section-aware)
+static bool hookCommandProc2(KbdSectionInfo* sec, int command, int val, int valhw, int relmode, HWND hwnd) {
+    if (sec && sec->uniqueID == 0 && command == g_commandId) {
         onTestAction();
         return true;
     }
@@ -348,23 +347,28 @@ REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
 
     // Load required API functions
     *((void**)&plugin_register) = rec->GetFunc("plugin_register");
-    *((void**)&Audio_RegHookAdd) = rec->GetFunc("Audio_RegHookAdd");
-    *((void**)&Audio_RegHookRemove) = rec->GetFunc("Audio_RegHookRemove");
+    *((void**)&Audio_RegHardwareHook) = rec->GetFunc("Audio_RegHardwareHook");
     *((void**)&TrackFX_SetParamNormalized) = rec->GetFunc("TrackFX_SetParamNormalized");
     *((void**)&GetPlayState) = rec->GetFunc("GetPlayState");
     *((void**)&GetPlayPosition) = rec->GetFunc("GetPlayPosition");
     *((void**)&TimeMap_GetDividedBpmAtTime) = rec->GetFunc("TimeMap_GetDividedBpmAtTime");
     *((void**)&ShowMessageBox) = rec->GetFunc("ShowMessageBox");
+    *((void**)&ShowConsoleMsg) = rec->GetFunc("ShowConsoleMsg");
 
     if (!plugin_register) {
         return 0;
     }
 
     // Register test action
-    g_commandId = plugin_register("command_id", nullptr);
+    static custom_action_register_t action = {
+        0,          // section (main)
+        "SIDEFX_TEST_MOD_ENGINE",  // idStr  
+        "SideFX: Test Modulation Engine",  // name
+        nullptr     // extra (not used)
+    };
+    g_commandId = plugin_register("custom_action", &action);
     if (g_commandId) {
-        plugin_register("gaccel", new gaccel_register_t{{0, 0, (unsigned short)g_commandId}, "SideFX: Test Modulation Engine"});
-        plugin_register("hookcommand", (void*)hookCommandProc);
+        plugin_register("hookcommand2", (void*)hookCommandProc2);
     }
 
     // Register our API functions
@@ -378,9 +382,8 @@ REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
 
 } // extern "C"
 
-// Export audio hook registration functions for audio_hook.cpp
-void* getAudioRegHookAdd() { return (void*)Audio_RegHookAdd; }
-void* getAudioRegHookRemove() { return (void*)Audio_RegHookRemove; }
+// Export audio hook registration function for audio_hook.cpp
+void* getAudioRegHardwareHook() { return (void*)Audio_RegHardwareHook; }
 void* getTrackFXSetParamNormalized() { return (void*)TrackFX_SetParamNormalized; }
 void* getGetPlayState() { return (void*)GetPlayState; }
 void* getGetPlayPosition() { return (void*)GetPlayPosition; }
