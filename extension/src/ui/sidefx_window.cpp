@@ -137,19 +137,34 @@ void SideFXWindow::Toggle() {
 //------------------------------------------------------------------------------
 
 void SideFXWindow::ScanPlugins() {
-    if (!EnumInstalledFX) return;
+    if (!EnumInstalledFX) {
+        if (m_ShowConsoleMsg) m_ShowConsoleMsg("[SideFX Mod] EnumInstalledFX not available\n");
+        return;
+    }
     
     m_allPlugins.clear();
     
     const char* name = nullptr;
     const char* ident = nullptr;
     int idx = 0;
+    int scanned = 0;
     
     while (EnumInstalledFX(idx++, &name, &ident)) {
         if (!name) continue;
         
         PluginInfo info;
-        info.fullName = ident ? ident : name;
+        // Use 'name' for adding FX - it's in the format "VST: Plugin Name" that TrackFX_AddByName expects
+        // 'ident' is a different identifier that may not work with TrackFX_AddByName
+        info.fullName = name;
+        
+        // Debug first few plugins
+        if (scanned < 3 && m_ShowConsoleMsg) {
+            char msg[512];
+            snprintf(msg, sizeof(msg), "[SideFX Mod] Plugin %d: name='%s' ident='%s'\n", 
+                     scanned, name ? name : "(null)", ident ? ident : "(null)");
+            m_ShowConsoleMsg(msg);
+        }
+        scanned++;
         
         // Parse plugin name and type
         // Format is typically: "VST: PluginName (Manufacturer)" or "VST3: ..." or "AU: ..." or "JS: ..."
@@ -200,6 +215,12 @@ void SideFXWindow::ScanPlugins() {
     
     m_pluginsScanned = true;
     FilterPlugins();
+    
+    if (m_ShowConsoleMsg) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "[SideFX Mod] Scanned %zu plugins\n", m_allPlugins.size());
+        m_ShowConsoleMsg(msg);
+    }
 }
 
 void SideFXWindow::FilterPlugins() {
@@ -232,12 +253,31 @@ void SideFXWindow::FilterPlugins() {
 }
 
 void SideFXWindow::AddPluginToTrack(const PluginInfo& plugin) {
-    if (!m_GetSelectedTrack || !TrackFX_AddByName) return;
+    if (!m_GetSelectedTrack || !TrackFX_AddByName) {
+        if (m_ShowConsoleMsg) m_ShowConsoleMsg("[SideFX Mod] AddPluginToTrack: API not available\n");
+        return;
+    }
     
     MediaTrack* track = m_GetSelectedTrack(nullptr, 0);
-    if (!track) return;
+    if (!track) {
+        if (m_ShowConsoleMsg) m_ShowConsoleMsg("[SideFX Mod] AddPluginToTrack: No track selected\n");
+        return;
+    }
     
-    TrackFX_AddByName(track, plugin.fullName.c_str(), false, -1);
+    if (m_ShowConsoleMsg) {
+        char msg[512];
+        snprintf(msg, sizeof(msg), "[SideFX Mod] Adding FX: %s\n", plugin.fullName.c_str());
+        m_ShowConsoleMsg(msg);
+    }
+    
+    int result = TrackFX_AddByName(track, plugin.fullName.c_str(), false, -1);
+    
+    if (m_ShowConsoleMsg) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "[SideFX Mod] TrackFX_AddByName returned: %d\n", result);
+        m_ShowConsoleMsg(msg);
+    }
+    
     RefreshFXList();
 }
 
@@ -620,6 +660,78 @@ void SideFXWindow::RenderPluginBrowser() {
 }
 
 //------------------------------------------------------------------------------
+// Drop Zone
+//------------------------------------------------------------------------------
+
+void SideFXWindow::RenderDropZone(MediaTrack* track, int depth, int parentFxIndex) {
+    if (!track) return;
+    
+    // Check if we're dragging something
+    bool hasDrag = false;
+    if (ImGui_GetDragDropPayload) {
+        const char* payload = nullptr;
+        int size = 0;
+        // Check for plugin payload
+        if (ImGui_GetDragDropPayload(m_ctx, "PLUGIN_NAME", nullptr, &payload, &size) && payload) {
+            hasDrag = true;
+        }
+        // Check for FX reorder payload  
+        if (!hasDrag && ImGui_GetDragDropPayload(m_ctx, "FX_INDEX", nullptr, &payload, &size) && payload) {
+            hasDrag = true;
+        }
+    }
+    
+    // Only show drop zone when dragging
+    if (!hasDrag) return;
+    
+    // Draw the drop zone button
+    const char* dropLabel = (depth == 0) ? "Drop to add to track" : "Drop here";
+    
+    if (ImGui_PushStyleColor) {
+        ImGui_PushStyleColor(m_ctx, ImGuiCol::Button, Theme::Accent & 0xFFFFFF88);  // Semi-transparent accent
+    }
+    
+    double btnW = -1;  // Full width
+    double btnH = 24;
+    if (ImGui_Button && ImGui_Button(m_ctx, dropLabel, &btnW, &btnH)) {
+        // Button clicked - no action needed, just for drop target
+    }
+    
+    if (ImGui_PopStyleColor) {
+        int one = 1;
+        ImGui_PopStyleColor(m_ctx, &one);
+    }
+    
+    // Make it a drop target
+    if (ImGui_BeginDragDropTarget && ImGui_BeginDragDropTarget(m_ctx)) {
+        // Accept plugin drops
+        const char* pluginPayload = nullptr;
+        int payloadSize = 0;
+        if (ImGui_AcceptDragDropPayload && 
+            ImGui_AcceptDragDropPayload(m_ctx, "PLUGIN_NAME", nullptr, &pluginPayload, &payloadSize)) {
+            if (pluginPayload && TrackFX_AddByName) {
+                if (m_ShowConsoleMsg) {
+                    char msg[512];
+                    snprintf(msg, sizeof(msg), "[SideFX Mod] Drop zone: Adding FX '%s'\n", pluginPayload);
+                    m_ShowConsoleMsg(msg);
+                }
+                int result = TrackFX_AddByName(track, pluginPayload, false, -1);
+                if (m_ShowConsoleMsg) {
+                    char msg[128];
+                    snprintf(msg, sizeof(msg), "[SideFX Mod] TrackFX_AddByName returned: %d\n", result);
+                    m_ShowConsoleMsg(msg);
+                }
+                RefreshFXList();
+            }
+        }
+        
+        if (ImGui_EndDragDropTarget) ImGui_EndDragDropTarget(m_ctx);
+    }
+    
+    if (ImGui_Spacing) ImGui_Spacing(m_ctx);
+}
+
+//------------------------------------------------------------------------------
 // FX Item Rendering
 //------------------------------------------------------------------------------
 
@@ -830,6 +942,9 @@ void SideFXWindow::RenderFXChainColumn(int depth, int parentFxIndex) {
         ImGui_Text(m_ctx, title);
     }
     if (ImGui_Separator) ImGui_Separator(m_ctx);
+    
+    // Drop zone for adding plugins
+    RenderDropZone(track, depth, parentFxIndex);
     
     // Get FX list for this column
     std::vector<int> fxIndices;

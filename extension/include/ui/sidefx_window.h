@@ -57,6 +57,7 @@ private:
     // UI Panels
     void RenderToolbar();
     void RenderPluginBrowser();
+    void RenderDropZone(MediaTrack* track, int depth, int parentFxIndex);
     void RenderFXChainColumn(int depth, int parentFxIndex);
     void RenderFXItem(MediaTrack* track, int fxIndex, int depth);
     void RenderDetailPanel();

@@ -97,6 +97,7 @@ bool (*ImGui_SetDragDropPayload)(void* ctx, const char* type, const char* data, 
 void (*ImGui_EndDragDropSource)(void* ctx) = nullptr;
 bool (*ImGui_BeginDragDropTarget)(void* ctx) = nullptr;
 bool (*ImGui_AcceptDragDropPayload)(void* ctx, const char* type, int* flagsInOptional, const char** dataOut, int* sizeOut) = nullptr;
+bool (*ImGui_GetDragDropPayload)(void* ctx, const char* type, int* flagsInOptional, const char** dataOut, int* sizeOut) = nullptr;
 void (*ImGui_EndDragDropTarget)(void* ctx) = nullptr;
 
 // Drawing
@@ -288,6 +289,7 @@ bool InitializeReaImGui(reaper_plugin_info_t* rec) {
     LOAD_IMGUI_FUNC(ImGui_EndDragDropSource);
     LOAD_IMGUI_FUNC(ImGui_BeginDragDropTarget);
     LOAD_IMGUI_FUNC(ImGui_AcceptDragDropPayload);
+    LOAD_IMGUI_FUNC(ImGui_GetDragDropPayload);
     LOAD_IMGUI_FUNC(ImGui_EndDragDropTarget);
 
     // Drawing

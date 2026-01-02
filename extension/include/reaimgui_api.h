@@ -99,6 +99,7 @@ extern bool (*ImGui_SetDragDropPayload)(void* ctx, const char* type, const char*
 extern void (*ImGui_EndDragDropSource)(void* ctx);
 extern bool (*ImGui_BeginDragDropTarget)(void* ctx);
 extern bool (*ImGui_AcceptDragDropPayload)(void* ctx, const char* type, int* flagsInOptional, const char** dataOut, int* sizeOut);
+extern bool (*ImGui_GetDragDropPayload)(void* ctx, const char* type, int* flagsInOptional, const char** dataOut, int* sizeOut);
 extern void (*ImGui_EndDragDropTarget)(void* ctx);
 
 // Drawing
