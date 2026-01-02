@@ -533,6 +533,9 @@ end
 
 -- Draw the drop zone at top of column
 local function draw_column_drop_zone(ctx, depth, column_title, parent_container_guid)
+    -- Don't show drop zone during rename
+    if state.renaming_fx then return end
+    
     local has_fx_payload = ctx:get_drag_drop_payload("FX_GUID")
     local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_NAME")
     
@@ -583,6 +586,9 @@ end
 
 -- Handle drops on individual FX items
 local function handle_fx_item_drop(ctx, target_fx, target_guid, is_container)
+    -- Don't accept drops during rename
+    if state.renaming_fx then return end
+    
     if not ctx:begin_drag_drop_target() then return end
     
     -- Handle existing FX moves
@@ -824,8 +830,8 @@ local function draw_fx_item(ctx, fx, depth, i, width)
     ctx:same_line()
     draw_fx_name_area(ctx, fx, guid, depth, i, name_w, is_container)
     
-    -- Drag source
-    if ctx:begin_drag_drop_source() then
+    -- Drag source (disabled during rename)
+    if not state.renaming_fx and ctx:begin_drag_drop_source() then
         ctx:set_drag_drop_payload("FX_GUID", guid)
         ctx:text("Moving: " .. get_fx_display_name(fx))
         ctx:end_drag_drop_source()
