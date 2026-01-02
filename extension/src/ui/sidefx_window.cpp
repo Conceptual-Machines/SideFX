@@ -496,11 +496,12 @@ void SideFXWindow::RenderPluginBrowser() {
         if (ImGui_SetTooltip) ImGui_SetTooltip(m_ctx, "Search plugins...");
     }
     
-    // Filter tabs
+    // Filter tabs - store active state before button to avoid push/pop imbalance
     if (ImGui_SmallButton) {
         // All tab
-        if (m_filterMode == 0) {
-            if (ImGui_PushStyleColor) ImGui_PushStyleColor(m_ctx, ImGuiCol::Button, Theme::Accent);
+        bool allActive = (m_filterMode == 0);
+        if (allActive && ImGui_PushStyleColor) {
+            ImGui_PushStyleColor(m_ctx, ImGuiCol::Button, Theme::Accent);
         }
         if (ImGui_SmallButton(m_ctx, "All")) {
             if (m_filterMode != 0) {
@@ -508,7 +509,7 @@ void SideFXWindow::RenderPluginBrowser() {
                 FilterPlugins();
             }
         }
-        if (m_filterMode == 0 && ImGui_PopStyleColor) {
+        if (allActive && ImGui_PopStyleColor) {
             int one = 1;
             ImGui_PopStyleColor(m_ctx, &one);
         }
@@ -516,8 +517,9 @@ void SideFXWindow::RenderPluginBrowser() {
         if (ImGui_SameLine) ImGui_SameLine(m_ctx, nullptr, nullptr);
         
         // Instruments tab
-        if (m_filterMode == 1) {
-            if (ImGui_PushStyleColor) ImGui_PushStyleColor(m_ctx, ImGuiCol::Button, Theme::Accent);
+        bool instActive = (m_filterMode == 1);
+        if (instActive && ImGui_PushStyleColor) {
+            ImGui_PushStyleColor(m_ctx, ImGuiCol::Button, Theme::Accent);
         }
         if (ImGui_SmallButton(m_ctx, "Inst")) {
             if (m_filterMode != 1) {
@@ -525,7 +527,7 @@ void SideFXWindow::RenderPluginBrowser() {
                 FilterPlugins();
             }
         }
-        if (m_filterMode == 1 && ImGui_PopStyleColor) {
+        if (instActive && ImGui_PopStyleColor) {
             int one = 1;
             ImGui_PopStyleColor(m_ctx, &one);
         }
@@ -533,8 +535,9 @@ void SideFXWindow::RenderPluginBrowser() {
         if (ImGui_SameLine) ImGui_SameLine(m_ctx, nullptr, nullptr);
         
         // Effects tab
-        if (m_filterMode == 2) {
-            if (ImGui_PushStyleColor) ImGui_PushStyleColor(m_ctx, ImGuiCol::Button, Theme::Accent);
+        bool fxActive = (m_filterMode == 2);
+        if (fxActive && ImGui_PushStyleColor) {
+            ImGui_PushStyleColor(m_ctx, ImGuiCol::Button, Theme::Accent);
         }
         if (ImGui_SmallButton(m_ctx, "FX")) {
             if (m_filterMode != 2) {
@@ -542,7 +545,7 @@ void SideFXWindow::RenderPluginBrowser() {
                 FilterPlugins();
             }
         }
-        if (m_filterMode == 2 && ImGui_PopStyleColor) {
+        if (fxActive && ImGui_PopStyleColor) {
             int one = 1;
             ImGui_PopStyleColor(m_ctx, &one);
         }
