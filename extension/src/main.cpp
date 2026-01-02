@@ -396,9 +396,35 @@ static void imguiTimerCallback() {
 //------------------------------------------------------------------------------
 
 static bool onWindowToggle() {
+    if (ShowConsoleMsg) {
+        ShowConsoleMsg("[SideFX Mod] Window toggle triggered\n");
+    }
+    
     if (sidefx::g_sideFXWindow) {
+        if (!sidefx::g_sideFXWindow->IsAvailable()) {
+            if (ShowConsoleMsg) {
+                ShowConsoleMsg("[SideFX Mod] ReaImGui not available - please install ReaImGui extension\n");
+            }
+            if (ShowMessageBox) {
+                ShowMessageBox("ReaImGui extension is required for the SideFX window.\n\n"
+                               "Please install ReaImGui from ReaPack:\n"
+                               "Extensions > ReaPack > Browse packages > Search 'ReaImGui'",
+                               "SideFX - ReaImGui Required", 0);
+            }
+            return true;
+        }
         sidefx::g_sideFXWindow->Toggle();
+        if (ShowConsoleMsg) {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "[SideFX Mod] Window visible: %s\n",
+                     sidefx::g_sideFXWindow->IsVisible() ? "YES" : "NO");
+            ShowConsoleMsg(buf);
+        }
         return true;
+    }
+    
+    if (ShowConsoleMsg) {
+        ShowConsoleMsg("[SideFX Mod] ERROR: Window not initialized\n");
     }
     return false;
 }
@@ -441,17 +467,22 @@ static bool onTestAction() {
     return true;
 }
 
-// hookcommand2 is needed for custom_action (section-aware)
+// hookcommand2 is needed for custom_action and menu commands
 static bool hookCommandProc2(KbdSectionInfo* sec, int command, int val, int valhw, int relmode, HWND hwnd) {
-    if (sec && sec->uniqueID == 0) {
-        if (command == g_commandId) {
-            onTestAction();
-            return true;
-        }
-        if (command == g_windowCommandId) {
-            onWindowToggle();
-            return true;
-        }
+    (void)sec;
+    (void)val;
+    (void)valhw;
+    (void)relmode;
+    (void)hwnd;
+    
+    // Handle commands regardless of section - menu commands may not have valid section
+    if (g_commandId != 0 && command == g_commandId) {
+        onTestAction();
+        return true;
+    }
+    if (g_windowCommandId != 0 && command == g_windowCommandId) {
+        onWindowToggle();
+        return true;
     }
     return false;
 }
