@@ -17,6 +17,8 @@ static double (*GetPlayPosition)();
 static double (*TimeMap_GetDividedBpmAtTime)(double time);
 static int (*ShowMessageBox)(const char* msg, const char* title, int type);
 static void (*ShowConsoleMsg)(const char* msg);
+static double (*Track_GetPeakInfo)(MediaTrack* track, int chan);
+static int (*MIDI_GetRecentInputEvents)(int idx, char* buf, int buf_sz);
 
 // Action command ID
 static int g_commandId = 0;
@@ -186,6 +188,80 @@ static void SideFX_Mod_SetBipolar(int id, bool bipolar) {
     }
 }
 
+// Set source type: 0=LFO, 1=AudioEnvelope, 2=MidiCC, 3=MidiNote
+static void SideFX_Mod_SetSource(int id, int sourceType) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    if (mod && sourceType >= 0 && sourceType <= 3) {
+        mod->source = static_cast<sidefx::ModSource>(sourceType);
+    }
+}
+
+// Set envelope follower source track
+static void SideFX_Mod_SetEnvTrack(int id, MediaTrack* track) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    if (mod) {
+        mod->sourceTrack = track;
+    }
+}
+
+// Set envelope attack time in ms
+static void SideFX_Mod_SetEnvAttack(int id, double attackMs) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    if (mod) {
+        mod->attackMs = attackMs > 0.1 ? attackMs : 0.1;
+    }
+}
+
+// Set envelope release time in ms
+static void SideFX_Mod_SetEnvRelease(int id, double releaseMs) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    if (mod) {
+        mod->releaseMs = releaseMs > 0.1 ? releaseMs : 0.1;
+    }
+}
+
+// Set MIDI CC number (0-127)
+static void SideFX_Mod_SetMidiCC(int id, int cc) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    if (mod && cc >= 0 && cc <= 127) {
+        mod->midiCC = cc;
+    }
+}
+
+// Set MIDI channel (-1 = omni, 0-15 = specific)
+static void SideFX_Mod_SetMidiChannel(int id, int channel) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    if (mod && channel >= -1 && channel <= 15) {
+        mod->midiChannel = channel;
+    }
+}
+
+// Set MIDI note filter (-1 = any, 0-127 = specific note)
+static void SideFX_Mod_SetMidiNote(int id, int note) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    if (mod && note >= -1 && note <= 127) {
+        mod->midiNote = note;
+    }
+}
+
+// Get current envelope value (for UI display)
+static double SideFX_Mod_GetEnvValue(int id) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    return mod ? mod->envelopeValue.load() : 0.0;
+}
+
+// Get current MIDI value (for UI display)
+static double SideFX_Mod_GetMidiValue(int id) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    return mod ? mod->midiValue.load() : 0.0;
+}
+
+// Check if MIDI note is currently on
+static bool SideFX_Mod_GetMidiNoteOn(int id) {
+    auto* mod = sidefx::ModulatorManager::instance().getModulator(id);
+    return mod ? mod->midiNoteOn.load() : false;
+}
+
 //------------------------------------------------------------------------------
 // Test Action
 //------------------------------------------------------------------------------
@@ -316,6 +392,59 @@ static void registerAPI() {
     plugin_register("APIdef_SideFX_Mod_SetBipolar",
         (void*)"void\0int,bool\0id,bipolar\0"
         "Set bipolar mode (true: modulates around offset, false: 0 to depth).");
+
+    // Source type selection
+    plugin_register("API_SideFX_Mod_SetSource", (void*)&SideFX_Mod_SetSource);
+    plugin_register("APIdef_SideFX_Mod_SetSource",
+        (void*)"void\0int,int\0id,source\0"
+        "Set modulation source: 0=LFO, 1=AudioEnvelope, 2=MidiCC, 3=MidiNote.");
+
+    // Envelope follower settings
+    plugin_register("API_SideFX_Mod_SetEnvTrack", (void*)&SideFX_Mod_SetEnvTrack);
+    plugin_register("APIdef_SideFX_Mod_SetEnvTrack",
+        (void*)"void\0int,MediaTrack*\0id,track\0"
+        "Set source track for envelope follower.");
+
+    plugin_register("API_SideFX_Mod_SetEnvAttack", (void*)&SideFX_Mod_SetEnvAttack);
+    plugin_register("APIdef_SideFX_Mod_SetEnvAttack",
+        (void*)"void\0int,double\0id,attack_ms\0"
+        "Set envelope attack time in milliseconds.");
+
+    plugin_register("API_SideFX_Mod_SetEnvRelease", (void*)&SideFX_Mod_SetEnvRelease);
+    plugin_register("APIdef_SideFX_Mod_SetEnvRelease",
+        (void*)"void\0int,double\0id,release_ms\0"
+        "Set envelope release time in milliseconds.");
+
+    plugin_register("API_SideFX_Mod_GetEnvValue", (void*)&SideFX_Mod_GetEnvValue);
+    plugin_register("APIdef_SideFX_Mod_GetEnvValue",
+        (void*)"double\0int\0id\0"
+        "Get current envelope follower value (0-1).");
+
+    // MIDI settings
+    plugin_register("API_SideFX_Mod_SetMidiCC", (void*)&SideFX_Mod_SetMidiCC);
+    plugin_register("APIdef_SideFX_Mod_SetMidiCC",
+        (void*)"void\0int,int\0id,cc\0"
+        "Set MIDI CC number to listen for (0-127).");
+
+    plugin_register("API_SideFX_Mod_SetMidiChannel", (void*)&SideFX_Mod_SetMidiChannel);
+    plugin_register("APIdef_SideFX_Mod_SetMidiChannel",
+        (void*)"void\0int,int\0id,channel\0"
+        "Set MIDI channel (-1=omni, 0-15=specific).");
+
+    plugin_register("API_SideFX_Mod_SetMidiNote", (void*)&SideFX_Mod_SetMidiNote);
+    plugin_register("APIdef_SideFX_Mod_SetMidiNote",
+        (void*)"void\0int,int\0id,note\0"
+        "Set MIDI note filter for MidiNote source (-1=any, 0-127=specific).");
+
+    plugin_register("API_SideFX_Mod_GetMidiValue", (void*)&SideFX_Mod_GetMidiValue);
+    plugin_register("APIdef_SideFX_Mod_GetMidiValue",
+        (void*)"double\0int\0id\0"
+        "Get current MIDI CC value (0-1).");
+
+    plugin_register("API_SideFX_Mod_GetMidiNoteOn", (void*)&SideFX_Mod_GetMidiNoteOn);
+    plugin_register("APIdef_SideFX_Mod_GetMidiNoteOn",
+        (void*)"bool\0int\0id\0"
+        "Check if MIDI note is currently on (for MidiNote source).");
 }
 
 //------------------------------------------------------------------------------
@@ -354,6 +483,8 @@ REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
     *((void**)&TimeMap_GetDividedBpmAtTime) = rec->GetFunc("TimeMap_GetDividedBpmAtTime");
     *((void**)&ShowMessageBox) = rec->GetFunc("ShowMessageBox");
     *((void**)&ShowConsoleMsg) = rec->GetFunc("ShowConsoleMsg");
+    *((void**)&Track_GetPeakInfo) = rec->GetFunc("Track_GetPeakInfo");
+    *((void**)&MIDI_GetRecentInputEvents) = rec->GetFunc("MIDI_GetRecentInputEvents");
 
     if (!plugin_register) {
         return 0;
@@ -388,3 +519,5 @@ void* getTrackFXSetParamNormalized() { return (void*)TrackFX_SetParamNormalized;
 void* getGetPlayState() { return (void*)GetPlayState; }
 void* getGetPlayPosition() { return (void*)GetPlayPosition; }
 void* getTimeMapGetDividedBpmAtTime() { return (void*)TimeMap_GetDividedBpmAtTime; }
+void* getTrackGetPeakInfo() { return (void*)Track_GetPeakInfo; }
+void* getMidiGetRecentInputEvents() { return (void*)MIDI_GetRecentInputEvents; }
