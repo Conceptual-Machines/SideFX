@@ -3,6 +3,8 @@
 #include "modulator.h"
 #include <cstdio>
 #include <cstring>
+#include <vector>
+#include <string>
 
 namespace sidefx {
 
@@ -11,6 +13,21 @@ SideFXWindow* g_sideFXWindow = nullptr;
 
 // Store rec for lazy initialization
 static reaper_plugin_info_t* s_rec = nullptr;
+
+// Additional REAPER API function pointers
+static bool (*TrackFX_SetEnabled)(MediaTrack* track, int fx, bool enabled) = nullptr;
+static double (*TrackFX_GetParamNormalized)(MediaTrack* track, int fx, int param) = nullptr;
+static bool (*TrackFX_SetParamNormalized)(MediaTrack* track, int fx, int param, double value) = nullptr;
+static int (*TrackFX_GetNumParams)(MediaTrack* track, int fx) = nullptr;
+static bool (*TrackFX_GetParamName)(MediaTrack* track, int fx, int param, char* buf, int buf_sz) = nullptr;
+static int (*TrackFX_GetParamFromIdent)(MediaTrack* track, int fx, const char* ident) = nullptr;
+static void (*TrackFX_Show)(MediaTrack* track, int index, int showFlag) = nullptr;
+static bool (*TrackFX_GetNamedConfigParm)(MediaTrack* track, int fx, const char* parmname, char* buf, int buf_sz) = nullptr;
+
+// Layout constants
+static const double COLUMN_WIDTH = 280.0;
+static const double BROWSER_WIDTH = 260.0;
+static const double ITEM_HEIGHT = 24.0;
 
 SideFXWindow::SideFXWindow() {}
 
@@ -37,6 +54,16 @@ bool SideFXWindow::Initialize(reaper_plugin_info_t* rec) {
     m_TrackFX_GetFXName = (bool (*)(MediaTrack*, int, char*, int))rec->GetFunc("TrackFX_GetFXName");
     m_TrackFX_GetEnabled = (bool (*)(MediaTrack*, int))rec->GetFunc("TrackFX_GetEnabled");
     m_ShowConsoleMsg = (void (*)(const char*))rec->GetFunc("ShowConsoleMsg");
+    
+    // Load additional FX APIs
+    TrackFX_SetEnabled = (bool (*)(MediaTrack*, int, bool))rec->GetFunc("TrackFX_SetEnabled");
+    TrackFX_GetParamNormalized = (double (*)(MediaTrack*, int, int))rec->GetFunc("TrackFX_GetParamNormalized");
+    TrackFX_SetParamNormalized = (bool (*)(MediaTrack*, int, int, double))rec->GetFunc("TrackFX_SetParamNormalized");
+    TrackFX_GetNumParams = (int (*)(MediaTrack*, int))rec->GetFunc("TrackFX_GetNumParams");
+    TrackFX_GetParamName = (bool (*)(MediaTrack*, int, int, char*, int))rec->GetFunc("TrackFX_GetParamName");
+    TrackFX_GetParamFromIdent = (int (*)(MediaTrack*, int, const char*))rec->GetFunc("TrackFX_GetParamFromIdent");
+    TrackFX_Show = (void (*)(MediaTrack*, int, int))rec->GetFunc("TrackFX_Show");
+    TrackFX_GetNamedConfigParm = (bool (*)(MediaTrack*, int, const char*, char*, int))rec->GetFunc("TrackFX_GetNamedConfigParm");
 
     // Don't try to initialize ReaImGui yet - it might not be loaded
     // We'll try lazily when Show() is called
@@ -117,61 +144,45 @@ void SideFXWindow::ApplyTheme() {
 
     m_themeColorCount = 0;
 
-    // Window background
+    // Dark theme matching Lua version
     ImGui_PushStyleColor(m_ctx, ImGuiCol::WindowBg, Theme::WindowBg);
     m_themeColorCount++;
     ImGui_PushStyleColor(m_ctx, ImGuiCol::ChildBg, Theme::ChildBg);
     m_themeColorCount++;
     ImGui_PushStyleColor(m_ctx, ImGuiCol::PopupBg, Theme::PopupBg);
     m_themeColorCount++;
-
-    // Title bar
     ImGui_PushStyleColor(m_ctx, ImGuiCol::TitleBg, Theme::TitleBg);
     m_themeColorCount++;
     ImGui_PushStyleColor(m_ctx, ImGuiCol::TitleBgActive, Theme::TitleBgActive);
     m_themeColorCount++;
     ImGui_PushStyleColor(m_ctx, ImGuiCol::TitleBgCollapsed, Theme::TitleBg);
     m_themeColorCount++;
-
-    // Frame
     ImGui_PushStyleColor(m_ctx, ImGuiCol::FrameBg, Theme::FrameBg);
     m_themeColorCount++;
     ImGui_PushStyleColor(m_ctx, ImGuiCol::FrameBgHovered, Theme::FrameBgHovered);
     m_themeColorCount++;
     ImGui_PushStyleColor(m_ctx, ImGuiCol::FrameBgActive, Theme::FrameBgActive);
     m_themeColorCount++;
-
-    // Text
     ImGui_PushStyleColor(m_ctx, ImGuiCol::Text, Theme::Text);
     m_themeColorCount++;
     ImGui_PushStyleColor(m_ctx, ImGuiCol::TextDisabled, Theme::TextDisabled);
     m_themeColorCount++;
-
-    // Button
     ImGui_PushStyleColor(m_ctx, ImGuiCol::Button, Theme::Button);
     m_themeColorCount++;
     ImGui_PushStyleColor(m_ctx, ImGuiCol::ButtonHovered, Theme::ButtonHovered);
     m_themeColorCount++;
     ImGui_PushStyleColor(m_ctx, ImGuiCol::ButtonActive, Theme::ButtonActive);
     m_themeColorCount++;
-
-    // Header
     ImGui_PushStyleColor(m_ctx, ImGuiCol::Header, Theme::Header);
     m_themeColorCount++;
     ImGui_PushStyleColor(m_ctx, ImGuiCol::HeaderHovered, Theme::HeaderHovered);
     m_themeColorCount++;
     ImGui_PushStyleColor(m_ctx, ImGuiCol::HeaderActive, Theme::HeaderActive);
     m_themeColorCount++;
-
-    // Border
     ImGui_PushStyleColor(m_ctx, ImGuiCol::Border, Theme::Border);
     m_themeColorCount++;
-
-    // Separator
     ImGui_PushStyleColor(m_ctx, ImGuiCol::Separator, Theme::Border);
     m_themeColorCount++;
-
-    // Check mark and slider
     ImGui_PushStyleColor(m_ctx, ImGuiCol::CheckMark, Theme::Accent);
     m_themeColorCount++;
     ImGui_PushStyleColor(m_ctx, ImGuiCol::SliderGrab, Theme::Accent);
@@ -187,27 +198,7 @@ void SideFXWindow::PopTheme() {
     m_themeColorCount = 0;
 }
 
-void SideFXWindow::RenderHeader() {
-    if (ImGui_TextColored) {
-        ImGui_TextColored(m_ctx, Theme::Accent, "SideFX");
-    } else if (ImGui_Text) {
-        ImGui_Text(m_ctx, "SideFX");
-    }
-
-    if (ImGui_SameLine) {
-        ImGui_SameLine(m_ctx, nullptr, nullptr);
-    }
-
-    if (ImGui_TextColored) {
-        ImGui_TextColored(m_ctx, Theme::TextDim, "v0.1.0");
-    }
-
-    if (ImGui_Separator) {
-        ImGui_Separator(m_ctx);
-    }
-}
-
-void SideFXWindow::RenderTrackInfo() {
+void SideFXWindow::RenderToolbar() {
     if (!m_GetSelectedTrack) {
         if (ImGui_Text) {
             ImGui_Text(m_ctx, "REAPER API not available");
@@ -217,134 +208,206 @@ void SideFXWindow::RenderTrackInfo() {
 
     MediaTrack* track = m_GetSelectedTrack(nullptr, 0);
     
-    if (!track) {
-        if (ImGui_TextColored) {
-            ImGui_TextColored(m_ctx, Theme::TextDim, "No track selected");
-        } else if (ImGui_Text) {
-            ImGui_Text(m_ctx, "No track selected");
-        }
-        return;
-    }
-
-    // Get track name
-    char trackName[256] = "Untitled";
-    if (m_GetTrackName) {
+    // Track name
+    char trackName[256] = "No track selected";
+    if (track && m_GetTrackName) {
         m_GetTrackName(track, trackName, sizeof(trackName));
     }
-
-    // Get track number
-    int trackNum = 0;
-    if (m_GetMediaTrackInfo_Value) {
-        trackNum = (int)(size_t)m_GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER");
-    }
-
-    // Display track info
-    char trackInfo[512];
-    snprintf(trackInfo, sizeof(trackInfo), "Track %d: %s", trackNum, trackName);
     
+    // SideFX label
     if (ImGui_TextColored) {
-        ImGui_TextColored(m_ctx, Theme::Text, trackInfo);
-    } else if (ImGui_Text) {
-        ImGui_Text(m_ctx, trackInfo);
+        ImGui_TextColored(m_ctx, Theme::Accent, "SideFX");
     }
-
-    // Get FX count
-    int fxCount = 0;
-    if (m_TrackFX_GetCount) {
-        fxCount = m_TrackFX_GetCount(track);
-    }
-
-    char fxInfo[128];
-    snprintf(fxInfo, sizeof(fxInfo), "%d FX", fxCount);
     
     if (ImGui_SameLine) {
         ImGui_SameLine(m_ctx, nullptr, nullptr);
     }
-    if (ImGui_TextColored) {
-        ImGui_TextColored(m_ctx, Theme::TextDim, fxInfo);
+    
+    if (ImGui_Text) {
+        ImGui_Text(m_ctx, "|");
     }
+    
+    if (ImGui_SameLine) {
+        ImGui_SameLine(m_ctx, nullptr, nullptr);
+    }
+    
+    // Track name
+    if (track) {
+        if (ImGui_Text) {
+            ImGui_Text(m_ctx, trackName);
+        }
+    } else {
+        if (ImGui_TextColored) {
+            ImGui_TextColored(m_ctx, Theme::TextDim, trackName);
+        }
+    }
+    
+    if (ImGui_Separator) {
+        ImGui_Separator(m_ctx);
+    }
+}
 
-    if (ImGui_Spacing) {
-        ImGui_Spacing(m_ctx);
+void SideFXWindow::RenderFXItem(MediaTrack* track, int fxIndex) {
+    if (!track || !m_TrackFX_GetFXName || !m_TrackFX_GetEnabled) return;
+    
+    char fxName[256] = "Unknown FX";
+    m_TrackFX_GetFXName(track, fxIndex, fxName, sizeof(fxName));
+    
+    bool enabled = m_TrackFX_GetEnabled(track, fxIndex);
+    
+    // Check if it's a container
+    bool isContainer = false;
+    if (TrackFX_GetNamedConfigParm) {
+        char buf[64] = {0};
+        if (TrackFX_GetNamedConfigParm(track, fxIndex, "container_count", buf, sizeof(buf))) {
+            isContainer = atoi(buf) > 0;
+        }
+    }
+    
+    // Push unique ID
+    if (ImGui_PushID) {
+        char idStr[32];
+        snprintf(idStr, sizeof(idStr), "fx_%d", fxIndex);
+        ImGui_PushID(m_ctx, idStr);
+    }
+    
+    // Icon (text-based for now)
+    const char* icon = isContainer ? "[+]" : "  *";
+    if (ImGui_TextColored) {
+        ImGui_TextColored(m_ctx, isContainer ? Theme::SecondaryAccent : Theme::TextDim, icon);
+    }
+    
+    if (ImGui_SameLine) {
+        ImGui_SameLine(m_ctx, nullptr, nullptr);
+    }
+    
+    // FX Name (truncated if needed)
+    char displayName[64];
+    int maxLen = 25;
+    if ((int)strlen(fxName) > maxLen) {
+        snprintf(displayName, sizeof(displayName), "%.*s..", maxLen - 2, fxName);
+    } else {
+        snprintf(displayName, sizeof(displayName), "%s", fxName);
+    }
+    
+    // Selectable name
+    int textColor = enabled ? Theme::Text : Theme::TextDisabled;
+    if (ImGui_TextColored) {
+        ImGui_TextColored(m_ctx, textColor, displayName);
+    }
+    
+    // Double-click to open FX window
+    if (ImGui_IsItemHovered && ImGui_IsMouseDoubleClicked && TrackFX_Show) {
+        if (ImGui_IsItemHovered(m_ctx, nullptr) && ImGui_IsMouseDoubleClicked(m_ctx, 0)) {
+            TrackFX_Show(track, fxIndex, 3);  // 3 = toggle floating window
+        }
+    }
+    
+    // Wet/Dry slider
+    int wetIdx = -1;
+    if (TrackFX_GetParamFromIdent) {
+        wetIdx = TrackFX_GetParamFromIdent(track, fxIndex, ":wet");
+    }
+    
+    if (wetIdx >= 0 && TrackFX_GetParamNormalized && TrackFX_SetParamNormalized && ImGui_SliderDouble) {
+        if (ImGui_SameLine) {
+            ImGui_SameLine(m_ctx, nullptr, nullptr);
+        }
+        
+        double wetVal = TrackFX_GetParamNormalized(track, fxIndex, wetIdx);
+        
+        if (ImGui_PushItemWidth) {
+            ImGui_PushItemWidth(m_ctx, 50);
+        }
+        
+        char sliderLabel[32];
+        snprintf(sliderLabel, sizeof(sliderLabel), "##wet%d", fxIndex);
+        
+        double newWet = wetVal;
+        if (ImGui_SliderDouble(m_ctx, sliderLabel, &newWet, 0.0, 1.0, "%.0f%%", nullptr)) {
+            TrackFX_SetParamNormalized(track, fxIndex, wetIdx, newWet);
+        }
+        
+        if (ImGui_PopItemWidth) {
+            ImGui_PopItemWidth(m_ctx);
+        }
+    }
+    
+    // ON/OFF button
+    if (ImGui_SameLine) {
+        ImGui_SameLine(m_ctx, nullptr, nullptr);
+    }
+    
+    // Color the button based on state
+    if (ImGui_PushStyleColor) {
+        if (enabled) {
+            ImGui_PushStyleColor(m_ctx, ImGuiCol::Button, Theme::FxEnabled);
+        } else {
+            ImGui_PushStyleColor(m_ctx, ImGuiCol::Button, Theme::FxBypassed);
+        }
+    }
+    
+    char btnLabel[32];
+    snprintf(btnLabel, sizeof(btnLabel), "%s##btn%d", enabled ? "ON" : "OFF", fxIndex);
+    
+    if (ImGui_SmallButton && TrackFX_SetEnabled) {
+        if (ImGui_SmallButton(m_ctx, btnLabel)) {
+            TrackFX_SetEnabled(track, fxIndex, !enabled);
+        }
+    }
+    
+    if (ImGui_PopStyleColor) {
+        int one = 1;
+        ImGui_PopStyleColor(m_ctx, &one);
+    }
+    
+    if (ImGui_PopID) {
+        ImGui_PopID(m_ctx);
     }
 }
 
 void SideFXWindow::RenderFXChain() {
-    if (!m_GetSelectedTrack || !m_TrackFX_GetCount || !m_TrackFX_GetFXName) {
+    if (!m_GetSelectedTrack || !m_TrackFX_GetCount) {
         return;
     }
 
     MediaTrack* track = m_GetSelectedTrack(nullptr, 0);
     if (!track) {
+        if (ImGui_TextColored) {
+            ImGui_TextColored(m_ctx, Theme::TextDim, "Select a track to view FX chain");
+        }
         return;
     }
 
     int fxCount = m_TrackFX_GetCount(track);
-    if (fxCount == 0) {
-        if (ImGui_TextColored) {
-            ImGui_TextColored(m_ctx, Theme::TextDim, "No FX on this track");
-        }
-        return;
-    }
-
-    // Draw FX list header
-    if (ImGui_TextColored) {
-        ImGui_TextColored(m_ctx, Theme::SecondaryAccent, "FX Chain");
+    
+    // Column header
+    if (ImGui_Text) {
+        ImGui_Text(m_ctx, "FX Chain");
     }
     if (ImGui_Separator) {
         ImGui_Separator(m_ctx);
     }
+    
+    if (fxCount == 0) {
+        if (ImGui_TextColored) {
+            ImGui_TextColored(m_ctx, Theme::TextDim, "No FX on this track");
+        }
+        if (ImGui_TextColored) {
+            ImGui_TextColored(m_ctx, Theme::TextDim, "Drag plugins here to add");
+        }
+        return;
+    }
 
     // Draw each FX
     for (int i = 0; i < fxCount; i++) {
-        char fxName[256] = "Unknown FX";
-        m_TrackFX_GetFXName(track, i, fxName, sizeof(fxName));
-
-        // Check if enabled
-        bool enabled = true;
-        if (m_TrackFX_GetEnabled) {
-            enabled = m_TrackFX_GetEnabled(track, i);
-        }
-
-        // Push unique ID for this FX
-        if (ImGui_PushID) {
-            char idStr[32];
-            snprintf(idStr, sizeof(idStr), "fx_%d", i);
-            ImGui_PushID(m_ctx, idStr);
-        }
-
-        // Draw FX slot
-        int textColor = enabled ? Theme::FxEnabled : Theme::FxBypassed;
-        if (ImGui_TextColored) {
-            char fxLabel[300];
-            snprintf(fxLabel, sizeof(fxLabel), "%s %s", enabled ? "●" : "○", fxName);
-            ImGui_TextColored(m_ctx, textColor, fxLabel);
-        }
-
-        // Tooltip on hover
-        if (ImGui_IsItemHovered && ImGui_BeginTooltip && ImGui_EndTooltip) {
-            if (ImGui_IsItemHovered(m_ctx, nullptr)) {
-                if (ImGui_BeginTooltip(m_ctx)) {
-                    if (ImGui_Text) {
-                        ImGui_Text(m_ctx, fxName);
-                    }
-                    ImGui_EndTooltip(m_ctx);
-                }
-            }
-        }
-
-        if (ImGui_PopID) {
-            ImGui_PopID(m_ctx);
-        }
+        RenderFXItem(track, i);
     }
 }
 
 void SideFXWindow::RenderModulatorPanel() {
     if (ImGui_Spacing) {
         ImGui_Spacing(m_ctx);
-    }
-    if (ImGui_Separator) {
-        ImGui_Separator(m_ctx);
     }
 
     // Get modulator count
@@ -354,18 +417,16 @@ void SideFXWindow::RenderModulatorPanel() {
     char headerText[64];
     snprintf(headerText, sizeof(headerText), "Modulators (%zu)", modulators.size());
     
-    if (ImGui_TextColored) {
-        ImGui_TextColored(m_ctx, Theme::SecondaryAccent, headerText);
+    if (ImGui_Text) {
+        ImGui_Text(m_ctx, headerText);
+    }
+    if (ImGui_Separator) {
+        ImGui_Separator(m_ctx);
     }
 
-    if (ImGui_Spacing) {
-        ImGui_Spacing(m_ctx);
-    }
-
-    // List modulators
     if (modulators.empty()) {
         if (ImGui_TextColored) {
-            ImGui_TextColored(m_ctx, Theme::TextDim, "No modulators");
+            ImGui_TextColored(m_ctx, Theme::TextDim, "No active modulators");
         }
     } else {
         for (Modulator* mod : modulators) {
@@ -386,7 +447,7 @@ void SideFXWindow::RenderModulatorPanel() {
 
             char modLabel[256];
             snprintf(modLabel, sizeof(modLabel), "%s %s (%.0f%%)",
-                     playing ? "▶" : (enabled ? "●" : "○"),
+                     playing ? ">" : (enabled ? "*" : "o"),
                      mod->name.empty() ? "Unnamed" : mod->name.c_str(),
                      phase * 100.0);
 
@@ -409,7 +470,6 @@ void SideFXWindow::RenderStatusBar() {
         ImGui_Separator(m_ctx);
     }
 
-    // Check audio hook status
     extern bool isAudioHookActive();
     bool hookActive = isAudioHookActive();
 
@@ -449,7 +509,7 @@ void SideFXWindow::Render() {
     // Set initial window size
     int cond = ImGuiCond::FirstUseEver;
     if (ImGui_SetNextWindowSize) {
-        ImGui_SetNextWindowSize(m_ctx, 350, 500, &cond);
+        ImGui_SetNextWindowSize(m_ctx, 900, 500, &cond);
     }
 
     // Begin window
@@ -480,11 +540,42 @@ void SideFXWindow::Render() {
         return;
     }
 
-    // Render content
-    RenderHeader();
-    RenderTrackInfo();
-    RenderFXChain();
-    RenderModulatorPanel();
+    // Toolbar
+    RenderToolbar();
+    
+    // FX Chain Column (in a child window with border)
+    if (ImGui_BeginChild) {
+        double childW = COLUMN_WIDTH;
+        double childH = 0;  // Auto height
+        int childFlags = 1;  // Border flag
+        
+        if (ImGui_BeginChild(m_ctx, "FXChainCol", &childW, &childH, &childFlags, nullptr)) {
+            RenderFXChain();
+        }
+        if (ImGui_EndChild) {
+            ImGui_EndChild(m_ctx);
+        }
+    }
+    
+    // Modulator panel (to the right)
+    if (ImGui_SameLine) {
+        ImGui_SameLine(m_ctx, nullptr, nullptr);
+    }
+    
+    if (ImGui_BeginChild) {
+        double childW = COLUMN_WIDTH;
+        double childH = 0;
+        int childFlags = 1;  // Border
+        
+        if (ImGui_BeginChild(m_ctx, "ModulatorCol", &childW, &childH, &childFlags, nullptr)) {
+            RenderModulatorPanel();
+        }
+        if (ImGui_EndChild) {
+            ImGui_EndChild(m_ctx);
+        }
+    }
+    
+    // Status bar at bottom
     RenderStatusBar();
 
     ImGui_End(m_ctx);
@@ -492,4 +583,3 @@ void SideFXWindow::Render() {
 }
 
 } // namespace sidefx
-
