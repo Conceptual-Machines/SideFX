@@ -2,16 +2,13 @@ desc:SideFX Modulator
 author:Nomad Monad
 version:2.0
 
-// Main controls
-slider1:1<0.01,20,0.01>Rate (Hz)
-slider2:0<0,1,0.001>Phase Offset
-slider3:1<0,1,0.01>Depth
-slider4:0<0,1,0.001>---Output (readonly)
-
-// Tempo sync
-slider10:0<0,1,1{Free,Sync}>Tempo Mode
-slider11:5<0,9,1{8 bars,4 bars,2 bars,1 bar,1/2,1/4,1/8,1/16,1/32,1/64}>Sync Rate
-slider12:0<0,2,1{Normal,Triplet,Dotted}>Modifier
+// Rate
+slider1:0<0,1,1{Free,Sync}>Tempo Mode
+slider2:1<0.01,20,0.01>Rate (Hz)
+slider3:5<0,17,1{8 bars,4 bars,2 bars,1 bar,1/2,1/4,1/4T,1/4.,1/8,1/8T,1/8.,1/16,1/16T,1/16.,1/32,1/32T,1/32.,1/64}>Sync Rate
+slider4:0<0,1,0.001>-Output
+slider5:0<0,1,0.001>Phase
+slider6:1<0,1,0.01>Depth
 
 // Trigger
 slider20:0<0,3,1{Free,Transport,MIDI,Audio}>Trigger Mode
@@ -340,25 +337,27 @@ trigger_mode == 3 ? (
 );
 
 // Rate
-slider10 == 1 ? (
+slider1 == 1 ? (
   current_tempo = tempo;
   current_tempo <= 0 ? current_tempo = 120;
-  beats = 32;
-  slider11 == 1 ? beats = 16 : slider11 == 2 ? beats = 8 : slider11 == 3 ? beats = 4 :
-  slider11 == 4 ? beats = 2 : slider11 == 5 ? beats = 1 : slider11 == 6 ? beats = 0.5 :
-  slider11 == 7 ? beats = 0.25 : slider11 == 8 ? beats = 0.125 : slider11 == 9 ? beats = 0.0625;
-  slider12 == 1 ? beats *= 2/3 : slider12 == 2 ? beats *= 1.5;
+  // 0=8bars,1=4bars,2=2bars,3=1bar,4=1/2,5=1/4,6=1/4T,7=1/4.,8=1/8,9=1/8T,10=1/8.,11=1/16,12=1/16T,13=1/16.,14=1/32,15=1/32T,16=1/32.,17=1/64
+  sr = slider3;
+  sr == 0 ? beats = 32 : sr == 1 ? beats = 16 : sr == 2 ? beats = 8 : sr == 3 ? beats = 4 :
+  sr == 4 ? beats = 2 : sr == 5 ? beats = 1 : sr == 6 ? beats = 1*2/3 : sr == 7 ? beats = 1.5 :
+  sr == 8 ? beats = 0.5 : sr == 9 ? beats = 0.5*2/3 : sr == 10 ? beats = 0.75 :
+  sr == 11 ? beats = 0.25 : sr == 12 ? beats = 0.25*2/3 : sr == 13 ? beats = 0.375 :
+  sr == 14 ? beats = 0.125 : sr == 15 ? beats = 0.125*2/3 : sr == 16 ? beats = 0.1875 : beats = 0.0625;
   rate = current_tempo / 60 / beats;
-) : ( rate = slider1; );
+) : ( rate = slider2; );
 
 lfo_phase += rate / srate;
 lfo_phase >= 1 ? lfo_phase -= 1;
 
-phase = lfo_phase + slider2;
+phase = lfo_phase + slider5;
 phase >= 1 ? phase -= 1;
 
 raw_lfo = eval_spline(phase);
-final_output = raw_lfo * slider3 * env_value;
+final_output = raw_lfo * slider6 * env_value;
 slider4 = final_output;
 
 @gfx 500 400
@@ -471,13 +470,17 @@ gfx_x = curve_x; gfx_y = 12;
 gfx_drawstr("SideFX Modulator");
 
 gfx_x = curve_x; gfx_y = curve_y + curve_h + 12;
-slider10 == 1 ? (
-  slider11 == 0 ? strcpy(#sn, "8 bars") : slider11 == 1 ? strcpy(#sn, "4 bars") :
-  slider11 == 2 ? strcpy(#sn, "2 bars") : slider11 == 3 ? strcpy(#sn, "1 bar") :
-  slider11 == 4 ? strcpy(#sn, "1/2") : slider11 == 5 ? strcpy(#sn, "1/4") :
-  slider11 == 6 ? strcpy(#sn, "1/8") : slider11 == 7 ? strcpy(#sn, "1/16") :
-  slider11 == 8 ? strcpy(#sn, "1/32") : strcpy(#sn, "1/64");
-  slider12 == 1 ? strcat(#sn, "T") : slider12 == 2 ? strcat(#sn, ".");
+slider1 == 1 ? (
+  sr = slider3;
+  sr == 0 ? strcpy(#sn, "8 bars") : sr == 1 ? strcpy(#sn, "4 bars") :
+  sr == 2 ? strcpy(#sn, "2 bars") : sr == 3 ? strcpy(#sn, "1 bar") :
+  sr == 4 ? strcpy(#sn, "1/2") : sr == 5 ? strcpy(#sn, "1/4") :
+  sr == 6 ? strcpy(#sn, "1/4T") : sr == 7 ? strcpy(#sn, "1/4.") :
+  sr == 8 ? strcpy(#sn, "1/8") : sr == 9 ? strcpy(#sn, "1/8T") :
+  sr == 10 ? strcpy(#sn, "1/8.") : sr == 11 ? strcpy(#sn, "1/16") :
+  sr == 12 ? strcpy(#sn, "1/16T") : sr == 13 ? strcpy(#sn, "1/16.") :
+  sr == 14 ? strcpy(#sn, "1/32") : sr == 15 ? strcpy(#sn, "1/32T") :
+  sr == 16 ? strcpy(#sn, "1/32.") : strcpy(#sn, "1/64");
   gfx_drawstr(sprintf(#, "SYNC: %s @ %.0f BPM | Out: %.3f", #sn, current_tempo, final_output));
 ) : (
   gfx_drawstr(sprintf(#, "FREE: %.2f Hz | Out: %.3f", rate, final_output));
