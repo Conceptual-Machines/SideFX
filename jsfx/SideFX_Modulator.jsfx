@@ -12,10 +12,15 @@ slider6:1<0,1,0.01>Depth
 
 // Trigger
 slider20:0<0,3,1{Free,Transport,MIDI,Audio}>Trigger Mode
-slider21:0<0,127,1>MIDI Note (0=any)
-slider22:0.5<0,1,0.01>Audio Threshold
-slider23:100<1,2000,1>Attack (ms)
-slider24:500<1,5000,1>Release (ms)
+slider21:0<0,1,1{This Track,MIDI Bus}>MIDI Source
+slider22:0<0,127,1>MIDI Note (0=any)
+slider23:0.5<0,1,0.01>Audio Threshold
+slider24:100<1,2000,1>Attack (ms)
+slider25:500<1,5000,1>Release (ms)
+
+// Editor
+slider26:2<0,4,1{Off,4,8,16,32}>Grid
+slider27:1<0,1,1{Off,On}>Snap
 
 // Number of points (2-16)
 slider30:4<2,16,1>-Num Points
@@ -288,13 +293,13 @@ function calc_coeff(time_ms) (
 update_spline();
 
 @slider
-attack_coeff = calc_coeff(slider23);
-release_coeff = calc_coeff(slider24);
+attack_coeff = calc_coeff(slider24);
+release_coeff = calc_coeff(slider25);
 update_spline();
 
 @block
 trigger_mode = slider20;
-midi_note = slider21;
+midi_note = slider22;
 
 trigger_mode == 1 ? (
   play_state & 1 ? (
@@ -327,7 +332,7 @@ trigger_mode == 1 ? ( triggered ? env_value = 1 : env_value = env_value * releas
 trigger_mode == 2 ? ( triggered ? env_value = 1; );
 trigger_mode == 3 ? (
   input_level = max(abs(spl0), abs(spl1));
-  input_level > slider22 ? (
+  input_level > slider23 ? (
     triggered = 1;
     env_value = env_value * attack_coeff + (1 - attack_coeff);
   ) : (
