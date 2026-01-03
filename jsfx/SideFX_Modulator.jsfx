@@ -86,6 +86,8 @@ drag_node = -1;
 hover_node = -1;
 cap_mode = 0;
 last_mouse_cap = 0;
+drag_start_x = 0;
+drag_start_y = 0;
 
 // Get X value from slider
 function get_x(i) (
@@ -377,11 +379,20 @@ curve_h = gfx_h - margin * 2 - 50;
 gfx_set(0.12, 0.12, 0.14, 1);
 gfx_rect(curve_x, curve_y, curve_w, curve_h);
 
+// Grid based on slider26: 0=Off, 1=4, 2=8, 3=16, 4=32
+grid_div = slider26 == 0 ? 0 : slider26 == 1 ? 4 : slider26 == 2 ? 8 : slider26 == 3 ? 16 : 32;
 gfx_set(0.22, 0.22, 0.25, 1);
+grid_div > 0 ? (
+  i = 0;
+  loop(grid_div + 1,
+    gx = curve_x + i * curve_w / grid_div;
+    gfx_line(gx, curve_y, gx, curve_y + curve_h);
+    i += 1;
+  );
+);
+// Y grid always 4
 i = 0;
 loop(5,
-  gx = curve_x + i * curve_w / 4;
-  gfx_line(gx, curve_y, gx, curve_y + curve_h);
   gy = curve_y + i * curve_h / 4;
   gfx_line(curve_x, gy, curve_x + curve_w, gy);
   i += 1;
@@ -427,20 +438,45 @@ left_click = mouse_cap & 1;
 right_click = mouse_cap & 2;
 last_left = last_mouse_cap & 1;
 last_right = last_mouse_cap & 2;
+// Modifiers: Shift=4, Ctrl=8, Alt=16
+shift_held = mouse_cap & 4;
+ctrl_held = mouse_cap & 8;
+alt_held = mouse_cap & 16;
 
 left_click ? (
   cap_mode == 0 && !last_left ? (
     drag_node = find_nearest(norm_mx, norm_my, node_threshold);
-    drag_node >= 0 ? cap_mode = 1 : mouse_in_area ? (
+    drag_node >= 0 ? (
+      cap_mode = 1;
+      drag_start_x = get_x(drag_node);
+      drag_start_y = get_y(drag_node);
+    ) : mouse_in_area ? (
       add_node(norm_mx, norm_my);
       drag_node = find_nearest(norm_mx, norm_my, node_threshold);
-      drag_node >= 0 ? cap_mode = 1;
+      drag_node >= 0 ? (
+        cap_mode = 1;
+        drag_start_x = norm_mx;
+        drag_start_y = norm_my;
+      );
     );
   ) : cap_mode == 1 && drag_node >= 0 ? (
     new_x = max(0.001, min(0.999, norm_mx));
     new_y = max(0, min(1, norm_my));
-    drag_node == 0 ? new_x = 0;
-    drag_node == slider30 - 1 ? new_x = 1;
+    
+    // Shift = Y-only, Ctrl = X-only
+    shift_held ? new_x = drag_start_x;
+    ctrl_held ? new_y = drag_start_y;
+    
+    // Snap to grid (slider27=On, unless Alt held)
+    slider27 == 1 && !alt_held && grid_div > 0 ? (
+      new_x = floor(new_x * grid_div + 0.5) / grid_div;
+      new_y = floor(new_y * 4 + 0.5) / 4;
+    );
+    
+    // Lock endpoints
+    drag_start_x < 0.01 ? new_x = 0;
+    drag_start_x > 0.99 ? new_x = 1;
+    
     set_x(drag_node, new_x);
     set_y(drag_node, new_y);
     update_spline();
@@ -502,4 +538,4 @@ gfx_drawstr(sprintf(#, "%s | Pts: %d", #tm, slider30));
 
 gfx_x = curve_x; gfx_y += 18;
 gfx_set(0.45, 0.45, 0.45, 1);
-gfx_drawstr("Left-click: add/drag | Right-click: delete");
+gfx_drawstr("LMB: add/drag | RMB: delete | Shift: Y-only | Ctrl: X-only | Alt: no snap");
