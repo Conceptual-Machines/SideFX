@@ -1,0 +1,339 @@
+desc:SideFX Modulator
+author:Nomad Monad
+version:1.0
+
+slider1:0<0,4,1{Sine,Triangle,Saw Up,Saw Down,Square}>Shape
+slider2:1<0.01,20,0.01>Rate (Hz)
+slider3:0<0,1,0.001>Phase
+slider4:1<0,1,0.01>Depth
+slider5:0<0,1,0.001>---Output (readonly)
+slider6:0<0,127,1>MIDI Note Trigger (0=off)
+slider7:0<0,1,1{Off,On}>Audio Trigger
+slider8:0.5<0,1,0.01>Trigger Threshold
+slider9:100<1,2000,1>Attack (ms)
+slider10:500<1,5000,1>Release (ms)
+
+// Curve editor points (4 points)
+slider20:0.0<0,1,0.001>P1 X
+slider21:0.0<0,1,0.001>P1 Y
+slider22:0.33<0,1,0.001>P2 X
+slider23:0.5<0,1,0.001>P2 Y
+slider24:0.66<0,1,0.001>P3 X
+slider25:0.5<0,1,0.001>P3 Y
+slider26:1.0<0,1,0.001>P4 X
+slider27:1.0<0,1,0.001>P4 Y
+
+@init
+// LFO state
+lfo_phase = 0;
+env_value = 0;
+triggered = 0;
+
+// Point arrays - explicitly allocate separate memory regions
+num_points = 4;
+point_x = 0;    // Addresses 0-15 for X values
+point_y = 16;   // Addresses 16-31 for Y values
+
+// Initialize default curve
+point_x[0] = 0.0;  point_y[0] = 0.0;
+point_x[1] = 0.33; point_y[1] = 0.5;
+point_x[2] = 0.66; point_y[2] = 0.5;
+point_x[3] = 1.0;  point_y[3] = 1.0;
+
+// Drag state
+dragging = -1;
+drag_start_x = 0;
+drag_start_y = 0;
+
+// Attack/Release coefficients
+function calc_coeff(time_ms) (
+  time_ms > 0 ? exp(-1.0 / (srate * time_ms / 1000)) : 0;
+);
+
+@slider
+// Sync points from sliders
+point_x[0] = slider20; point_y[0] = slider21;
+point_x[1] = slider22; point_y[1] = slider23;
+point_x[2] = slider24; point_y[2] = slider25;
+point_x[3] = slider26; point_y[3] = slider27;
+
+attack_coeff = calc_coeff(slider9);
+release_coeff = calc_coeff(slider10);
+
+@block
+// MIDI trigger detection
+while (midirecv(offset, msg1, msg2, msg3)) (
+  status = msg1 & 0xF0;
+  note = msg2;
+  velocity = msg3;
+  
+  // Note On
+  status == 0x90 && velocity > 0 && slider6 > 0 ? (
+    note == slider6 ? (
+      triggered = 1;
+      lfo_phase = 0;
+    );
+  );
+  
+  // Note Off
+  status == 0x80 || (status == 0x90 && velocity == 0) ? (
+    note == slider6 ? (
+      triggered = 0;
+    );
+  );
+  
+  midisend(offset, msg1, msg2, msg3);
+);
+
+@sample
+// Audio trigger
+slider7 ? (
+  input_level = max(abs(spl0), abs(spl1));
+  input_level > slider8 ? (
+    triggered = 1;
+  ) : (
+    triggered = 0;
+  );
+);
+
+// Envelope follower
+triggered ? (
+  env_value = env_value * attack_coeff + (1 - attack_coeff);
+) : (
+  env_value = env_value * release_coeff;
+);
+
+// LFO calculation
+shape = slider1;
+rate = slider2;
+base_phase = slider3;
+depth = slider4;
+
+// Advance phase
+lfo_phase += rate / srate;
+lfo_phase >= 1 ? lfo_phase -= 1;
+
+// Calculate raw LFO based on shape
+phase = lfo_phase + base_phase;
+phase >= 1 ? phase -= 1;
+
+shape == 0 ? ( // Sine
+  raw_lfo = (sin(phase * 2 * $pi) + 1) * 0.5;
+) : shape == 1 ? ( // Triangle
+  raw_lfo = phase < 0.5 ? phase * 2 : 2 - phase * 2;
+) : shape == 2 ? ( // Saw Up
+  raw_lfo = phase;
+) : shape == 3 ? ( // Saw Down
+  raw_lfo = 1 - phase;
+) : ( // Square
+  raw_lfo = phase < 0.5 ? 1 : 0;
+);
+
+// Apply curve shaping
+function eval_curve(x) local(i, t, x0, y0, x1, y1) (
+  x = max(0, min(1, x));
+  
+  // Find segment
+  i = 0;
+  while (i < num_points - 1 && point_x[i + 1] < x) (
+    i += 1;
+  );
+  
+  i >= num_points - 1 ? (
+    point_y[num_points - 1];
+  ) : (
+    x0 = point_x[i];
+    y0 = point_y[i];
+    x1 = point_x[i + 1];
+    y1 = point_y[i + 1];
+    
+    x1 - x0 < 0.0001 ? (
+      y0;
+    ) : (
+      t = (x - x0) / (x1 - x0);
+      y0 + t * (y1 - y0);
+    );
+  );
+);
+
+shaped_lfo = eval_curve(raw_lfo);
+
+// Apply depth and envelope
+final_output = shaped_lfo * depth * env_value;
+
+// Output to slider for parameter modulation
+slider5 = final_output;
+
+@gfx 400 350
+gfx_clear = 0x1a1a1a;
+
+// Colors
+bg_color = 0x2a2a2a;
+grid_color = 0x404040;
+curve_color = 0x00ff88;
+point_color = 0xff8800;
+point_hover = 0xffaa44;
+text_color = 0xcccccc;
+
+// Layout
+margin = 40;
+curve_x = margin;
+curve_y = margin;
+curve_w = gfx_w - margin * 2;
+curve_h = gfx_h - margin * 2 - 60;
+
+// Background
+gfx_set(0.16, 0.16, 0.16, 1);
+gfx_rect(curve_x, curve_y, curve_w, curve_h);
+
+// Grid
+gfx_set(0.25, 0.25, 0.25, 1);
+i = 0;
+loop(5,
+  x = curve_x + i * curve_w / 4;
+  gfx_line(x, curve_y, x, curve_y + curve_h);
+  y = curve_y + i * curve_h / 4;
+  gfx_line(curve_x, y, curve_x + curve_w, y);
+  i += 1;
+);
+
+// Draw curve
+gfx_set(0, 1, 0.53, 1);
+prev_x = curve_x;
+prev_y = curve_y + curve_h - eval_curve(0) * curve_h;
+i = 1;
+loop(100,
+  t = i / 100;
+  val = eval_curve(t);
+  x = curve_x + t * curve_w;
+  y = curve_y + curve_h - val * curve_h;
+  gfx_line(prev_x, prev_y, x, y);
+  prev_x = x;
+  prev_y = y;
+  i += 1;
+);
+
+// LFO position indicator
+gfx_set(1, 0.5, 0, 0.5);
+lfo_x = curve_x + raw_lfo * curve_w;
+gfx_line(lfo_x, curve_y, lfo_x, curve_y + curve_h);
+
+// Output indicator
+gfx_set(0, 1, 0.53, 0.8);
+out_y = curve_y + curve_h - final_output * curve_h;
+gfx_circle(lfo_x, out_y, 4, 1);
+
+// Mouse handling
+mouse_in_area = mouse_x >= curve_x && mouse_x <= curve_x + curve_w &&
+                mouse_y >= curve_y && mouse_y <= curve_y + curve_h;
+
+// Check for point hover/drag
+hover_point = -1;
+point_radius = 8;
+
+i = 0;
+loop(num_points,
+  px = curve_x + point_x[i] * curve_w;
+  py = curve_y + curve_h - point_y[i] * curve_h;
+  
+  dist = sqrt((mouse_x - px)^2 + (mouse_y - py)^2);
+  dist < point_radius + 4 ? hover_point = i;
+  
+  i += 1;
+);
+
+// Mouse button handling
+mouse_cap & 1 ? (
+  // Left button down
+  dragging < 0 && hover_point >= 0 ? (
+    // Start dragging
+    dragging = hover_point;
+    drag_start_x = mouse_x;
+    drag_start_y = mouse_y;
+  );
+  
+  // Update dragged point position
+  dragging >= 0 ? (
+    // Convert mouse position to normalized coordinates
+    new_x = (mouse_x - curve_x) / curve_w;
+    new_y = 1.0 - (mouse_y - curve_y) / curve_h;
+    
+    // Clamp to valid range
+    new_x = max(0, min(1, new_x));
+    new_y = max(0, min(1, new_y));
+    
+    // First and last points: lock X position
+    dragging == 0 ? new_x = 0;
+    dragging == num_points - 1 ? new_x = 1;
+    
+    // Middle points: constrain X between neighbors
+    dragging > 0 && dragging < num_points - 1 ? (
+      new_x = max(point_x[dragging - 1] + 0.01, min(point_x[dragging + 1] - 0.01, new_x));
+    );
+    
+    // Update point position
+    point_x[dragging] = new_x;
+    point_y[dragging] = new_y;
+    
+    // Sync to sliders
+    slider20 = point_x[0]; slider21 = point_y[0];
+    slider22 = point_x[1]; slider23 = point_y[1];
+    slider24 = point_x[2]; slider25 = point_y[2];
+    slider26 = point_x[3]; slider27 = point_y[3];
+  );
+) : (
+  // Mouse released
+  dragging = -1;
+);
+
+// Draw points
+i = 0;
+loop(num_points,
+  px = curve_x + point_x[i] * curve_w;
+  py = curve_y + curve_h - point_y[i] * curve_h;
+  
+  // Point color (highlight if hovered or dragged)
+  i == hover_point || i == dragging ? (
+    gfx_set(1, 0.67, 0.27, 1);
+  ) : (
+    gfx_set(1, 0.53, 0, 1);
+  );
+  
+  gfx_circle(px, py, point_radius, 1);
+  
+  // Point outline
+  gfx_set(1, 1, 1, 0.5);
+  gfx_circle(px, py, point_radius, 0);
+  
+  i += 1;
+);
+
+// Labels
+gfx_set(0.8, 0.8, 0.8, 1);
+gfx_x = curve_x;
+gfx_y = 10;
+gfx_drawstr("SideFX Modulator - Curve Editor");
+
+// Status line
+gfx_x = curve_x;
+gfx_y = curve_y + curve_h + 10;
+gfx_drawstr(sprintf(#, "Shape: %d | Rate: %.2f Hz | Output: %.3f", shape, rate, final_output));
+
+// Trigger indicator
+gfx_y += 15;
+triggered || env_value > 0.01 ? (
+  gfx_set(0, 1, 0.5, 1);
+  gfx_circle(curve_x + 5, gfx_y + 5, 5, 1);
+) : (
+  gfx_set(0.3, 0.3, 0.3, 1);
+  gfx_circle(curve_x + 5, gfx_y + 5, 5, 1);
+);
+gfx_set(0.8, 0.8, 0.8, 1);
+gfx_x = curve_x + 15;
+gfx_drawstr(sprintf(#, "ENV: %.2f", env_value));
+
+// Instructions
+gfx_x = curve_x;
+gfx_y += 18;
+gfx_set(0.5, 0.5, 0.5, 1);
+gfx_drawstr("Drag points to shape the curve. Link 'Output' parameter to modulate FX.");

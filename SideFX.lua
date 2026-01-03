@@ -1,8 +1,9 @@
 -- @description SideFX - Smart FX Container Manager
 -- @author Nomad Monad
--- @version 0.4.1
+-- @version 0.5.0
 -- @provides
 --   [nomain] lib/*.lua
+--   [nomain] jsfx/SideFX_Modulator.jsfx
 -- @link https://github.com/Conceptual-Machines/SideFX
 -- @about
 --   # SideFX
@@ -11,6 +12,11 @@
 --   Ableton/Bitwig-inspired UI for FX chains.
 --
 -- @changelog
+--   v0.5.0 - JSFX Modulator Integration
+--     + Added SideFX_Modulator JSFX with custom curve editor
+--     + Modulator panel in sidebar to add/manage JSFX modulators
+--     + Serum/ShaperBox-style multi-point Bezier curve editor
+--     + Use REAPER's parameter modulation to link modulator output
 --   v0.4.1 - UI fixes
 --     + Horizontal scrolling for nested columns
 --     + Fixed container toggle behavior
@@ -910,6 +916,97 @@ local function draw_fx_detail_column(ctx, width)
 end
 
 --------------------------------------------------------------------------------
+-- UI: Modulator Panel
+--------------------------------------------------------------------------------
+
+local JSFX_NAME = "SideFX_Modulator"
+
+local function find_modulators_on_track(track)
+    if not track then return {} end
+    local modulators = {}
+    local fx_count = track:get_fx_count()
+    for i = 0, fx_count - 1 do
+        local name = r.TrackFX_GetFXName(track.pointer, i, "")
+        if name and (name:find(JSFX_NAME) or name:find("SideFX Modulator")) then
+            table.insert(modulators, {
+                index = i,
+                name = name,
+            })
+        end
+    end
+    return modulators
+end
+
+local function add_modulator_to_track(track)
+    if not track then return end
+    r.Undo_BeginBlock()
+    local fx_idx = r.TrackFX_AddByName(track.pointer, JSFX_NAME, false, -1)
+    if fx_idx >= 0 then
+        r.TrackFX_Show(track.pointer, fx_idx, 3)  -- Show floating window
+    end
+    r.Undo_EndBlock("Add SideFX Modulator", -1)
+end
+
+local function delete_modulator(track, fx_idx)
+    if not track then return end
+    r.Undo_BeginBlock()
+    r.TrackFX_Delete(track.pointer, fx_idx)
+    r.Undo_EndBlock("Delete SideFX Modulator", -1)
+end
+
+local function show_modulator_ui(track, fx_idx)
+    if not track then return end
+    r.TrackFX_Show(track.pointer, fx_idx, 3)  -- Show floating window
+end
+
+local function draw_modulator_panel(ctx)
+    ctx:text("Modulators")
+    ctx:same_line()
+    if ctx:small_button("+ Add") then
+        add_modulator_to_track(state.track)
+    end
+    ctx:separator()
+    
+    if not state.track then
+        ctx:text_colored(0x888888FF, "Select a track")
+        return
+    end
+    
+    local modulators = find_modulators_on_track(state.track)
+    
+    if #modulators == 0 then
+        ctx:text_colored(0x888888FF, "No modulators")
+        ctx:text_colored(0x888888FF, "Click '+ Add'")
+    else
+        for i, mod in ipairs(modulators) do
+            ctx:push_id("mod_" .. mod.index)
+            
+            -- Modulator label
+            ctx:text("LFO " .. i)
+            ctx:same_line()
+            
+            -- UI button
+            if ctx:small_button("UI") then
+                show_modulator_ui(state.track, mod.index)
+            end
+            ctx:same_line()
+            
+            -- Delete button
+            ctx:push_style_color(r.ImGui_Col_Button(), 0xAA3333FF)
+            if ctx:small_button("X") then
+                delete_modulator(state.track, mod.index)
+                ctx:pop_style_color()
+                ctx:pop_id()
+                return  -- Exit since list changed
+            end
+            ctx:pop_style_color()
+            
+            ctx:pop_id()
+        end
+    end
+end
+
+--------------------------------------------------------------------------------
 -- UI: Toolbar
 --------------------------------------------------------------------------------
 
@@ -1058,11 +1155,29 @@ local function main()
                 end
             end
 
-            -- Plugin Browser (fixed left)
-            if ctx:begin_child("Browser", browser_w, 0, imgui.ChildFlags.Border()) then
-                ctx:text("Plugins")
-                ctx:separator()
-                draw_plugin_browser(ctx)
+            -- Left panel: Browser + Modulators
+            if ctx:begin_child("LeftPanel", browser_w, 0, imgui.ChildFlags.None()) then
+                
+                -- Plugin Browser (top portion)
+                local avail_h = ctx:get_content_region_avail_y()
+                local modulator_h = 150  -- Fixed height for modulator panel
+                local browser_h = avail_h - modulator_h - 10  -- Leave some padding
+                
+                if ctx:begin_child("Browser", 0, browser_h, imgui.ChildFlags.Border()) then
+                    ctx:text("Plugins")
+                    ctx:separator()
+                    draw_plugin_browser(ctx)
+                    ctx:end_child()
+                end
+                
+                ctx:spacing()
+                
+                -- Modulator Panel (bottom portion)
+                if ctx:begin_child("Modulators", 0, modulator_h, imgui.ChildFlags.Border()) then
+                    draw_modulator_panel(ctx)
+                    ctx:end_child()
+                end
+                
                 ctx:end_child()
             end
 
