@@ -18,6 +18,9 @@ slider23:0.5<0,1,0.01>Audio Threshold
 slider24:100<1,2000,1>Attack (ms)
 slider25:500<1,5000,1>Release (ms)
 
+// LFO Mode
+slider28:0<0,1,1{Loop,One Shot}>LFO Mode
+
 // Editor
 slider26:2<0,4,1{Off,4,8,16,32}>Grid
 slider27:1<0,1,1{Off,On}>Snap
@@ -365,9 +368,16 @@ slider1 == 1 ? (
 ) : ( rate = slider2; );
 
 // Only advance LFO in Free mode OR when triggered in other modes
+one_shot = slider28;
 trigger_mode == 0 || triggered ? (
   lfo_phase += rate / srate;
-  lfo_phase >= 1 ? lfo_phase -= 1;
+  one_shot ? (
+    // One shot: clamp at 1, don't wrap
+    lfo_phase >= 1 ? lfo_phase = 1;
+  ) : (
+    // Loop: wrap around
+    lfo_phase >= 1 ? lfo_phase -= 1;
+  );
 );
 
 phase = lfo_phase + slider5;
