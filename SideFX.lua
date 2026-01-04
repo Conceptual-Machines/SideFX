@@ -474,6 +474,130 @@ local function draw_plugin_browser(ctx)
 end
 
 --------------------------------------------------------------------------------
+-- UI: FX Context Menu
+--------------------------------------------------------------------------------
+
+local function draw_fx_context_menu(ctx, fx, guid, i, enabled, is_container, depth)
+    if ctx:begin_popup_context_item("fxmenu" .. i) then
+        if ctx:menu_item("Open FX Window") then
+            fx:show(3)
+        end
+        if ctx:menu_item(enabled and "Bypass" or "Enable") then
+            fx:set_enabled(not enabled)
+        end
+        ctx:separator()
+        if ctx:menu_item("Rename") then
+            state.renaming_fx = guid
+            state.rename_text = get_fx_display_name(fx)
+        end
+        ctx:separator()
+        -- Remove from container option (only if inside a container)
+        local parent = fx:get_parent_container()
+        if parent then
+            if ctx:menu_item("Remove from Container") then
+                fx:move_out_of_container()
+                collapse_from_depth(depth)
+                refresh_fx_list()
+            end
+            ctx:separator()
+        end
+        -- Dissolve container option (only for containers)
+        if is_container then
+            if ctx:menu_item("Dissolve Container") then
+                dissolve_container(fx)
+                collapse_from_depth(depth)
+                refresh_fx_list()
+            end
+            ctx:separator()
+        end
+        if ctx:menu_item("Delete") then
+            fx:delete()
+            collapse_from_depth(depth)
+            refresh_fx_list()
+        end
+        ctx:separator()
+        local sel_count = get_multi_select_count()
+        if sel_count > 0 then
+            if ctx:menu_item("Add Selected to Container (" .. sel_count .. ")") then
+                add_to_new_container(get_multi_selected_fx())
+                clear_multi_select()
+            end
+        else
+            -- Single item - add to new container (works for FX and containers)
+            if ctx:menu_item("Add to New Container") then
+                add_to_new_container({fx})
+            end
+        end
+        ctx:end_popup()
+    end
+end
+
+--- Handle drop target for FX reordering and container drops.
+local function handle_fx_drop_target(ctx, fx, guid, is_container)
+    if ctx:begin_drag_drop_target() then
+        local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
+        if accepted and payload and payload ~= guid then
+            local drag_fx = state.track:find_fx_by_guid(payload)
+            if drag_fx then
+                if is_container then
+                    -- Dropping onto a container: move into it
+                    drag_fx:move_to_container(fx)
+                else
+                    -- Dropping onto a non-container FX: reorder
+                    local drag_parent = drag_fx:get_parent_container()
+                    local target_parent = fx:get_parent_container()
+                    local drag_parent_guid = drag_parent and drag_parent:get_guid() or nil
+                    local target_parent_guid = target_parent and target_parent:get_guid() or nil
+                    
+                    if drag_parent_guid == target_parent_guid then
+                        -- Same container: reorder using REAPER's swap
+                        local drag_pos = drag_fx.pointer
+                        local target_pos = fx.pointer
+                        
+                        if target_parent then
+                            -- Inside a container - use container child positions
+                            local children = {}
+                            for child in target_parent:iter_container_children() do
+                                children[#children + 1] = child
+                            end
+                            for idx, child in ipairs(children) do
+                                if child:get_guid() == payload then drag_pos = idx - 1 end
+                                if child:get_guid() == guid then target_pos = idx - 1 end
+                            end
+                        end
+                        
+                        -- Swap using TrackFX_CopyToTrack
+                        if drag_pos ~= target_pos then
+                            r.TrackFX_CopyToTrack(
+                                state.track.pointer, drag_fx.pointer,
+                                state.track.pointer, fx.pointer,
+                                true
+                            )
+                        end
+                    else
+                        -- Different containers: move to target's container at target's position
+                        if target_parent then
+                            -- Find target's position in its container
+                            local target_pos = 0
+                            for child in target_parent:iter_container_children() do
+                                if child:get_guid() == guid then break end
+                                target_pos = target_pos + 1
+                            end
+                            target_parent:add_fx_to_container(drag_fx, target_pos)
+                        else
+                            -- Target is at track level
+                            drag_fx:move_out_of_container()
+                        end
+                    end
+                end
+                refresh_fx_list()
+            end
+        end
+        ctx:end_drag_drop_target()
+    end
+end
+
+--------------------------------------------------------------------------------
 -- UI: FX List Column (reusable for any level)
 --------------------------------------------------------------------------------
 
@@ -654,123 +778,11 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
                 ctx:end_drag_drop_source()
             end
 
-            -- Drop target for ALL FX items (reordering and container drops)
-            if ctx:begin_drag_drop_target() then
-                local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
-                if accepted and payload and payload ~= guid then
-                    local drag_fx = state.track:find_fx_by_guid(payload)
-                    if drag_fx then
-                        if is_container then
-                            -- Dropping onto a container: move into it
-                            drag_fx:move_to_container(fx)
-                        else
-                            -- Dropping onto a non-container FX: reorder
-                            local drag_parent = drag_fx:get_parent_container()
-                            local target_parent = fx:get_parent_container()
-                            local drag_parent_guid = drag_parent and drag_parent:get_guid() or nil
-                            local target_parent_guid = target_parent and target_parent:get_guid() or nil
-                            
-                            if drag_parent_guid == target_parent_guid then
-                                -- Same container: reorder using REAPER's swap
-                                -- Get positions
-                                local drag_pos = drag_fx.pointer
-                                local target_pos = fx.pointer
-                                
-                                if target_parent then
-                                    -- Inside a container - use container child positions
-                                    local children = {}
-                                    for child in target_parent:iter_container_children() do
-                                        children[#children + 1] = child
-                                    end
-                                    for idx, child in ipairs(children) do
-                                        if child:get_guid() == payload then drag_pos = idx - 1 end
-                                        if child:get_guid() == guid then target_pos = idx - 1 end
-                                    end
-                                end
-                                
-                                -- Swap using TrackFX_CopyToTrack
-                                if drag_pos ~= target_pos then
-                                    r.TrackFX_CopyToTrack(
-                                        state.track.pointer, drag_fx.pointer,
-                                        state.track.pointer, fx.pointer,
-                                        true
-                                    )
-                                end
-                            else
-                                -- Different containers: move to target's container at target's position
-                                if target_parent then
-                                    -- Find target's position in its container
-                                    local target_pos = 0
-                                    for child in target_parent:iter_container_children() do
-                                        if child:get_guid() == guid then break end
-                                        target_pos = target_pos + 1
-                                    end
-                                    target_parent:add_fx_to_container(drag_fx, target_pos)
-                                else
-                                    -- Target is at track level
-                                    drag_fx:move_out_of_container()
-                                end
-                            end
-                        end
-                        refresh_fx_list()
-                    end
-                end
-                ctx:end_drag_drop_target()
-            end
+            -- Drop target for reordering and container drops
+            handle_fx_drop_target(ctx, fx, guid, is_container)
 
-            -- Right-click context menu (must be right after selectable)
-            if ctx:begin_popup_context_item("fxmenu" .. i) then
-                if ctx:menu_item("Open FX Window") then
-                    fx:show(3)
-                end
-                if ctx:menu_item(enabled and "Bypass" or "Enable") then
-                    fx:set_enabled(not enabled)
-                end
-                ctx:separator()
-                if ctx:menu_item("Rename") then
-                    state.renaming_fx = guid
-                    state.rename_text = get_fx_display_name(fx)
-                end
-                ctx:separator()
-                -- Remove from container option (only if inside a container)
-                local parent = fx:get_parent_container()
-                if parent then
-                    if ctx:menu_item("Remove from Container") then
-                        fx:move_out_of_container()
-                        collapse_from_depth(depth)
-                        refresh_fx_list()
-                    end
-                    ctx:separator()
-                end
-                -- Dissolve container option (only for containers)
-                if is_container then
-                    if ctx:menu_item("Dissolve Container") then
-                        dissolve_container(fx)
-                        collapse_from_depth(depth)
-                        refresh_fx_list()
-                    end
-                    ctx:separator()
-                end
-                if ctx:menu_item("Delete") then
-                    fx:delete()
-                    collapse_from_depth(depth)
-                    refresh_fx_list()
-                end
-                ctx:separator()
-                local sel_count = get_multi_select_count()
-                if sel_count > 0 then
-                    if ctx:menu_item("Add Selected to Container (" .. sel_count .. ")") then
-                        add_to_new_container(get_multi_selected_fx())
-                        clear_multi_select()
-                    end
-                else
-                    -- Single item - add to new container (works for FX and containers)
-                    if ctx:menu_item("Add to New Container") then
-                        add_to_new_container({fx})
-                    end
-                end
-                ctx:end_popup()
-            end
+            -- Right-click context menu
+            draw_fx_context_menu(ctx, fx, guid, i, enabled, is_container, depth)
             
             if ctx:is_item_hovered() then ctx:set_tooltip(get_fx_display_name(fx)) end
 
