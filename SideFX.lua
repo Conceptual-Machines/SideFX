@@ -534,7 +534,7 @@ end
 
 --- Handle drop target for FX reordering and container drops.
 local function handle_fx_drop_target(ctx, fx, guid, is_container)
-    if ctx:begin_drag_drop_target() then
+            if ctx:begin_drag_drop_target() then
         local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
         if accepted and payload and payload ~= guid then
             local drag_fx = state.track:find_fx_by_guid(payload)
@@ -599,14 +599,14 @@ end
 
 --- Move FX to track level (out of all containers).
 local function move_fx_to_track_level(guid)
-    local fx = state.track:find_fx_by_guid(guid)
+                    local fx = state.track:find_fx_by_guid(guid)
     if not fx then return end
-    
-    while fx:get_parent_container() do
-        fx:move_out_of_container()
-        fx = state.track:find_fx_by_guid(guid)
-        if not fx then break end
-    end
+                        
+                                while fx:get_parent_container() do
+                                    fx:move_out_of_container()
+                                    fx = state.track:find_fx_by_guid(guid)
+                                    if not fx then break end
+                                end
 end
 
 --- Move FX to a target container by navigating through hierarchy.
@@ -616,27 +616,27 @@ local function move_fx_to_container(guid, target_container_guid)
     
     -- Build path from root to target container
     local target_path = {}
-    local container = target_container
-    while container do
-        table.insert(target_path, 1, container:get_guid())
-        container = container:get_parent_container()
-    end
-    
-    -- Move FX through each level
-    for _, container_guid in ipairs(target_path) do
+                                    local container = target_container
+                                    while container do
+                                        table.insert(target_path, 1, container:get_guid())
+                                        container = container:get_parent_container()
+                                    end
+                                    
+                                    -- Move FX through each level
+                                    for _, container_guid in ipairs(target_path) do
         local fx = state.track:find_fx_by_guid(guid)
-        if not fx then break end
-        
-        local current_parent = fx:get_parent_container()
-        local current_parent_guid = current_parent and current_parent:get_guid() or nil
-        
-        if current_parent_guid ~= container_guid then
-            local c = state.track:find_fx_by_guid(container_guid)
-            if c then
-                c:add_fx_to_container(fx)
-            end
-        end
-    end
+                                        if not fx then break end
+                                        
+                                        local current_parent = fx:get_parent_container()
+                                        local current_parent_guid = current_parent and current_parent:get_guid() or nil
+                                        
+                                        if current_parent_guid ~= container_guid then
+                                            local c = state.track:find_fx_by_guid(container_guid)
+                                            if c then
+                                                c:add_fx_to_container(fx)
+                                            end
+                                        end
+                                    end
 end
 
 --------------------------------------------------------------------------------
@@ -667,8 +667,8 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
                             -- Move to track level (only if FX is in a container)
                             if fx_parent then
                                 move_fx_to_track_level(guid)
-                                refresh_fx_list()
-                            end
+                                    refresh_fx_list()
+                                end
                         elseif parent_container_guid and fx_parent_guid ~= parent_container_guid then
                             -- Move into this column's container
                             move_fx_to_container(guid, parent_container_guid)
@@ -1238,7 +1238,7 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected)
     local chain_guid = chain:get_guid()
     
     -- Column 1: Chain name button
-    r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+    ctx:table_set_column_index(0)
     
     -- Check if dragging for visual feedback
     local has_plugin_drag = ctx:get_drag_drop_payload("PLUGIN_ADD")
@@ -1298,7 +1298,7 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected)
     end
     
     -- Column 2: Enable button
-    r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+    ctx:table_set_column_index(1)
     if chain_enabled then
         ctx:push_style_color(r.ImGui_Col_Button(), 0x44AA44FF)
     else
@@ -1310,7 +1310,7 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected)
     ctx:pop_style_color()
     
     -- Column 3: Delete button
-    r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+    ctx:table_set_column_index(2)
     ctx:push_style_color(r.ImGui_Col_Button(), 0x664444FF)
     if ctx:small_button("×") then
         chain:delete()
@@ -1322,7 +1322,7 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected)
     ctx:pop_style_color()
     
     -- Column 4: Volume slider
-    r.ImGui_TableSetColumnIndex(ctx.ctx, 3)
+    ctx:table_set_column_index(3)
     if mixer then
         local vol_param = 2 + (chain_idx - 1)  -- Params 2-17 are channel volumes
         local ok_vol, vol_norm = pcall(function() return mixer:get_param_normalized(vol_param) end)
@@ -1346,7 +1346,7 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected)
     end
     
     -- Column 5: Pan slider
-    r.ImGui_TableSetColumnIndex(ctx.ctx, 4)
+    ctx:table_set_column_index(4)
     if mixer then
         local pan_param = 18 + (chain_idx - 1)  -- Params 18-33 are channel pans
         local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(pan_param) end)
@@ -1390,19 +1390,19 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
     ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
     if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, 0, rack_h, wrapper_flags) then
         -- Use table layout so header width matches content width
-        local table_flags = r.ImGui_TableFlags_SizingStretchSame()
-        if r.ImGui_BeginTable(ctx.ctx, "chain_table_" .. selected_chain_guid, 1, table_flags) then
+        local table_flags = imgui.TableFlags.SizingStretchSame()
+        if ctx:begin_table("chain_table_" .. selected_chain_guid, 1, table_flags) then
             -- Row 1: Header
-            r.ImGui_TableNextRow(ctx.ctx)
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+            ctx:table_next_row()
+            ctx:table_set_column_index(0)
             ctx:text_colored(0xAAAAAAFF, "Chain:")
             ctx:same_line()
             ctx:text(chain_display_name)
             ctx:separator()
             
             -- Row 2: Content
-            r.ImGui_TableNextRow(ctx.ctx)
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+            ctx:table_next_row()
+            ctx:table_set_column_index(0)
             
             -- Chain contents - auto-resize to fit devices
             -- Use same background as wrapper for seamless appearance
@@ -1510,7 +1510,7 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
             end
             ctx:pop_style_color()
             
-            r.ImGui_EndTable(ctx.ctx)
+            ctx:end_table()
         end
         
         ctx:end_child()
@@ -1573,16 +1573,16 @@ local function draw_rack_panel(ctx, rack, avail_height)
             
             -- Master output controls
             if mixer then
-                if r.ImGui_BeginTable(ctx.ctx, "master_controls", 3, r.ImGui_TableFlags_SizingStretchProp()) then
-                    r.ImGui_TableSetupColumn(ctx.ctx, "label", r.ImGui_TableColumnFlags_WidthFixed(), 50)
-                    r.ImGui_TableSetupColumn(ctx.ctx, "gain", r.ImGui_TableColumnFlags_WidthStretch(), 1)
-                    r.ImGui_TableSetupColumn(ctx.ctx, "pan", r.ImGui_TableColumnFlags_WidthFixed(), 70)
-                    r.ImGui_TableNextRow(ctx.ctx)
+                if ctx:begin_table("master_controls", 3, imgui.TableFlags.SizingStretchProp()) then
+                    ctx:table_setup_column("label", imgui.TableColumnFlags.WidthFixed(), 50)
+                    ctx:table_setup_column("gain", imgui.TableColumnFlags.WidthStretch(), 1)
+                    ctx:table_setup_column("pan", imgui.TableColumnFlags.WidthFixed(), 70)
+                    ctx:table_next_row()
                     
-                    r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+                    ctx:table_set_column_index(0)
                     ctx:text_colored(0xAAAAAAFF, "Master")
                     
-                    r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+                    ctx:table_set_column_index(1)
                     local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
                     if ok_gain and gain_norm then
                         local gain_db = -24 + gain_norm * 36
@@ -1599,7 +1599,7 @@ local function draw_rack_panel(ctx, rack, avail_height)
                         ctx:text_disabled("--")
                     end
                     
-                    r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+                    ctx:table_set_column_index(2)
                     local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(1) end)
                     if ok_pan and pan_norm then
                         local pan_val = -100 + pan_norm * 200
@@ -1611,7 +1611,7 @@ local function draw_rack_panel(ctx, rack, avail_height)
                         ctx:text_disabled("C")
                     end
                     
-                    r.ImGui_EndTable(ctx.ctx)
+                    ctx:end_table()
                 end
             end
             
@@ -1632,22 +1632,22 @@ local function draw_rack_panel(ctx, rack, avail_height)
                 ctx:text_disabled("Drag plugins here to create chains")
             else
                 -- Chains table
-                if r.ImGui_BeginTable(ctx.ctx, "chains_table", 5, r.ImGui_TableFlags_SizingStretchProp()) then
-                    r.ImGui_TableSetupColumn(ctx.ctx, "name", r.ImGui_TableColumnFlags_WidthFixed(), 80)
-                    r.ImGui_TableSetupColumn(ctx.ctx, "enable", r.ImGui_TableColumnFlags_WidthFixed(), 28)
-                    r.ImGui_TableSetupColumn(ctx.ctx, "delete", r.ImGui_TableColumnFlags_WidthFixed(), 24)
-                    r.ImGui_TableSetupColumn(ctx.ctx, "volume", r.ImGui_TableColumnFlags_WidthStretch(), 1)
-                    r.ImGui_TableSetupColumn(ctx.ctx, "pan", r.ImGui_TableColumnFlags_WidthFixed(), 60)
+                if ctx:begin_table("chains_table", 5, imgui.TableFlags.SizingStretchProp()) then
+                    ctx:table_setup_column("name", imgui.TableColumnFlags.WidthFixed(), 80)
+                    ctx:table_setup_column("enable", imgui.TableColumnFlags.WidthFixed(), 28)
+                    ctx:table_setup_column("delete", imgui.TableColumnFlags.WidthFixed(), 24)
+                    ctx:table_setup_column("volume", imgui.TableColumnFlags.WidthStretch(), 1)
+                    ctx:table_setup_column("pan", imgui.TableColumnFlags.WidthFixed(), 60)
                     
                     for j, chain in ipairs(chains) do
-                        r.ImGui_TableNextRow(ctx.ctx)
+                        ctx:table_next_row()
                         ctx:push_id("chain_" .. j)
                         local is_selected = state.expanded_path[2] == chain:get_guid()
                         draw_chain_row(ctx, chain, j, rack, mixer, is_selected)
                         ctx:pop_id()
                     end
                     
-                    r.ImGui_EndTable(ctx.ctx)
+                    ctx:end_table()
                 end
             end
             
@@ -1874,12 +1874,12 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                     -- Params area (left)
                     local params_w = col_w * num_cols
                     if ctx:begin_child("params_" .. guid, params_w, panel_h - 40, 0) then
-                        if total_params > 0 and r.ImGui_BeginTable(ctx.ctx, "params_fb_" .. guid, num_cols, r.ImGui_TableFlags_SizingStretchSame()) then
+                        if total_params > 0 and ctx:begin_table("params_fb_" .. guid, num_cols, imgui.TableFlags.SizingStretchSame()) then
                             for row = 0, params_per_col - 1 do
-                                r.ImGui_TableNextRow(ctx.ctx)
+                                ctx:table_next_row()
                                 for col = 0, num_cols - 1 do
                                     local p = col * params_per_col + row
-                                    r.ImGui_TableSetColumnIndex(ctx.ctx, col)
+                                    ctx:table_set_column_index(col)
                                     if p < total_params then
                                         local pname = fx:get_param_name(p)
                                         local pval = fx:get_param_normalized(p) or 0
@@ -1894,7 +1894,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                                     end
                                 end
                             end
-                            r.ImGui_EndTable(ctx.ctx)
+                            ctx:end_table()
                         end
                         ctx:end_child()
                     end
