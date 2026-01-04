@@ -512,35 +512,45 @@ local function add_plugin_to_track(plugin, position)
     local container = state.track:add_fx_by_name("Container", false, container_position)
     
     if container and container.pointer >= 0 then
-        -- Rename the container
-        r.TrackFX_SetNamedConfigParm(state.track.pointer, container.pointer, "renamed_name", container_name)
+        -- Rename the container using ReaWrap
+        container:set_named_config_param("renamed_name", container_name)
         
-        -- Add the main FX inside the container
-        -- Container child addressing: 0x2000000 + (container_idx << 16) + child_position
-        -- << 16 is equivalent to * 0x10000 (65536)
-        local container_addr = 0x2000000 + (container.pointer * 0x10000)
-        local fx_idx = r.TrackFX_AddByName(state.track.pointer, plugin.full_name, false, container_addr)
+        -- Add the main FX at track level first
+        local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
         
-        if fx_idx >= 0 then
-            -- Set wet/dry to 100% by default
-            local retval, wet_idx = r.TrackFX_GetParamFromIdent(state.track.pointer, fx_idx, ":wet")
-            if wet_idx and wet_idx >= 0 then
-                r.TrackFX_SetParamNormalized(state.track.pointer, fx_idx, wet_idx, 1.0)
+        if main_fx and main_fx.pointer >= 0 then
+            -- Move the FX into the container using ReaWrap
+            container:add_fx_to_container(main_fx, 0)
+            
+            -- Re-find the FX inside the container (pointer changed after move)
+            local fx_inside = get_device_main_fx(container)
+            
+            if fx_inside then
+                -- Set wet/dry to 100% by default
+                local wet_idx = fx_inside:get_param_from_ident(":wet")
+                if wet_idx >= 0 then
+                    fx_inside:set_param_normalized(wet_idx, 1.0)
+                end
             end
             
-            -- Add utility after the main FX (child position 1)
-            local util_addr = 0x2000000 + (container.pointer * 0x10000) + 1
-            local util_idx = r.TrackFX_AddByName(state.track.pointer, UTILITY_JSFX, false, util_addr)
+            -- Add utility at track level, then move into container
+            local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, -1)
             
-            if util_idx < 0 then
+            if not util_fx or util_fx.pointer < 0 then
                 r.ShowConsoleMsg("SideFX: Could not add utility JSFX. Make sure SideFX_Utility.jsfx is installed in REAPER's Effects/SideFX folder.\n")
             else
-                -- Rename utility
-                local util_name = string.format("D%d_Util", device_idx)
-                r.TrackFX_SetNamedConfigParm(state.track.pointer, util_idx, "renamed_name", util_name)
+                -- Move utility into container at position 1
+                container:add_fx_to_container(util_fx, 1)
+                
+                -- Re-find utility inside container and rename it
+                local util_inside = get_device_utility(container)
+                if util_inside then
+                    local util_name = string.format("D%d_Util", device_idx)
+                    util_inside:set_named_config_param("renamed_name", util_name)
+                end
             end
         else
-            r.ShowConsoleMsg("SideFX: Could not add FX to container. fx_idx=" .. tostring(fx_idx) .. "\n")
+            r.ShowConsoleMsg("SideFX: Could not add FX.\n")
         end
         
         refresh_fx_list()
