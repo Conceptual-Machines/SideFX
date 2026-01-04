@@ -713,9 +713,9 @@ local function add_chain_to_rack(rack, plugin)
     -- Chain index (1-based)
     local chain_idx = chain_count + 1
     
-    -- Max 32 chains (64 channels / 2 per stereo chain)
-    if chain_idx > 32 then
-        r.ShowConsoleMsg("SideFX: Maximum 32 chains per rack (64 channel limit)\n")
+    -- Max 31 chains (channels 3-64, since 1/2 reserved for dry signal)
+    if chain_idx > 31 then
+        r.ShowConsoleMsg("SideFX: Maximum 31 chains per rack (channels 3-64, 1/2 reserved)\n")
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Chain to Rack (failed)", -1)
         return nil
@@ -789,14 +789,15 @@ local function add_chain_to_rack(rack, plugin)
         
         if chain_inside then
             -- Set output channel routing for this chain
-            -- All chains read from 1/2, output to different channel pairs:
-            -- Chain 1 → 1/2, Chain 2 → 3/4, Chain 3 → 5/6, Chain 4 → 7/8
+            -- All chains read from 1/2 (main signal), output to sideband channels:
+            -- Chain 1 → 3/4, Chain 2 → 5/6, Chain 3 → 7/8, Chain 4 → 9/10, etc.
+            -- Channels 1/2 are reserved for the dry signal pass-through
             -- Pin mappings use bitmask: bit N = channel N (0-indexed)
-            local out_channel = (chain_idx - 1) * 2  -- 0, 2, 4, 6 (0-indexed)
+            local out_channel = chain_idx * 2  -- 2, 4, 6, 8... (0-indexed, so 3/4, 5/6, 7/8, 9/10...)
             
             -- Calculate bitmasks: 2^out_channel for left, 2^(out_channel+1) for right
-            local left_bits = math.floor(2 ^ out_channel)      -- 1, 4, 16, 64
-            local right_bits = math.floor(2 ^ (out_channel + 1)) -- 2, 8, 32, 128
+            local left_bits = math.floor(2 ^ out_channel)      -- 4, 16, 64, 256...
+            local right_bits = math.floor(2 ^ (out_channel + 1)) -- 8, 32, 128, 512...
             
             chain_inside:set_pin_mappings(1, 0, left_bits, 0)   -- output pin 0 (left)
             chain_inside:set_pin_mappings(1, 1, right_bits, 0)  -- output pin 1 (right)

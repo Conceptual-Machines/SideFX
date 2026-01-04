@@ -1,11 +1,12 @@
 desc:SideFX Chain Mixer
 author:Nomad Monad
-version:1.1
+version:1.2
 options:no_meter
 
-// Internal mixer for R-containers - sums all parallel chains to stereo
-// Supports up to 32 stereo chains (64 channels)
-// Each chain has its own utility for gain control, so this just sums
+// Internal mixer for R-containers - sums parallel chain outputs to stereo
+// Chains output to sideband channels (3/4, 5/6, 7/8, etc.)
+// This mixer sums those sidebands back to channels 1/2
+// Channels 1/2 are NOT included in sum (reserved for dry signal pass-through)
 
 // Use all 64 channels
 in_pin:none
@@ -16,7 +17,7 @@ slider1:0<-24,12,0.1>-Master (dB)
 @init
 smooth_coeff = exp(-1 / (srate * 0.005));  // 5ms smoothing
 master_smooth = 1;
-num_ch = 64;  // Max channels to sum
+num_ch = 64;  // Max channels
 
 @slider
 master = 10 ^ (slider1 / 20);
@@ -25,19 +26,20 @@ master = 10 ^ (slider1 / 20);
 // Smooth master gain
 master_smooth = master_smooth * smooth_coeff + master * (1 - smooth_coeff);
 
-// Sum all stereo pairs to output on 1/2
+// Sum sideband channels (3/4 onwards, skipping 1/2)
 out_l = 0;
 out_r = 0;
 
-// Sum channels 0-63 in pairs
-ch = 0;
+// Start from channel 2 (0-indexed), which is channel 3 in REAPER
+// Sum channels 2-63 in pairs (3/4, 5/6, 7/8, etc.)
+ch = 2;
 while (ch < num_ch) (
   out_l += spl(ch);
   out_r += spl(ch + 1);
   ch += 2;
 );
 
-// Output to channels 1/2
+// Output to channels 1/2 (replacing dry signal with chain sum)
 spl0 = out_l * master_smooth;
 spl1 = out_r * master_smooth;
 
