@@ -90,6 +90,10 @@ local device_module = require('lib.device')
 local container_module = require('lib.container')
 local modulator_module = require('lib.modulator')
 local browser_module = require('lib.browser')
+local presets_module = require('lib.presets')
+
+-- Initialize presets module with script path
+presets_module.init(script_path)
 
 --------------------------------------------------------------------------------
 -- Icons (using OpenMoji font)
@@ -980,44 +984,11 @@ local function get_modulator_links(mod_fx_idx)
 end
 
 --------------------------------------------------------------------------------
--- Presets
+-- Presets (moved to lib/presets.lua)
 --------------------------------------------------------------------------------
 
-local presets_folder = script_path .. "presets/"
-
-local function ensure_presets_folder()
-    r.RecursiveCreateDirectory(presets_folder, 0)
-    r.RecursiveCreateDirectory(presets_folder .. "chains/", 0)
-end
-
-local function save_chain_preset(preset_name)
-    -- Save the full FX chain with modulator links
-    if not state.track or not preset_name or preset_name == "" then return false end
-    
-    ensure_presets_folder()
-    
-    -- Use REAPER's native FX chain preset system
-    local path = presets_folder .. "chains/" .. preset_name .. ".RfxChain"
-    r.TrackFX_SavePresetBank(state.track.pointer, path)
-    return true
-end
-
-local function load_chain_preset(preset_name)
-    if not state.track or not preset_name then return false end
-    
-    local path = presets_folder .. "chains/" .. preset_name .. ".RfxChain"
-    r.Undo_BeginBlock()
-    -- Clear existing FX using ReaWrap
-    while state.track:get_track_fx_count() > 0 do
-        local fx = state.track:get_track_fx(0)
-        fx:delete()
-    end
-    -- Load chain
-    state.track:add_by_name(path, false, -1)
-    r.Undo_EndBlock("Load FX Chain Preset", -1)
-    refresh_fx_list()
-    return true
-end
+local save_chain_preset = presets_module.save_chain
+local load_chain_preset = presets_module.load_chain
 
 -- Use fx_utils module for is_modulator_fx
 local is_modulator_fx = fx_utils.is_modulator_fx
