@@ -81,6 +81,10 @@ local Project = require('project')
 local Plugins = require('plugins')
 local helpers = require('helpers')
 
+-- SideFX modules
+local naming = require('lib.naming')
+local fx_utils = require('lib.fx_utils')
+
 --------------------------------------------------------------------------------
 -- Icons (using OpenMoji font)
 --------------------------------------------------------------------------------
@@ -246,29 +250,8 @@ local function get_multi_select_count()
     return count
 end
 
--- Get display name for FX (uses renamed_name if set, otherwise default name)
--- Strips internal prefixes (R1_C1_D1_FX:, D1:, etc.) for clean UI display
-local function get_fx_display_name(fx)
-    if not fx then return "Unknown" end
-    local ok, renamed = pcall(function() return fx:get_named_config_param("renamed_name") end)
-    local name
-    if ok and renamed and renamed ~= "" then
-        name = renamed
-    else
-        name = fx:get_name()
-    end
-    
-    -- Strip SideFX internal prefixes for clean UI display
-    -- Patterns from most specific to least specific
-    name = name:gsub("^R%d+_C%d+_D%d+_FX:%s*", "")  -- R1_C1_D1_FX: prefix
-    name = name:gsub("^R%d+_C%d+_D%d+:%s*", "")     -- R1_C1_D1: prefix
-    name = name:gsub("^R%d+_C%d+:%s*", "")          -- R1_C1: prefix
-    name = name:gsub("^D%d+_FX:%s*", "")            -- D1_FX: prefix
-    name = name:gsub("^D%d+:%s*", "")               -- D1: prefix
-    name = name:gsub("^R%d+:%s*", "")               -- R1: prefix
-    
-    return name
-end
+-- Use fx_utils module for display name
+local get_fx_display_name = fx_utils.get_display_name
 
 -- Collapse all columns from a certain depth onwards
 local function collapse_from_depth(depth)
@@ -351,128 +334,31 @@ end
 -- Use just the name and let REAPER find it, or use full path for dev
 local UTILITY_JSFX = "JS:SideFX/SideFX_Utility"
 
-local function is_utility_fx(fx)
-    if not fx then return false end
-    local name = fx:get_name()
-    if not name then return false end
-    -- Check for original JSFX name or renamed utility formats:
-    -- D{n}_Util (top-level device)
-    -- R{n}_C{m}_D{p}_Util (device inside chain inside rack)
-    return name:find("SideFX_Utility") or name:find("SideFX Utility") or 
-           name:match("^D%d+_Util$") or name:match("_Util$")
-end
+-- Use fx_utils module for is_utility_fx
+local is_utility_fx = fx_utils.is_utility_fx
 
-local function find_paired_utility(track, fx)
-    -- Find the SideFX_Utility immediately after this FX
-    if not track or not fx then return nil end
-    
-    local fx_idx = fx.pointer
-    local next_idx = fx_idx + 1
-    local total = track:get_track_fx_count()
-    
-    if next_idx < total then
-        local next_fx = track:get_track_fx(next_idx)
-        if next_fx and is_utility_fx(next_fx) then
-            return next_fx
-        end
-    end
-    return nil
-end
+-- Use fx_utils module for find_paired_utility
+local find_paired_utility = fx_utils.find_paired_utility
 
 --------------------------------------------------------------------------------
 -- D-Container (Device) Helpers
 --------------------------------------------------------------------------------
 
--- Check if a container is a SideFX device container (D-prefix for top-level)
-local function is_device_container(fx)
-    if not fx then return false end
-    local ok, is_cont = pcall(function() return fx:is_container() end)
-    if not ok or not is_cont then return false end
-    
-    local ok2, name = pcall(function() return fx:get_name() end)
-    if not ok2 or not name then return false end
-    
-    return name:match("^D%d") ~= nil
-end
+-- Use fx_utils module for container type detection
+local is_device_container = fx_utils.is_device_container
+local is_chain_container = fx_utils.is_chain_container
+local is_rack_container = fx_utils.is_rack_container
 
--- Check if a container is a SideFX chain container (R{n}_C{n} pattern for chains inside racks)
-local function is_chain_container(fx)
-    if not fx then return false end
-    local ok, is_cont = pcall(function() return fx:is_container() end)
-    if not ok or not is_cont then return false end
-    
-    local ok2, name = pcall(function() return fx:get_name() end)
-    if not ok2 or not name then return false end
-    
-    -- Match R{n}_C{n}: pattern (e.g., R1_C1: ReaComp)
-    return name:match("^R%d+_C%d+") ~= nil
-end
+-- Use fx_utils module for device helpers
+local get_device_main_fx = fx_utils.get_device_main_fx
+get_device_utility = fx_utils.get_device_utility
 
--- Check if a container is a SideFX rack container (R-prefix, not a chain)
-local function is_rack_container(fx)
-    if not fx then return false end
-    local ok, is_cont = pcall(function() return fx:is_container() end)
-    if not ok or not is_cont then return false end
-    
-    local ok2, name = pcall(function() return fx:get_name() end)
-    if not ok2 or not name then return false end
-    
-    -- Match R{n}: pattern but NOT R{n}_C{n} (which is a chain)
-    return name:match("^R%d+:") ~= nil and not name:match("^R%d+_C%d+")
-end
-
--- Get the main FX from a D-container (first non-utility child)
-local function get_device_main_fx(container)
-    if not container then return nil end
-    for child in container:iter_container_children() do
-        if not is_utility_fx(child) then
-            return child
-        end
-    end
-    return nil
-end
-
--- Get the utility FX from a D-container
-get_device_utility = function(container)
-    if not container then return nil end
-    for child in container:iter_container_children() do
-        if is_utility_fx(child) then
-            return child
-        end
-    end
-    return nil
-end
-
--- Count D-containers at top level to get next index
+-- Wrapper functions using fx_utils and naming modules
 local function get_next_device_index()
-    if not state.track then return 1 end
-    local max_idx = 0
-    for fx in state.track:iter_track_fx_chain() do
-        local parent = fx:get_parent_container()
-        if not parent then  -- Top level only
-            local name = fx:get_name()
-            local idx = name:match("^D(%d+)")
-            if idx then
-                max_idx = math.max(max_idx, tonumber(idx))
-            end
-        end
-    end
-    return max_idx + 1
+    return fx_utils.get_next_device_index(state.track)
 end
 
--- Get short name from plugin full name (strip prefixes)
-local function get_short_plugin_name(full_name)
-    local name = full_name
-    -- Strip common prefixes
-    name = name:gsub("^VST3?: ", "")
-    name = name:gsub("^AU: ", "")
-    name = name:gsub("^JS: ", "")
-    name = name:gsub("^CLAP: ", "")
-    name = name:gsub("^VSTi: ", "")
-    -- Strip path for JS
-    name = name:gsub("^.+/", "")
-    return name
-end
+local get_short_plugin_name = naming.get_short_plugin_name
 
 -- Renumber all D-containers after chain changes
 renumber_device_chain = function()
@@ -621,43 +507,12 @@ end
 
 local MIXER_JSFX = "JS:SideFX/SideFX_Mixer"
 
--- Get next rack index for R-naming
+-- Wrapper functions using fx_utils module
 local function get_next_rack_index()
-    if not state.track then return 1 end
-    local max_idx = 0
-    for fx in state.track:iter_track_fx_chain() do
-        local parent = fx:get_parent_container()
-        if not parent then  -- Top level only
-            local name = fx:get_name()
-            -- Check for R-containers
-            local idx = name:match("^R(%d+)")
-            if idx then
-                max_idx = math.max(max_idx, tonumber(idx))
-            end
-            -- Also count D-containers for overall numbering
-            local d_idx = name:match("^D(%d+)")
-            if d_idx then
-                max_idx = math.max(max_idx, tonumber(d_idx))
-            end
-        end
-    end
-    return max_idx + 1
+    return fx_utils.get_next_rack_index(state.track)
 end
 
--- Get the mixer FX from a rack container
-local function get_rack_mixer(rack)
-    if not rack then return nil end
-    for child in rack:iter_container_children() do
-        local ok, name = pcall(function() return child:get_name() end)
-        if ok and name then
-            -- Mixer is named _R{n}_M or contains "Mixer"
-            if name:match("^_R%d+_M$") or (name:find("SideFX") and name:find("Mixer")) then
-                return child
-            end
-        end
-    end
-    return nil
-end
+local get_rack_mixer = fx_utils.get_rack_mixer
 
 -- Get the parameter index for chain volume in the mixer
 -- Parameter index is based on DECLARATION ORDER in JSFX, not slider number!
@@ -2069,11 +1924,8 @@ local function load_chain_preset(preset_name)
     return true
 end
 
-local function is_modulator_fx(fx)
-    if not fx then return false end
-    local name = fx:get_name()
-    return name and (name:find(MODULATOR_JSFX) or name:find("SideFX Modulator"))
-end
+-- Use fx_utils module for is_modulator_fx
+local is_modulator_fx = fx_utils.is_modulator_fx
 
 local function draw_modulator_column(ctx, width)
     if ctx:begin_child("Modulators", width, 0, imgui.ChildFlags.Border()) then
