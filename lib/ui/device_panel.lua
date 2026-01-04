@@ -229,12 +229,13 @@ local function get_display_name(fx)
     local name = get_internal_name(fx)
     
     -- Strip SideFX internal prefixes for clean UI display
-    -- R1_C1: Name -> Name
-    -- D1: Name -> Name
-    -- R1: Rack -> Rack
-    name = name:gsub("^R%d+_C%d+:%s*", "")  -- R1_C1: prefix
-    name = name:gsub("^D%d+:%s*", "")        -- D1: prefix
-    name = name:gsub("^R%d+:%s*", "")        -- R1: prefix
+    -- Patterns from most specific to least specific
+    name = name:gsub("^R%d+_C%d+_D%d+_FX:%s*", "")  -- R1_C1_D1_FX: prefix
+    name = name:gsub("^R%d+_C%d+_D%d+:%s*", "")     -- R1_C1_D1: prefix
+    name = name:gsub("^R%d+_C%d+:%s*", "")          -- R1_C1: prefix
+    name = name:gsub("^D%d+_FX:%s*", "")            -- D1_FX: prefix
+    name = name:gsub("^D%d+:%s*", "")               -- D1: prefix
+    name = name:gsub("^R%d+:%s*", "")               -- R1: prefix
     
     -- Strip common plugin format prefixes
     name = name:gsub("^VST3?: ", "")

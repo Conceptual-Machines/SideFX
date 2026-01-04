@@ -246,7 +246,7 @@ local function get_multi_select_count()
 end
 
 -- Get display name for FX (uses renamed_name if set, otherwise default name)
--- Strips internal prefixes (R1_C1:, D1:, etc.) for clean UI display
+-- Strips internal prefixes (R1_C1_D1_FX:, D1:, etc.) for clean UI display
 local function get_fx_display_name(fx)
     if not fx then return "Unknown" end
     local ok, renamed = pcall(function() return fx:get_named_config_param("renamed_name") end)
@@ -258,12 +258,13 @@ local function get_fx_display_name(fx)
     end
     
     -- Strip SideFX internal prefixes for clean UI display
-    -- R1_C1: Name -> Name
-    -- D1: Name -> Name
-    -- R1: Rack -> Rack
-    name = name:gsub("^R%d+_C%d+:%s*", "")  -- R1_C1: prefix
-    name = name:gsub("^D%d+:%s*", "")        -- D1: prefix
-    name = name:gsub("^R%d+:%s*", "")        -- R1: prefix
+    -- Patterns from most specific to least specific
+    name = name:gsub("^R%d+_C%d+_D%d+_FX:%s*", "")  -- R1_C1_D1_FX: prefix
+    name = name:gsub("^R%d+_C%d+_D%d+:%s*", "")     -- R1_C1_D1: prefix
+    name = name:gsub("^R%d+_C%d+:%s*", "")          -- R1_C1: prefix
+    name = name:gsub("^D%d+_FX:%s*", "")            -- D1_FX: prefix
+    name = name:gsub("^D%d+:%s*", "")               -- D1: prefix
+    name = name:gsub("^R%d+:%s*", "")               -- R1: prefix
     
     return name
 end
@@ -487,6 +488,13 @@ renumber_device_chain = function()
                 if new_name ~= name then
                     r.TrackFX_SetNamedConfigParm(state.track.pointer, fx.pointer, "renamed_name", new_name)
                     
+                    -- Also rename FX inside (has _FX suffix)
+                    local main_fx = get_device_main_fx(fx)
+                    if main_fx then
+                        local main_fx_name = string.format("D%d_FX: %s", device_idx, fx_name)
+                        r.TrackFX_SetNamedConfigParm(state.track.pointer, main_fx.pointer, "renamed_name", main_fx_name)
+                    end
+                    
                     -- Also rename utility inside
                     local utility = get_device_utility(fx)
                     if utility then
@@ -560,6 +568,9 @@ local function add_plugin_to_track(plugin, position)
                 if wet_idx >= 0 then
                     fx_inside:set_param_normalized(wet_idx, 1.0)
                 end
+                -- Rename FX with _FX suffix to distinguish from container
+                local fx_name = string.format("D%d_FX: %s", device_idx, short_name)
+                fx_inside:set_named_config_param("renamed_name", fx_name)
             end
             
             -- Add utility at track level, then move into container
@@ -722,47 +733,72 @@ local function add_chain_to_rack(rack, plugin)
         return nil
     end
     
-    -- Hierarchical naming:
-    -- Chain container: R1_C1: <name>
-    -- Device inside:   R1_C1_D1: <name>
-    -- Utility inside:  R1_C1_Util
+    -- Hierarchical naming (fully recursive):
+    -- Chain container:  R1_C1 (routing only)
+    -- Device container: R1_C1_D1: <name>
+    -- FX inside device: R1_C1_D1_FX: <name>
+    -- Utility:          R1_C1_D1_Util
     local short_name = get_short_plugin_name(plugin.full_name)
     local chain_prefix = string.format("%s_C%d", rack_prefix, chain_idx)
-    local chain_name = string.format("%s: %s", chain_prefix, short_name)
+    local chain_name = chain_prefix  -- Chain container has no suffix, just the prefix
+    local device_prefix = string.format("%s_D1", chain_prefix)  -- First device in chain
+    local device_name = string.format("%s: %s", device_prefix, short_name)
     
     -- Create the chain container at track level first
     local chain = state.track:add_fx_by_name("Container", false, -1)
     
     if chain and chain.pointer >= 0 then
-        -- Rename the chain container
+        -- Rename the chain container (just the prefix, no name)
         chain:set_named_config_param("renamed_name", chain_name)
         
-        -- Add the main FX inside the chain
-        local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
-        if main_fx and main_fx.pointer >= 0 then
-            chain:add_fx_to_container(main_fx, 0)
+        -- Create device container inside chain
+        local device = state.track:add_fx_by_name("Container", false, -1)
+        if device and device.pointer >= 0 then
+            -- Move device into chain first
+            chain:add_fx_to_container(device, 0)
             
-            -- Re-find FX inside container and configure
-            local fx_inside = get_device_main_fx(chain)
-            if fx_inside then
-                -- Set wet to 100%
-                local wet_idx = fx_inside:get_param_from_ident(":wet")
-                if wet_idx and wet_idx >= 0 then
-                    fx_inside:set_param_normalized(wet_idx, 1.0)
+            -- Re-find device inside chain
+            local device_inside = nil
+            for child in chain:iter_container_children() do
+                local ok, name = pcall(function() return child:get_name() end)
+                if ok and name and name:find("Container") then
+                    device_inside = child
+                    break
                 end
-                -- Rename FX with D1 (Device 1) - allows for multiple devices in chain later
-                fx_inside:set_named_config_param("renamed_name", string.format("%s_D1: %s", chain_prefix, short_name))
             end
             
-            -- Add utility
-            local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, -1)
-            if util_fx and util_fx.pointer >= 0 then
-                chain:add_fx_to_container(util_fx, 1)
+            if device_inside then
+                -- Rename the device container
+                device_inside:set_named_config_param("renamed_name", device_name)
                 
-                -- Rename utility with parent prefix
-                local util_inside = get_device_utility(chain)
-                if util_inside then
-                    util_inside:set_named_config_param("renamed_name", string.format("%s_Util", chain_prefix))
+                -- Add the main FX at track level, then move into device
+                local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
+                if main_fx and main_fx.pointer >= 0 then
+                    device_inside:add_fx_to_container(main_fx, 0)
+                    
+                    -- Re-find FX inside device and configure
+                    local fx_inside = get_device_main_fx(device_inside)
+                    if fx_inside then
+                        -- Set wet to 100%
+                        local wet_idx = fx_inside:get_param_from_ident(":wet")
+                        if wet_idx and wet_idx >= 0 then
+                            fx_inside:set_param_normalized(wet_idx, 1.0)
+                        end
+                        -- Rename FX with _FX suffix
+                        fx_inside:set_named_config_param("renamed_name", string.format("%s_FX: %s", device_prefix, short_name))
+                    end
+                    
+                    -- Add utility to device
+                    local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, -1)
+                    if util_fx and util_fx.pointer >= 0 then
+                        device_inside:add_fx_to_container(util_fx, 1)
+                        
+                        -- Rename utility
+                        local util_inside = get_device_utility(device_inside)
+                        if util_inside then
+                            util_inside:set_named_config_param("renamed_name", string.format("%s_Util", device_prefix))
+                        end
+                    end
                 end
             end
         end
