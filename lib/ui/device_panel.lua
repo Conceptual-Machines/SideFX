@@ -506,8 +506,48 @@ function M.draw(ctx, fx, opts)
             r.ImGui_EndTable(ctx.ctx)
         end
         
-        -- Skip content when panel is collapsed
+        -- Render collapsed panel content
         if is_panel_collapsed then
+            ctx:separator()
+            
+            -- UI button (centered)
+            local btn_w = panel_width - cfg.padding * 2
+            if ctx:button("UI", btn_w, 28) then
+                fx:show(3)
+                interacted = true
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Open " .. name)
+            end
+            
+            -- ON/OFF toggle
+            if enabled then
+                ctx:push_style_color(r.ImGui_Col_Button(), colors.bypass_on)
+            else
+                ctx:push_style_color(r.ImGui_Col_Button(), colors.bypass_off)
+            end
+            if ctx:button(enabled and "ON" or "OFF", btn_w, 24) then
+                fx:set_enabled(not enabled)
+                interacted = true
+            end
+            ctx:pop_style_color()
+            
+            ctx:spacing()
+            ctx:separator()
+            ctx:spacing()
+            
+            -- Wrapped name - split into lines
+            local max_chars_per_line = math.floor((panel_width - cfg.padding * 2) / 8)
+            max_chars_per_line = math.max(8, max_chars_per_line)
+            local remaining = name
+            ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAAAAFF)
+            while #remaining > 0 do
+                local line = remaining:sub(1, max_chars_per_line)
+                remaining = remaining:sub(max_chars_per_line + 1)
+                ctx:text(line)
+            end
+            ctx:pop_style_color()
+            
             ctx:end_child()  -- end panel
             ctx:pop_id()
             return interacted
