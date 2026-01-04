@@ -21,7 +21,7 @@ M.config = {
     padding = 8,               -- Padding around content
     border_radius = 6,
     fader_width = 28,          -- Fader width
-    fader_height = 100,        -- Taller fader
+    fader_height = 70,         -- Fader height
     knob_size = 48,            -- Knob diameter
 }
 
@@ -320,6 +320,23 @@ function M.draw(ctx, fx, opts)
     local ok4, param_count = pcall(function() return fx:get_num_params() end)
     if not ok4 then param_count = 0 end
     
+    -- Build list of visible params (exclude sidebar controls: wet, delta, bypass)
+    local visible_params = {}
+    for i = 0, param_count - 1 do
+        local ok_pn, pname = pcall(function() return fx:get_param_name(i) end)
+        local skip = false
+        if ok_pn and pname then
+            local lower = pname:lower()
+            if lower == "wet" or lower == "delta" or lower == "bypass" then
+                skip = true
+            end
+        end
+        if not skip then
+            table.insert(visible_params, i)
+        end
+    end
+    local visible_count = #visible_params
+    
     -- Use available height passed in opts, or default
     local avail_height = opts.avail_height or 600
     local panel_height = avail_height
@@ -329,8 +346,8 @@ function M.draw(ctx, fx, opts)
     local params_per_column = math.floor(usable_height / cfg.param_height)
     params_per_column = math.max(1, params_per_column)
     
-    -- Calculate columns needed to show ALL params
-    local num_columns = math.ceil(param_count / params_per_column)
+    -- Calculate columns needed to show visible params only
+    local num_columns = math.ceil(visible_count / params_per_column)
     num_columns = math.max(1, num_columns)
     
     -- Check if sidebar is collapsed
@@ -454,7 +471,7 @@ function M.draw(ctx, fx, opts)
         local sidebar_actual_w = is_sidebar_collapsed and 8 or cfg.sidebar_width
         local btn_h = 22
         
-        if r.ImGui_BeginTable(ctx.ctx, "device_layout_" .. guid, 2, 0) then
+        if r.ImGui_BeginTable(ctx.ctx, "device_layout_" .. guid, 2, r.ImGui_TableFlags_BordersInnerV()) then
             r.ImGui_TableSetupColumn(ctx.ctx, "params", r.ImGui_TableColumnFlags_WidthFixed(), content_width)
             r.ImGui_TableSetupColumn(ctx.ctx, "sidebar", r.ImGui_TableColumnFlags_WidthFixed(), sidebar_actual_w)
             
@@ -463,7 +480,7 @@ function M.draw(ctx, fx, opts)
             -- === PARAMS COLUMN ===
             r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
             
-            if param_count > 0 then
+            if visible_count > 0 then
                 -- Use nested table for parameter columns
                 if r.ImGui_BeginTable(ctx.ctx, "params_" .. guid, num_columns, r.ImGui_TableFlags_SizingStretchSame()) then
                     
@@ -471,16 +488,18 @@ function M.draw(ctx, fx, opts)
                         r.ImGui_TableSetupColumn(ctx.ctx, "col" .. col, r.ImGui_TableColumnFlags_WidthStretch())
                     end
                     
-                    -- Draw parameters row by row across columns
+                    -- Draw parameters row by row across columns (using pre-filtered visible_params)
                     for row = 0, params_per_column - 1 do
                         r.ImGui_TableNextRow(ctx.ctx)
                         
                         for col = 0, num_columns - 1 do
-                            local param_idx = col * params_per_column + row
+                            local visible_idx = col * params_per_column + row + 1  -- +1 for Lua 1-based
                             
                             r.ImGui_TableSetColumnIndex(ctx.ctx, col)
                             
-                            if param_idx < param_count then
+                            if visible_idx <= visible_count then
+                                local param_idx = visible_params[visible_idx]
+                                
                                 -- Safely get param info (FX might have been deleted)
                                 local ok_name, param_name = pcall(function() return fx:get_param_name(param_idx) end)
                                 local ok_val, param_val = pcall(function() return fx:get_param_normalized(param_idx) end)
@@ -554,11 +573,12 @@ function M.draw(ctx, fx, opts)
                 -- Nothing to render
             else
                 -- Expanded sidebar
-                local ctrl_w = cfg.sidebar_width - cfg.padding * 2
+                local ctrl_w = cfg.sidebar_width - cfg.padding * 2  -- Full width controls
+                local btn_w = 70  -- Narrower buttons
                 
                 -- UI button (centered)
-                center_item(ctrl_w)
-                if ctx:button("UI", ctrl_w, btn_h) then
+                center_item(btn_w)
+                if ctx:button("UI", btn_w, btn_h) then
                     fx:show(3)
                     interacted = true
                 end
@@ -567,13 +587,13 @@ function M.draw(ctx, fx, opts)
                 end
                 
                 -- ON/OFF toggle (centered)
-                center_item(ctrl_w)
+                center_item(btn_w)
                 if enabled then
                     ctx:push_style_color(r.ImGui_Col_Button(), colors.bypass_on)
                 else
                     ctx:push_style_color(r.ImGui_Col_Button(), colors.bypass_off)
                 end
-                if ctx:button(enabled and "ON" or "OFF", ctrl_w, btn_h) then
+                if ctx:button(enabled and "ON" or "OFF", btn_w, btn_h) then
                     fx:set_enabled(not enabled)
                     interacted = true
                 end
@@ -711,9 +731,9 @@ function M.draw(ctx, fx, opts)
                             pan_str = "C"
                         end
                         
-                        -- Center the pan slider
-                        center_item(ctrl_w)
-                        ctx:set_next_item_width(ctrl_w)
+                        -- Center the pan slider (narrower)
+                        center_item(btn_w)
+                        ctx:set_next_item_width(btn_w)
                         local pan_changed, new_pan_pct = ctx:slider_double("##pan", pan_pct, -100, 100, pan_str)
                         if pan_changed then
                             local new_norm = (new_pan_pct / 200) + 0.5
