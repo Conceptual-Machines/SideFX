@@ -268,15 +268,15 @@ local function draw_pan_slider(ctx, label, pan_val, width)
         pan_format = "C"
     end
     
-    local screen_x, screen_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+    local screen_x, screen_y = ctx:get_cursor_screen_pos()
+    local draw_list = ctx:get_window_draw_list()
     
     -- Background track
-    r.ImGui_DrawList_AddRectFilled(draw_list, screen_x, screen_y, screen_x + width, screen_y + slider_h, 0x333333FF, 2)
+    ctx:draw_list_add_rect_filled(draw_list, screen_x, screen_y, screen_x + width, screen_y + slider_h, 0x333333FF, 2)
     
     -- Center line (vertical tick)
     local center_x = screen_x + width / 2
-    r.ImGui_DrawList_AddLine(draw_list, center_x, screen_y - 1, center_x, screen_y + slider_h + 1, 0x666666FF, 1)
+    ctx:draw_list_add_line(draw_list, center_x, screen_y - 1, center_x, screen_y + slider_h + 1, 0x666666FF, 1)
     
     -- Pan indicator line from center
     local pan_norm = (pan_val + 100) / 200  -- 0 to 1
@@ -284,25 +284,25 @@ local function draw_pan_slider(ctx, label, pan_val, width)
     
     -- Draw filled region from center to pan position
     if pan_val < -1 then
-        r.ImGui_DrawList_AddRectFilled(draw_list, pan_x, screen_y + 1, center_x, screen_y + slider_h - 1, 0x5588AAFF, 1)
+        ctx:draw_list_add_rect_filled(draw_list, pan_x, screen_y + 1, center_x, screen_y + slider_h - 1, 0x5588AAFF, 1)
     elseif pan_val > 1 then
-        r.ImGui_DrawList_AddRectFilled(draw_list, center_x, screen_y + 1, pan_x, screen_y + slider_h - 1, 0x5588AAFF, 1)
+        ctx:draw_list_add_rect_filled(draw_list, center_x, screen_y + 1, pan_x, screen_y + slider_h - 1, 0x5588AAFF, 1)
     end
     
     -- Pan position indicator (small line)
-    r.ImGui_DrawList_AddLine(draw_list, pan_x, screen_y, pan_x, screen_y + slider_h, 0xAADDFFFF, 2)
+    ctx:draw_list_add_line(draw_list, pan_x, screen_y, pan_x, screen_y + slider_h, 0xAADDFFFF, 2)
     
     -- Text label background (full width)
     local text_y = screen_y + slider_h + gap
-    r.ImGui_DrawList_AddRectFilled(draw_list, screen_x, text_y, screen_x + width, text_y + text_h, 0x222222FF, 2)
+    ctx:draw_list_add_rect_filled(draw_list, screen_x, text_y, screen_x + width, text_y + text_h, 0x222222FF, 2)
     
     -- Invisible button for slider dragging (only covers slider area)
-    r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, screen_y)
-    r.ImGui_InvisibleButton(ctx.ctx, label .. "_slider_btn", width, slider_h)
+    ctx:set_cursor_screen_pos(screen_x, screen_y)
+    ctx:invisible_button(label .. "_slider_btn", width, slider_h)
     
     -- Handle dragging
     if ctx:is_item_active() then
-        local mouse_x = r.ImGui_GetMousePos(ctx.ctx)
+        local mouse_x = ctx:get_mouse_pos()
         local new_norm = (mouse_x - screen_x) / width
         new_norm = math.max(0, math.min(1, new_norm))
         new_val = -100 + new_norm * 200
@@ -316,12 +316,12 @@ local function draw_pan_slider(ctx, label, pan_val, width)
     end
     
     -- Draw formatted text centered
-    local text_w = r.ImGui_CalcTextSize(ctx.ctx, pan_format)
-    r.ImGui_DrawList_AddText(draw_list, screen_x + (width - text_w) / 2, text_y + 2, 0xCCCCCCFF, pan_format)
+    local text_w = ctx:calc_text_size(pan_format)
+    ctx:draw_list_add_text(draw_list, screen_x + (width - text_w) / 2, text_y + 2, 0xCCCCCCFF, pan_format)
     
     -- Invisible button for text label (separate from slider)
-    r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, text_y)
-    r.ImGui_InvisibleButton(ctx.ctx, label .. "_text_btn", width, text_h)
+    ctx:set_cursor_screen_pos(screen_x, text_y)
+    ctx:invisible_button(label .. "_text_btn", width, text_h)
     
     -- Double-click on text to edit value
     if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
@@ -331,8 +331,8 @@ local function draw_pan_slider(ctx, label, pan_val, width)
     -- Edit popup
     if ctx:begin_popup(label .. "_edit_popup") then
         ctx:set_next_item_width(60)
-        r.ImGui_SetKeyboardFocusHere(ctx.ctx)
-        local input_changed, input_val = r.ImGui_InputDouble(ctx.ctx, "##" .. label .. "_input", pan_val, 0, 0, "%.0f")
+        ctx:set_keyboard_focus_here()
+        local input_changed, input_val = ctx:input_double("##" .. label .. "_input", pan_val, 0, 0, "%.0f")
         if input_changed then
             new_val = math.max(-100, math.min(100, input_val))
             changed = true
@@ -344,7 +344,7 @@ local function draw_pan_slider(ctx, label, pan_val, width)
     end
     
     -- Advance cursor
-    r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, screen_y + total_h)
+    ctx:set_cursor_screen_pos(screen_x, screen_y + total_h)
     ctx:dummy(width, 0)
     
     return changed, new_val
@@ -445,10 +445,10 @@ local function draw_plugin_browser(ctx)
             ctx:push_id(i)
 
             -- Icon with emoji font
-            if icon_font then r.ImGui_PushFont(ctx.ctx, icon_font, icon_size) end
+            if icon_font then ctx:push_font(icon_font, icon_size) end
             local icon = plugin.is_instrument and icon_text(Icons.musical_keyboard) or icon_text(Icons.wrench)
             ctx:text(icon)
-            if icon_font then r.ImGui_PopFont(ctx.ctx) end
+            if icon_font then ctx:pop_font() end
 
             -- Text with default font
             ctx:same_line()
@@ -710,12 +710,12 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
             local controls_x = width - controls_w - 8
             
             -- Icon with emoji font
-            if icon_font then r.ImGui_PushFont(ctx.ctx, icon_font, icon_size) end
+            if icon_font then ctx:push_font(icon_font, icon_size) end
             local icon = is_container
                 and (is_expanded and icon_text(Icons.folder_open) or icon_text(Icons.folder_closed))
                 or icon_text(Icons.plug)
             ctx:text(icon)
-            if icon_font then r.ImGui_PopFont(ctx.ctx) end
+            if icon_font then ctx:pop_font() end
 
             -- Name as selectable (or input text if renaming)
             ctx:same_line()
@@ -1007,7 +1007,7 @@ local function draw_modulator_column(ctx, width)
                 ctx:same_line()
                 
                 -- Delete button
-                ctx:push_style_color(r.ImGui_Col_Button(), 0x993333FF)
+                ctx:push_style_color(imgui.Col.Button(), 0x993333FF)
                 if ctx:small_button("X##del_" .. mod.fx_idx) then
                     ctx:pop_style_color()
                     ctx:pop_id()
@@ -1019,9 +1019,9 @@ local function draw_modulator_column(ctx, width)
                 ctx:same_line()
                 
                 -- Modulator name as collapsing header
-                ctx:push_style_color(r.ImGui_Col_Header(), 0x445566FF)
-                ctx:push_style_color(r.ImGui_Col_HeaderHovered(), 0x556677FF)
-                local header_open = ctx:collapsing_header(mod.name, r.ImGui_TreeNodeFlags_DefaultOpen())
+                ctx:push_style_color(imgui.Col.Header(), 0x445566FF)
+                ctx:push_style_color(imgui.Col.HeaderHovered(), 0x556677FF)
+                local header_open = ctx:collapsing_header(mod.name, imgui.TreeNodeFlags.DefaultOpen())
                 ctx:pop_style_color(2)
                 
                 if header_open then
@@ -1042,7 +1042,7 @@ local function draw_modulator_column(ctx, width)
                             ctx:same_line(width - 30)
                             
                             -- Remove link button
-                            ctx:push_style_color(r.ImGui_Col_Button(), 0x664444FF)
+                            ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
                             if ctx:small_button("×") then
                                 remove_param_link(link.target_fx_idx, link.target_param_idx)
             end
@@ -1103,17 +1103,17 @@ end
 
 local function draw_toolbar(ctx)
     -- Refresh button
-    if icon_font then r.ImGui_PushFont(ctx.ctx, icon_font, icon_size) end
+    if icon_font then ctx:push_font(icon_font, icon_size) end
     if ctx:button(icon_text(Icons.arrows_counterclockwise)) then
         refresh_fx_list()
     end
-    if icon_font then r.ImGui_PopFont(ctx.ctx) end
+    if icon_font then ctx:pop_font() end
     if ctx:is_item_hovered() then ctx:set_tooltip("Refresh FX list") end
 
     ctx:same_line()
 
     -- Add Rack button
-    ctx:push_style_color(r.ImGui_Col_Button(), 0x446688FF)
+    ctx:push_style_color(imgui.Col.Button(), 0x446688FF)
     if ctx:button("+ Rack") then
         if state.track then
             add_rack_to_track()
@@ -1138,7 +1138,7 @@ local function draw_toolbar(ctx)
     ctx:same_line()
     
     -- Track name
-    ctx:push_style_color(r.ImGui_Col_Text(), 0xAADDFFFF)
+    ctx:push_style_color(imgui.Col.Text(), 0xAADDFFFF)
     ctx:text(state.track_name)
     ctx:pop_style_color()
 
@@ -1183,9 +1183,9 @@ local function draw_drop_zone(ctx, position, is_empty, avail_height)
     
     if is_dragging then
         -- Show visible drop indicator when dragging
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x4488FF44)
-        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x66AAFF88)
-        ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x88CCFFAA)
+        ctx:push_style_color(imgui.Col.Button(), 0x4488FF44)
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x66AAFF88)
+        ctx:push_style_color(imgui.Col.ButtonActive(), 0x88CCFFAA)
         
         ctx:button(label .. "##drop_" .. position, btn_w, zone_h)
         ctx:pop_style_color(3)
@@ -1253,7 +1253,7 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected)
         row_color = 0x44AA4488  -- Green tint when chain dragging
     end
     
-    ctx:push_style_color(r.ImGui_Col_Button(), row_color)
+    ctx:push_style_color(imgui.Col.Button(), row_color)
     if ctx:button(chain_name .. "##chain_btn", -1, 20) then
         if is_selected then
             state.expanded_path[2] = nil
@@ -1300,9 +1300,9 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected)
     -- Column 2: Enable button
     ctx:table_set_column_index(1)
     if chain_enabled then
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x44AA44FF)
+        ctx:push_style_color(imgui.Col.Button(), 0x44AA44FF)
     else
-        ctx:push_style_color(r.ImGui_Col_Button(), 0xAA4444FF)
+        ctx:push_style_color(imgui.Col.Button(), 0xAA4444FF)
     end
     if ctx:small_button(chain_enabled and "ON" or "OF") then
         pcall(function() chain:set_enabled(not chain_enabled) end)
@@ -1311,7 +1311,7 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected)
     
     -- Column 3: Delete button
     ctx:table_set_column_index(2)
-    ctx:push_style_color(r.ImGui_Col_Button(), 0x664444FF)
+    ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
     if ctx:small_button("×") then
         chain:delete()
         if is_selected then
@@ -1385,9 +1385,9 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
     local wrapper_flags = 17  -- Border + AutoResizeX
     
     -- Add padding around content, especially on the right
-    r.ImGui_PushStyleVar(ctx.ctx, r.ImGui_StyleVar_WindowPadding(), 12, 8)
+    ctx:push_style_var(imgui.StyleVar.WindowPadding(), 12, 8)
     
-    ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
+    ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
     if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, 0, rack_h, wrapper_flags) then
         -- Use table layout so header width matches content width
         local table_flags = imgui.TableFlags.SizingStretchSame()
@@ -1406,7 +1406,7 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
             
             -- Chain contents - auto-resize to fit devices
             -- Use same background as wrapper for seamless appearance
-            ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
+            ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
             -- ChildFlags: Border (1) + AutoResizeX (16) + AlwaysAutoResize (64) = 81
             local chain_content_flags = 81
             if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, chain_content_flags) then
@@ -1414,9 +1414,9 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
             if #devices == 0 then
                 -- Empty chain - show drop zone
                 if has_plugin_payload then
-                    ctx:push_style_color(r.ImGui_Col_Button(), 0x4488FF66)
+                    ctx:push_style_color(imgui.Col.Button(), 0x4488FF66)
                 else
-                    ctx:push_style_color(r.ImGui_Col_Button(), 0x33333344)
+                    ctx:push_style_color(imgui.Col.Button(), 0x33333344)
                 end
                 ctx:button("+ Drop plugin to add first device", 250, chain_content_h - 20)
                 ctx:pop_style_color()
@@ -1440,7 +1440,7 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                     -- Arrow connector between devices
                     if k > 1 then
                         ctx:same_line()
-                        ctx:push_style_color(r.ImGui_Col_Text(), 0x555555FF)
+                        ctx:push_style_color(imgui.Col.Text(), 0x555555FF)
                         ctx:text("→")
                         ctx:pop_style_color()
                         ctx:same_line()
@@ -1467,7 +1467,7 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                     else
                         -- Fallback: simple button
                         local btn_color = dev_enabled and 0x3A5A4AFF or 0x2A2A35FF
-                        ctx:push_style_color(r.ImGui_Col_Button(), btn_color)
+                        ctx:push_style_color(imgui.Col.Button(), btn_color)
                         if ctx:button(dev_name:sub(1, 20) .. "##dev_" .. k, 120, chain_content_h - 20) then
                             dev:show(3)
                         end
@@ -1479,13 +1479,13 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                 ctx:same_line(0, 4)
                 local add_btn_h = chain_content_h - 20
                 if has_plugin_payload then
-                    ctx:push_style_color(r.ImGui_Col_Button(), 0x4488FF66)
-                    ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x66AAFF88)
+                    ctx:push_style_color(imgui.Col.Button(), 0x4488FF66)
+                    ctx:push_style_color(imgui.Col.ButtonHovered(), 0x66AAFF88)
                     ctx:button("+##chain_drop", 40, add_btn_h)
                     ctx:pop_style_color(2)
                 else
-                    ctx:push_style_color(r.ImGui_Col_Button(), 0x3A4A5A88)
-                    ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x4A6A8AAA)
+                    ctx:push_style_color(imgui.Col.Button(), 0x3A4A5A88)
+                    ctx:push_style_color(imgui.Col.ButtonHovered(), 0x4A6A8AAA)
                     ctx:button("+##chain_add", 40, add_btn_h)
                     ctx:pop_style_color(2)
                 end
@@ -1516,7 +1516,7 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
         ctx:end_child()
     end
     ctx:pop_style_color()
-    r.ImGui_PopStyleVar(ctx.ctx)
+    ctx:pop_style_var()
 end
 
 -- Draw the rack panel (main rack UI without chain column)
@@ -1537,7 +1537,7 @@ local function draw_rack_panel(ctx, rack, avail_height)
     local rack_w = is_expanded and 350 or 150
     local rack_h = avail_height - 10
     
-    ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252535FF)
+    ctx:push_style_color(imgui.Col.ChildBg(), 0x252535FF)
     if ctx:begin_child("rack_" .. rack_guid, rack_w, rack_h, imgui.ChildFlags.Border()) then
         
         -- Rack header
@@ -1552,14 +1552,14 @@ local function draw_rack_panel(ctx, rack, avail_height)
         
         ctx:same_line()
         local rack_enabled = rack:get_enabled()
-        ctx:push_style_color(r.ImGui_Col_Button(), rack_enabled and 0x44AA44FF or 0xAA4444FF)
+        ctx:push_style_color(imgui.Col.Button(), rack_enabled and 0x44AA44FF or 0xAA4444FF)
         if ctx:small_button(rack_enabled and "ON" or "OF") then
             rack:set_enabled(not rack_enabled)
         end
         ctx:pop_style_color()
         
         ctx:same_line()
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x664444FF)
+        ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
         if ctx:small_button("×##rack_del") then
             rack:delete()
             refresh_fx_list()
@@ -1620,7 +1620,7 @@ local function draw_rack_panel(ctx, rack, avail_height)
             -- Chains area header
             ctx:text_colored(0xAAAAAAFF, "Chains:")
             ctx:same_line()
-            ctx:push_style_color(r.ImGui_Col_Button(), 0x446688FF)
+            ctx:push_style_color(imgui.Col.Button(), 0x446688FF)
             if ctx:small_button("+ Chain") then
                 -- TODO: Open plugin selector
             end
@@ -1656,11 +1656,11 @@ local function draw_rack_panel(ctx, rack, avail_height)
             local drop_h = 40
             local has_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
             if has_payload then
-                ctx:push_style_color(r.ImGui_Col_Button(), 0x4488FF66)
-                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x66AAFF88)
+                ctx:push_style_color(imgui.Col.Button(), 0x4488FF66)
+                ctx:push_style_color(imgui.Col.ButtonHovered(), 0x66AAFF88)
             else
-                ctx:push_style_color(r.ImGui_Col_Button(), 0x33333344)
-                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444466)
+                ctx:push_style_color(imgui.Col.Button(), 0x33333344)
+                ctx:push_style_color(imgui.Col.ButtonHovered(), 0x44444466)
             end
             ctx:button("+ Drop plugin to create new chain##rack_drop", -1, drop_h)
             ctx:pop_style_color(2)
@@ -1769,7 +1769,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
         if display_idx > 1 then
             -- Arrow connector between devices
             ctx:same_line()
-            ctx:push_style_color(r.ImGui_Col_Text(), 0x555555FF)
+            ctx:push_style_color(imgui.Col.Text(), 0x555555FF)
             ctx:text("→")
             ctx:pop_style_color()
             ctx:same_line()
@@ -1798,7 +1798,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
             end
         elseif is_container then
             -- Unknown container type - show basic view
-            ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
+            ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
             if ctx:begin_child("container_" .. guid, 180, 100, imgui.ChildFlags.Border()) then
                 ctx:text(get_fx_display_name(fx):sub(1, 15))
                 if ctx:small_button("Open") then
@@ -1866,7 +1866,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                 num_cols = math.max(1, num_cols)
                 local panel_w = col_w * num_cols + sidebar_w + 16
                 
-                ctx:push_style_color(r.ImGui_Col_ChildBg(), enabled and 0x2A2A2AFF or 0x1A1A1AFF)
+                ctx:push_style_color(imgui.Col.ChildBg(), enabled and 0x2A2A2AFF or 0x1A1A1AFF)
                 if ctx:begin_child("fx_" .. guid, panel_w, panel_h, imgui.ChildFlags.Border()) then
                     ctx:text(name:sub(1, 35))
                     ctx:separator()
@@ -1904,7 +1904,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                     local sb_w = 60
                     if ctx:begin_child("sidebar_" .. guid, sb_w, panel_h - 40, 0) then
                         if ctx:button("UI", sb_w - 4, 24) then fx:show(3) end
-                        ctx:push_style_color(r.ImGui_Col_Button(), enabled and 0x44AA44FF or 0xAA4444FF)
+                        ctx:push_style_color(imgui.Col.Button(), enabled and 0x44AA44FF or 0xAA4444FF)
                         if ctx:button(enabled and "ON" or "OFF", sb_w - 4, 24) then
                             fx:set_enabled(not enabled)
                         end
@@ -1916,7 +1916,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                             ctx:text("Wet")
                             local wet_val = fx:get_param(wet_idx)
                             ctx:set_next_item_width(sb_w - 4)
-                            local wet_changed, new_wet = r.ImGui_VSliderDouble(ctx.ctx, "##wet", sb_w - 4, 60, wet_val, 0, 1, "")
+                            local wet_changed, new_wet = ctx:v_slider_double("##wet", sb_w - 4, 60, wet_val, 0, 1, "")
                             if wet_changed then fx:set_param(wet_idx, new_wet) end
                         end
                         
@@ -1925,7 +1925,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                             ctx:text("Gain")
                             local gain_val = utility:get_param_normalized(0) or 0.5
                             ctx:set_next_item_width(sb_w - 4)
-                            local gain_changed, new_gain = r.ImGui_VSliderDouble(ctx.ctx, "##gain", sb_w - 4, 60, gain_val, 0, 1, "")
+                            local gain_changed, new_gain = ctx:v_slider_double("##gain", sb_w - 4, 60, gain_val, 0, 1, "")
                             if gain_changed then utility:set_param_normalized(0, new_gain) end
                         end
                         
@@ -1943,7 +1943,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
     
     -- Always show add button at end of chain (plus drop zone when dragging)
     ctx:same_line()
-    ctx:push_style_color(r.ImGui_Col_Text(), 0x555555FF)
+    ctx:push_style_color(imgui.Col.Text(), 0x555555FF)
     ctx:text("→")
     ctx:pop_style_color()
     ctx:same_line()
@@ -1954,9 +1954,9 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
     else
         -- Show permanent "+" button to add FX
         local add_btn_h = math.min(avail_height - 20, 80)
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x3A4A5A88)
-        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x4A6A8AAA)
-        ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x5A8ABACC)
+        ctx:push_style_color(imgui.Col.Button(), 0x3A4A5A88)
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x4A6A8AAA)
+        ctx:push_style_color(imgui.Col.ButtonActive(), 0x5A8ABACC)
         if ctx:button("+##add_end", 40, add_btn_h) then
             -- Open FX browser or add last used - for now just indicate where to drag from
             -- Could open a popup menu with recent FX here
@@ -2034,7 +2034,7 @@ local function main()
             
             -- Push default font if available
             if default_font then
-                r.ImGui_PushFont(ctx.ctx, default_font, 14)
+                ctx:push_font(default_font, 14)
             end
             
             -- Load icon font on first frame
@@ -2065,11 +2065,11 @@ local function main()
             -- Layout dimensions
             local browser_w = 260
             local modulator_w = 240
-            local avail_w, avail_h = r.ImGui_GetContentRegionAvail(ctx.ctx)
+            local avail_w, avail_h = ctx:get_content_region_avail()
             local chain_w = avail_w - browser_w - modulator_w - 20
 
             -- Plugin Browser (fixed left)
-            ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x1E1E22FF)
+            ctx:push_style_color(imgui.Col.ChildBg(), 0x1E1E22FF)
             if ctx:begin_child("Browser", browser_w, 0, imgui.ChildFlags.Border()) then
                 ctx:text("Plugins")
                 ctx:separator()
@@ -2081,8 +2081,8 @@ local function main()
             ctx:same_line()
 
             -- Device Chain (horizontal scroll, center area)
-            ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x1A1A1EFF)
-            local chain_flags = r.ImGui_WindowFlags_HorizontalScrollbar()
+            ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1EFF)
+            local chain_flags = imgui.WindowFlags.HorizontalScrollbar()
             if ctx:begin_child("DeviceChain", chain_w, 0, imgui.ChildFlags.Border(), chain_flags) then
                 
                 -- Filter out modulators from top_level_fx
@@ -2109,7 +2109,7 @@ local function main()
             
             -- Pop default font if we pushed it
             if default_font then
-                r.ImGui_PopFont(ctx.ctx)
+                ctx:pop_font()
             end
         end,
     })
