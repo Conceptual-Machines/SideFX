@@ -2927,17 +2927,27 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                         end
                     end
                     
-                    -- Draw chain contents - HORIZONTAL layout like main chain
-                    local chain_content_h = rack_h - 10
+                    -- Chain column wrapper with header
+                    local chain_display_name = get_fx_display_name(selected_chain)
+                    local chain_content_h = rack_h - 30  -- Leave room for header
                     local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
                     
                     -- Use auto-resize for width (0 = fit content)
                     -- ChildFlags: Border (1) + AutoResizeX (16) + AlwaysAutoResize (64) = 81
-                    local chain_flags = 81
+                    local chain_wrapper_flags = 81
                     
-                    ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x2A2A35FF)
-                    local chain_scroll_flags = r.ImGui_WindowFlags_None()  -- No scroll needed with auto-resize
-                    if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, chain_flags, chain_scroll_flags) then
+                    ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
+                    if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, 0, rack_h, chain_wrapper_flags) then
+                        -- Header
+                        ctx:text_colored(0xAAAAAAFF, "Chain:")
+                        ctx:same_line()
+                        ctx:text(chain_display_name)
+                        ctx:separator()
+                        
+                        -- Chain contents with horizontal scroll
+                        ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x2A2A35FF)
+                        local chain_scroll_flags = r.ImGui_WindowFlags_HorizontalScrollbar()
+                        if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, imgui.ChildFlags.Border(), chain_scroll_flags) then
                         
                         if #devices == 0 then
                             -- Empty chain - show drop zone
@@ -3041,7 +3051,10 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                         ctx:end_child()
                     end
                     ctx:pop_style_color()
+                    
+                    ctx:end_child()
                 end
+                ctx:pop_style_color()
             end
             
         elseif is_container then
