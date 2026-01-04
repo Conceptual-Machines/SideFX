@@ -2427,10 +2427,10 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
     local chain_content_h = rack_h - 30  -- Leave room for header
     local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
     
-    -- Calculate chain column width based on number of devices (min 500px)
-    local device_width = 420  -- Approximate width per device panel
-    local min_width = 500
-    local chain_col_w = math.max(min_width, #devices * device_width + 80)
+    -- Calculate chain column width based on number of devices (min 650px)
+    local device_width = 450  -- Approximate width per device panel
+    local min_width = 650
+    local chain_col_w = math.max(min_width, #devices * device_width + 100)
     
     ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
     if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, chain_col_w, rack_h, imgui.ChildFlags.Border()) then
