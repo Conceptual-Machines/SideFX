@@ -1,14 +1,15 @@
 desc:SideFX Utility
 author:Nomad Monad
-version:1.0
+version:1.1
+options:no_meter
 
-// Gain/Pan utility for gain staging
-// Designed to be inserted after each FX and controlled by SideFX UI
+// Gain/Pan/Phase utility - controlled exclusively by SideFX UI
+// All sliders hidden (- prefix), no native JSFX interface
 
-slider1:0<-24,24,0.1>Gain (dB)
-slider2:0<-100,100,1>Pan (%)
-slider3:0<0,1,1{Off,On}>Phase Invert L
-slider4:0<0,1,1{Off,On}>Phase Invert R
+slider1:0<-24,24,0.1>-Gain (dB)
+slider2:0<-100,100,1>-Pan (%)
+slider3:0<0,1,1{Off,On}>-Phase Invert L
+slider4:0<0,1,1{Off,On}>-Phase Invert R
 slider5:1<0,1,0.01>-Output Level (for metering)
 
 @init
@@ -61,42 +62,5 @@ spl1 *= phase_r;
 level = max(abs(spl0), abs(spl1));
 slider5 = slider5 * 0.95 + level * 0.05;
 
-@gfx 100 60
-gfx_clear = 0x1a1a1a;
-
-// Simple level meter
-meter_h = 50;
-meter_w = 80;
-meter_x = 10;
-meter_y = 5;
-
-// Background
-gfx_set(0.15, 0.15, 0.18, 1);
-gfx_rect(meter_x, meter_y, meter_w, meter_h);
-
-// Level bar (green to yellow to red)
-level_db = 20 * log10(max(slider5, 0.0001));
-level_norm = (level_db + 60) / 60;  // -60dB to 0dB
-level_norm = max(0, min(1, level_norm));
-
-level_norm < 0.7 ? (
-  gfx_set(0.2, 0.8, 0.3, 1);
-) : level_norm < 0.9 ? (
-  gfx_set(0.9, 0.8, 0.2, 1);
-) : (
-  gfx_set(0.9, 0.2, 0.2, 1);
-);
-
-gfx_rect(meter_x + 2, meter_y + meter_h - level_norm * (meter_h - 4) - 2, 
-         meter_w - 4, level_norm * (meter_h - 4));
-
-// dB text
-gfx_set(0.8, 0.8, 0.8, 1);
-gfx_x = meter_x + 5;
-gfx_y = meter_y + meter_h + 2;
-level_db > -60 ? (
-  gfx_drawstr(sprintf(#, "%.1f dB", level_db));
-) : (
-  gfx_drawstr("-inf");
-);
+// No @gfx - controlled exclusively by SideFX UI
 
