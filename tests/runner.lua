@@ -54,6 +54,7 @@ end
 local test_modules = {
     "unit.test_naming",
     "unit.test_patterns",
+    "unit.test_rack",
 }
 
 --------------------------------------------------------------------------------
@@ -86,7 +87,7 @@ for _, module_name in ipairs(test_modules) do
     local ok, err = pcall(function()
         -- Reset state between test modules
         assert.reset()
-        
+
         -- Clear cached module to allow re-running
         package.loaded[module_name] = nil
 
@@ -104,7 +105,7 @@ for _, module_name in ipairs(test_modules) do
     local results = assert.get_results()
     total_passed = total_passed + results.passed
     total_failed = total_failed + results.failed
-    
+
     if results.failed > 0 then
         all_passed = false
     end
@@ -125,4 +126,3 @@ output("========================================")
 if not reaper then
     os.exit(all_passed and 0 or 1)
 end
-
