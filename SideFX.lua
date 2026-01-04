@@ -352,13 +352,17 @@ local function find_paired_utility(track, fx)
     return nil
 end
 
-local function add_plugin_to_track(plugin)
+local function add_plugin_to_track(plugin, position)
     if not state.track then return end
 
     r.Undo_BeginBlock()
     
+    -- Position: -1 = end, 0+ = specific position
+    -- REAPER uses negative values for position: -1 = end, -1000 - position = insert at position
+    local fx_position = position and (-1000 - position) or -1
+    
     -- Add the FX
-    local fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
+    local fx = state.track:add_fx_by_name(plugin.full_name, false, fx_position)
     
     -- Auto-insert SideFX_Utility after it (unless it's already a utility or modulator)
     if fx and fx.pointer >= 0 then
@@ -370,7 +374,9 @@ local function add_plugin_to_track(plugin)
         
         local name = plugin.full_name:lower()
         if not name:find("sidefx_utility") and not name:find("sidefx_modulator") then
-            local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, -1)
+            -- Insert utility right after the FX we just added
+            local util_position = position and (-1000 - (fx.pointer + 1)) or -1
+            local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, util_position)
             if not util_fx or util_fx.pointer < 0 then
                 r.ShowConsoleMsg("SideFX: Could not add utility JSFX. Make sure SideFX_Utility.jsfx is installed in REAPER's Effects/SideFX folder.\n")
             end
@@ -379,6 +385,17 @@ local function add_plugin_to_track(plugin)
     end
     
     r.Undo_EndBlock("SideFX: Add FX", -1)
+    
+    return fx
+end
+
+-- Add plugin by name at a specific position
+local function add_plugin_by_name(plugin_name, position)
+    if not state.track or not plugin_name then return end
+    
+    -- Create a minimal plugin object for add_plugin_to_track
+    local plugin = { full_name = plugin_name, name = plugin_name }
+    return add_plugin_to_track(plugin, position)
 end
 
 --------------------------------------------------------------------------------
@@ -512,9 +529,16 @@ local function draw_plugin_browser(ctx)
             if ctx:selectable(plugin.name, false) then
                 add_plugin_to_track(plugin)
             end
+            
+            -- Drag source for plugin (drag to add to chain)
+            if ctx:begin_drag_drop_source() then
+                ctx:set_drag_drop_payload("PLUGIN_ADD", plugin.full_name)
+                ctx:text("Add: " .. plugin.name)
+                ctx:end_drag_drop_source()
+            end
 
             if ctx:is_item_hovered() then
-                ctx:set_tooltip(plugin.full_name)
+                ctx:set_tooltip(plugin.full_name .. "\n(drag to chain or click to add)")
             end
 
             ctx:pop_id()
@@ -1354,6 +1378,55 @@ end
 local device_panel = nil  -- Lazy loaded
 local rack_panel = nil    -- Lazy loaded
 
+-- Helper to draw a drop zone for adding plugins
+local function draw_drop_zone(ctx, position, is_empty, avail_height)
+    local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
+    local has_fx_payload = ctx:get_drag_drop_payload("FX_GUID")
+    
+    if has_plugin_payload or has_fx_payload then
+        -- Show visible drop indicator when dragging
+        local zone_w = 24
+        local zone_h = math.min(avail_height - 20, 80)
+        
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x4488FF44)
+        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x66AAFF88)
+        ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x88CCFFAA)
+        
+        local label = is_empty and "+ Drop here" or "+"
+        local btn_w = is_empty and 100 or zone_w
+        
+        ctx:button(label .. "##drop_" .. position, btn_w, zone_h)
+        ctx:pop_style_color(3)
+        
+        if ctx:begin_drag_drop_target() then
+            -- Accept plugin drops
+            local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+            if accepted and plugin_name then
+                add_plugin_by_name(plugin_name, position)
+            end
+            
+            -- Accept FX reorder drops
+            local accepted_fx, fx_guid = ctx:accept_drag_drop_payload("FX_GUID")
+            if accepted_fx and fx_guid then
+                local fx = state.track:find_fx_by_guid(fx_guid)
+                if fx then
+                    -- Move FX to new position
+                    r.TrackFX_CopyToTrack(
+                        state.track.pointer, fx.pointer,
+                        state.track.pointer, position,
+                        true  -- move
+                    )
+                    refresh_fx_list()
+                end
+            end
+            
+            ctx:end_drag_drop_target()
+        end
+        return true  -- Drop zone was shown
+    end
+    return false
+end
+
 local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
     -- Lazy load UI components
     if not device_panel then
@@ -1374,14 +1447,29 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
             if i < #fx_list and is_utility_fx(fx_list[i + 1]) then
                 utility = fx_list[i + 1]
             end
-            table.insert(display_fx, { fx = fx, utility = utility })
+            table.insert(display_fx, { fx = fx, utility = utility, original_idx = fx.pointer })
         end
     end
     
+    -- Check if we're in a drag operation
+    local is_dragging = ctx:get_drag_drop_payload("PLUGIN_ADD") or ctx:get_drag_drop_payload("FX_GUID")
+    
     if #display_fx == 0 then
-        ctx:text_disabled("No FX on track")
-        ctx:text_disabled("Drag plugins from browser →")
+        -- Empty chain - show prominent drop zone
+        if is_dragging then
+            draw_drop_zone(ctx, 0, true, avail_height)
+        else
+            ctx:text_disabled("No FX on track")
+            ctx:text_disabled("Drag plugins from browser →")
+        end
         return
+    end
+    
+    -- Drop zone before first device
+    if is_dragging then
+        if draw_drop_zone(ctx, 0, false, avail_height) then
+            ctx:same_line()
+        end
     end
     
     -- Draw each FX as a device panel, horizontally
@@ -1389,6 +1477,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
     for _, item in ipairs(display_fx) do
         local fx = item.fx
         local utility = item.utility
+        local original_idx = item.original_idx
         display_idx = display_idx + 1
         ctx:push_id("device_" .. display_idx)
         
@@ -1402,6 +1491,18 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
             ctx:text("→")
             ctx:pop_style_color()
             ctx:same_line()
+            
+            -- Drop zone between devices (only when dragging)
+            if is_dragging then
+                if draw_drop_zone(ctx, original_idx, false, avail_height) then
+                    ctx:same_line()
+                    -- Arrow after drop zone
+                    ctx:push_style_color(r.ImGui_Col_Text(), 0x555555FF)
+                    ctx:text("→")
+                    ctx:pop_style_color()
+                    ctx:same_line()
+                end
+            end
         end
         
         if is_container then
@@ -1492,6 +1593,10 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                             refresh_fx_list()
                         end
                     end,
+                    on_plugin_drop = function(plugin_name, insert_before_idx)
+                        -- Add plugin before this FX
+                        add_plugin_by_name(plugin_name, insert_before_idx)
+                    end,
                 })
             else
                 -- Fallback if device_panel not loaded
@@ -1581,6 +1686,18 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
         end
         
         ctx:pop_id()
+    end
+    
+    -- Drop zone at end of chain (only when dragging)
+    if is_dragging then
+        ctx:same_line()
+        ctx:push_style_color(r.ImGui_Col_Text(), 0x555555FF)
+        ctx:text("→")
+        ctx:pop_style_color()
+        ctx:same_line()
+        
+        -- Position after the last FX (use -1 for "at end")
+        draw_drop_zone(ctx, -1, false, avail_height)
     end
 end
 

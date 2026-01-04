@@ -404,6 +404,7 @@ function M.draw(ctx, fx, opts)
             end
             
             if ctx:begin_drag_drop_target() then
+                -- Accept FX reorder drops
                 local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
                 if accepted and payload and payload ~= guid then
                     if opts.on_drop then
@@ -411,6 +412,16 @@ function M.draw(ctx, fx, opts)
                     end
                     interacted = true
                 end
+                
+                -- Accept plugin drops (insert before this FX)
+                local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                if accepted_plugin and plugin_name then
+                    if opts.on_plugin_drop then
+                        opts.on_plugin_drop(plugin_name, fx.pointer)
+                    end
+                    interacted = true
+                end
+                
                 ctx:end_drag_drop_target()
             end
             

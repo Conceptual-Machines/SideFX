@@ -132,9 +132,10 @@ btn_h = 22                     -- Button height
 
 ### Phase 2 Remaining (UI)
 - [ ] Finalize device panel styling/colors
-- [ ] Implement proper drag & drop reordering between devices
+- [x] Implement proper drag & drop reordering between devices
+- [x] Drag & drop plugins from browser to device chain
 - [ ] Add "+" button to add FX at end of chain
-- [ ] Arrow connectors between devices (→)
+- [x] Arrow connectors between devices (→)
 
 ### Phase 3: Rack Management
 - [ ] Create `SideFX_Mixer.jsfx` (sums chains to 1-2)
