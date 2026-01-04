@@ -48,73 +48,197 @@ end
 -- Rack Creation
 --------------------------------------------------------------------------------
 
---- Add a new rack (R-container) to the current track.
--- @param position number|nil Insert position (nil = end of chain)
+--- Create a rack container with mixer (internal helper).
+-- @param rack_idx number Rack index
+-- @param position number|nil Position for track-level rack (nil = end)
 -- @return TrackFX|nil Rack container or nil on failure
-function M.add_rack_to_track(position)
+local function create_rack_container(rack_idx, position)
+    if not state.track then return nil end
+
+    local rack_name = naming.build_rack_name(rack_idx)
+
+    -- Position for the container (only used when adding to track)
+    local container_position = position and (-1000 - position) or -1
+
+    -- Create the rack container at track level
+    local rack = state.track:add_fx_by_name("Container", false, container_position)
+    if not rack or rack.pointer < 0 then
+        return nil
+    end
+
+    -- Rename the rack
+    rack:set_named_config_param("renamed_name", rack_name)
+
+    -- Set up for parallel routing (64 channels for up to 32 stereo chains)
+    rack:set_container_channels(64)
+
+    -- Add the mixer JSFX at track level, then move into rack
+    local mixer_fx = state.track:add_fx_by_name(M.MIXER_JSFX, false, -1)
+    if mixer_fx and mixer_fx.pointer >= 0 then
+        -- Move mixer into rack
+        rack:add_fx_to_container(mixer_fx, 0)
+
+        -- Rename mixer
+        local mixer_inside = nil
+        for child in rack:iter_container_children() do
+            local ok, name = pcall(function() return child:get_name() end)
+            if ok and name and ((name:find("SideFX") and name:find("Mixer")) or name:match("^_R%d+_M$")) then
+                mixer_inside = child
+                break
+            end
+        end
+        if mixer_inside then
+            mixer_inside:set_named_config_param("renamed_name", naming.build_mixer_name(rack_idx))
+
+            -- Initialize master and chain params
+            local master_0db_norm = (0 + 24) / 36  -- 0.667
+            local pan_center_norm = 0.5
+            local vol_0db_norm = (0 + 60) / 72  -- 0.833
+
+            pcall(function() mixer_inside:set_param_normalized(0, master_0db_norm) end)
+            pcall(function() mixer_inside:set_param_normalized(1, pan_center_norm) end)
+
+            for i = 1, 16 do
+                pcall(function() mixer_inside:set_param_normalized(1 + i, vol_0db_norm) end)
+                pcall(function() mixer_inside:set_param_normalized(17 + i, pan_center_norm) end)
+            end
+        end
+    else
+        r.ShowConsoleMsg("SideFX: Could not add mixer JSFX. Make sure SideFX_Mixer.jsfx is installed.\n")
+        return nil
+    end
+
+    return rack
+end
+
+--- Add a new rack (R-container) to the current track or inside another rack.
+-- Recursive function that handles both top-level racks and nested racks.
+-- @param parent_rack TrackFX|nil Parent rack container (nil = add to track)
+-- @param position number|nil Insert position (nil = end of chain, only used when adding to track)
+-- @return TrackFX|nil Rack container or nil on failure
+function M.add_rack(parent_rack, position)
     if not state.track then return nil end
 
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
 
-    -- Get next index
+    -- Get next global rack index
     local rack_idx = fx_utils.get_next_rack_index(state.track)
-    local rack_name = naming.build_rack_name(rack_idx)
 
-    -- Position for the container
-    local container_position = position and (-1000 - position) or -1
+    -- If parent is a rack, wrap in chain and add to parent
+    if parent_rack and fx_utils.is_rack_container(parent_rack) then
+        -- Create the rack container (position not used for nested racks)
+        local rack = create_rack_container(rack_idx, nil)
+        if not rack then
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
+            return nil
+        end
+        -- Get parent rack info
+        local parent_name = parent_rack:get_name()
+        local parent_idx = naming.parse_rack_index(parent_name) or 1
 
-    -- Create the rack container
-    local rack = state.track:add_fx_by_name("Container", false, container_position)
+        -- Count existing chains to determine chain index
+        local chain_count = fx_utils.count_chains_in_rack(parent_rack)
+        local chain_idx = chain_count + 1
 
-    if rack and rack.pointer >= 0 then
-        -- Rename the rack
-        rack:set_named_config_param("renamed_name", rack_name)
+        if chain_idx > 31 then
+            r.ShowConsoleMsg("SideFX: Maximum 31 chains per rack\n")
+            rack:delete()
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
+            return nil
+        end
 
-        -- Set up for parallel routing (64 channels for up to 32 stereo chains)
-        rack:set_container_channels(64)
+        -- Build chain name
+        local chain_name = naming.build_chain_name(parent_idx, chain_idx)
 
-        -- Add the mixer JSFX at track level, then move into rack
-        local mixer_fx = state.track:add_fx_by_name(M.MIXER_JSFX, false, -1)
+        -- Create chain container to hold the nested rack
+        local chain = state.track:add_fx_by_name("Container", false, -1)
+        if chain and chain.pointer >= 0 then
+            chain:set_named_config_param("renamed_name", chain_name)
+            chain:add_fx_to_container(rack, 0)
 
-        if mixer_fx and mixer_fx.pointer >= 0 then
-            -- Move mixer into rack
-            rack:add_fx_to_container(mixer_fx, 0)
-
-            -- Rename mixer
-            local mixer_inside = nil
-            for child in rack:iter_container_children() do
+            -- Find mixer position in parent rack
+            local mixer_pos = 0
+            local pos = 0
+            for child in parent_rack:iter_container_children() do
                 local ok, name = pcall(function() return child:get_name() end)
-                if ok and name and ((name:find("SideFX") and name:find("Mixer")) or name:match("^_R%d+_M$")) then
-                    mixer_inside = child
+                if ok and name and (name:match("^_") or name:find("Mixer")) then
+                    mixer_pos = pos
+                    break
+                end
+                pos = pos + 1
+            end
+
+            -- Move chain into parent rack
+            parent_rack:add_fx_to_container(chain, mixer_pos)
+
+            -- Set up routing for the chain
+            local chain_inside = nil
+            for child in parent_rack:iter_container_children() do
+                local ok, name = pcall(function() return child:get_name() end)
+                if ok and name == chain_name then
+                    chain_inside = child
                     break
                 end
             end
-            if mixer_inside then
-                mixer_inside:set_named_config_param("renamed_name", naming.build_mixer_name(rack_idx))
 
-                -- Initialize master and chain params
-                local master_0db_norm = (0 + 24) / 36  -- 0.667
-                local pan_center_norm = 0.5
-                local vol_0db_norm = (0 + 60) / 72  -- 0.833
+            if chain_inside then
+                chain_inside:set_container_channels(64)
 
-                pcall(function() mixer_inside:set_param_normalized(0, master_0db_norm) end)
-                pcall(function() mixer_inside:set_param_normalized(1, pan_center_norm) end)
+                -- Set output channel routing
+                local out_channel = chain_idx * 2
+                local left_bits = math.floor(2 ^ out_channel)
+                local right_bits = math.floor(2 ^ (out_channel + 1))
 
-                for i = 1, 16 do
-                    pcall(function() mixer_inside:set_param_normalized(1 + i, vol_0db_norm) end)
-                    pcall(function() mixer_inside:set_param_normalized(17 + i, pan_center_norm) end)
-                end
+                chain_inside:set_pin_mappings(1, 0, left_bits, 0)
+                chain_inside:set_pin_mappings(1, 1, right_bits, 0)
             end
-        else
-            r.ShowConsoleMsg("SideFX: Could not add mixer JSFX. Make sure SideFX_Mixer.jsfx is installed.\n")
+
+            -- Set parent rack mixer volume for this chain to 0dB
+            local parent_mixer = fx_utils.get_rack_mixer(parent_rack)
+            if parent_mixer then
+                local vol_param = M.get_mixer_chain_volume_param(chain_idx)
+                local normalized_0db = 60 / 72  -- 0.833...
+                parent_mixer:set_param_normalized(vol_param, normalized_0db)
+
+                local pan_param = M.get_mixer_chain_pan_param(chain_idx)
+                parent_mixer:set_param_normalized(pan_param, 0.5)
+            end
         end
+
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Rack", -1)
+        return rack
+    else
+        -- Add to track at specified position
+        local rack = create_rack_container(rack_idx, position)
+        if not rack then
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
+            return nil
+        end
+
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Rack", -1)
+        return rack
     end
+end
 
-    r.PreventUIRefresh(-1)
-    r.Undo_EndBlock("SideFX: Add Rack", -1)
+--- Add a new rack (R-container) to the current track.
+-- @param position number|nil Insert position (nil = end of chain)
+-- @return TrackFX|nil Rack container or nil on failure
+function M.add_rack_to_track(position)
+    return M.add_rack(nil, position)
+end
 
-    return rack
+--- Add a nested rack as a new chain inside an existing rack.
+-- Creates a chain container with a fully functional rack inside it.
+-- @param parent_rack TrackFX Parent rack container
+-- @return TrackFX|nil Nested rack container or nil on failure
+function M.add_nested_rack_to_rack(parent_rack)
+    return M.add_rack(parent_rack, nil)
 end
 
 --------------------------------------------------------------------------------
