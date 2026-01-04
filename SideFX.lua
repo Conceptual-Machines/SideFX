@@ -744,64 +744,52 @@ local function add_chain_to_rack(rack, plugin)
     local device_prefix = string.format("%s_D1", chain_prefix)  -- First device in chain
     local device_name = string.format("%s: %s", device_prefix, short_name)
     
-    -- Create the chain container at track level first
-    local chain = state.track:add_fx_by_name("Container", false, -1)
+    -- Build device container completely at track level first, then nest it
+    -- This avoids issues with nested container addressing
     
+    -- Step 1: Create device container at track level
+    local device = state.track:add_fx_by_name("Container", false, -1)
+    if not device or device.pointer < 0 then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Chain (failed)", -1)
+        return nil
+    end
+    device:set_named_config_param("renamed_name", device_name)
+    
+    -- Step 2: Add FX to device container (while still at track level)
+    local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
+    if main_fx and main_fx.pointer >= 0 then
+        device:add_fx_to_container(main_fx, 0)
+        
+        -- Re-find and configure FX
+        local fx_inside = get_device_main_fx(device)
+        if fx_inside then
+            local wet_idx = fx_inside:get_param_from_ident(":wet")
+            if wet_idx and wet_idx >= 0 then
+                fx_inside:set_param_normalized(wet_idx, 1.0)
+            end
+            fx_inside:set_named_config_param("renamed_name", string.format("%s_FX: %s", device_prefix, short_name))
+        end
+    end
+    
+    -- Step 3: Add utility to device container (while still at track level)
+    local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, -1)
+    if util_fx and util_fx.pointer >= 0 then
+        device:add_fx_to_container(util_fx, 1)
+        
+        local util_inside = get_device_utility(device)
+        if util_inside then
+            util_inside:set_named_config_param("renamed_name", string.format("%s_Util", device_prefix))
+        end
+    end
+    
+    -- Step 4: Create chain container at track level
+    local chain = state.track:add_fx_by_name("Container", false, -1)
     if chain and chain.pointer >= 0 then
-        -- Rename the chain container (just the prefix, no name)
         chain:set_named_config_param("renamed_name", chain_name)
         
-        -- Create device container inside chain
-        local device = state.track:add_fx_by_name("Container", false, -1)
-        if device and device.pointer >= 0 then
-            -- Move device into chain first
-            chain:add_fx_to_container(device, 0)
-            
-            -- Re-find device inside chain
-            local device_inside = nil
-            for child in chain:iter_container_children() do
-                local ok, name = pcall(function() return child:get_name() end)
-                if ok and name and name:find("Container") then
-                    device_inside = child
-                    break
-                end
-            end
-            
-            if device_inside then
-                -- Rename the device container
-                device_inside:set_named_config_param("renamed_name", device_name)
-                
-                -- Add the main FX at track level, then move into device
-                local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
-                if main_fx and main_fx.pointer >= 0 then
-                    device_inside:add_fx_to_container(main_fx, 0)
-                    
-                    -- Re-find FX inside device and configure
-                    local fx_inside = get_device_main_fx(device_inside)
-                    if fx_inside then
-                        -- Set wet to 100%
-                        local wet_idx = fx_inside:get_param_from_ident(":wet")
-                        if wet_idx and wet_idx >= 0 then
-                            fx_inside:set_param_normalized(wet_idx, 1.0)
-                        end
-                        -- Rename FX with _FX suffix
-                        fx_inside:set_named_config_param("renamed_name", string.format("%s_FX: %s", device_prefix, short_name))
-                    end
-                    
-                    -- Add utility to device
-                    local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, -1)
-                    if util_fx and util_fx.pointer >= 0 then
-                        device_inside:add_fx_to_container(util_fx, 1)
-                        
-                        -- Rename utility
-                        local util_inside = get_device_utility(device_inside)
-                        if util_inside then
-                            util_inside:set_named_config_param("renamed_name", string.format("%s_Util", device_prefix))
-                        end
-                    end
-                end
-            end
-        end
+        -- Step 5: Move device into chain (device is complete now)
+        chain:add_fx_to_container(device, 0)
         
         -- Move the chain container into the rack (before the internal mixer)
         local mixer_pos = 0
