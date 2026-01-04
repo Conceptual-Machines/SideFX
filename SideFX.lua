@@ -597,6 +597,48 @@ local function handle_fx_drop_target(ctx, fx, guid, is_container)
     end
 end
 
+--- Move FX to track level (out of all containers).
+local function move_fx_to_track_level(guid)
+    local fx = state.track:find_fx_by_guid(guid)
+    if not fx then return end
+    
+    while fx:get_parent_container() do
+        fx:move_out_of_container()
+        fx = state.track:find_fx_by_guid(guid)
+        if not fx then break end
+    end
+end
+
+--- Move FX to a target container by navigating through hierarchy.
+local function move_fx_to_container(guid, target_container_guid)
+    local target_container = state.track:find_fx_by_guid(target_container_guid)
+    if not target_container then return end
+    
+    -- Build path from root to target container
+    local target_path = {}
+    local container = target_container
+    while container do
+        table.insert(target_path, 1, container:get_guid())
+        container = container:get_parent_container()
+    end
+    
+    -- Move FX through each level
+    for _, container_guid in ipairs(target_path) do
+        local fx = state.track:find_fx_by_guid(guid)
+        if not fx then break end
+        
+        local current_parent = fx:get_parent_container()
+        local current_parent_guid = current_parent and current_parent:get_guid() or nil
+        
+        if current_parent_guid ~= container_guid then
+            local c = state.track:find_fx_by_guid(container_guid)
+            if c then
+                c:add_fx_to_container(fx)
+            end
+        end
+    end
+end
+
 --------------------------------------------------------------------------------
 -- UI: FX List Column (reusable for any level)
 --------------------------------------------------------------------------------
@@ -624,45 +666,13 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
                         if depth == 1 then
                             -- Move to track level (only if FX is in a container)
                             if fx_parent then
-                                while fx:get_parent_container() do
-                                    fx:move_out_of_container()
-                                    fx = state.track:find_fx_by_guid(guid)
-                                    if not fx then break end
-                                end
+                                move_fx_to_track_level(guid)
                                 refresh_fx_list()
                             end
-                        elseif parent_container_guid then
-                            -- Move into this column's container (if not already there)
-                            if fx_parent_guid ~= parent_container_guid then
-                                local target_container = state.track:find_fx_by_guid(parent_container_guid)
-                                if target_container then
-                                    -- Build path from FX to target container
-                                    -- We need to move through intermediate containers
-                                    local target_path = {}  -- GUIDs from root to target
-                                    local container = target_container
-                                    while container do
-                                        table.insert(target_path, 1, container:get_guid())
-                                        container = container:get_parent_container()
-                                    end
-                                    
-                                    -- Move FX through each level
-                                    for _, container_guid in ipairs(target_path) do
-                                        fx = state.track:find_fx_by_guid(guid)
-                                        if not fx then break end
-                                        
-                                        local current_parent = fx:get_parent_container()
-                                        local current_parent_guid = current_parent and current_parent:get_guid() or nil
-                                        
-                                        if current_parent_guid ~= container_guid then
-                                            local c = state.track:find_fx_by_guid(container_guid)
-                                            if c then
-                                                c:add_fx_to_container(fx)
-                                            end
-                                        end
-                                    end
-                                    refresh_fx_list()
-                                end
-                            end
+                        elseif parent_container_guid and fx_parent_guid ~= parent_container_guid then
+                            -- Move into this column's container
+                            move_fx_to_container(guid, parent_container_guid)
+                            refresh_fx_list()
                         end
                     end
                 end
