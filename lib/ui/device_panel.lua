@@ -354,8 +354,8 @@ function M.draw(ctx, fx, opts)
     local panel_height, panel_width, content_width, num_columns, params_per_column
     
     if is_panel_collapsed then
-        -- Collapsed: just header bar
-        panel_height = cfg.header_height + 4
+        -- Collapsed: full height but narrow width
+        panel_height = avail_height
         panel_width = 140  -- Minimal width for collapsed panel
         content_width = 0
         num_columns = 0
