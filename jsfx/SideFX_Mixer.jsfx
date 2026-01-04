@@ -1,62 +1,43 @@
 desc:SideFX Chain Mixer
 author:Nomad Monad
-version:1.0
+version:1.1
 options:no_meter
 
-// Internal mixer for R-containers - sums parallel chains to stereo
-// This is an implementation detail, controlled by SideFX UI
+// Internal mixer for R-containers - sums all parallel chains to stereo
+// Supports up to 32 stereo chains (64 channels)
+// Each chain has its own utility for gain control, so this just sums
 
-// Configure for 8 inputs, 2 outputs
-in_pin:Chain 1 L
-in_pin:Chain 1 R
-in_pin:Chain 2 L
-in_pin:Chain 2 R
-in_pin:Chain 3 L
-in_pin:Chain 3 R
-in_pin:Chain 4 L
-in_pin:Chain 4 R
-out_pin:Mix L
-out_pin:Mix R
+// Use all 64 channels
+in_pin:none
+out_pin:none
 
-// Hidden sliders (- prefix hides from UI, controlled via API)
-slider1:0<-24,12,0.1>-Chain 1 (dB)
-slider2:0<-24,12,0.1>-Chain 2 (dB)
-slider3:0<-24,12,0.1>-Chain 3 (dB)
-slider4:0<-24,12,0.1>-Chain 4 (dB)
-slider5:0<-24,12,0.1>-Master (dB)
-slider6:0<0,1,1{Off,On}>-Mute Chain 1
-slider7:0<0,1,1{Off,On}>-Mute Chain 2
-slider8:0<0,1,1{Off,On}>-Mute Chain 3
-slider9:0<0,1,1{Off,On}>-Mute Chain 4
+slider1:0<-24,12,0.1>-Master (dB)
 
 @init
 smooth_coeff = exp(-1 / (srate * 0.005));  // 5ms smoothing
-gain1_smooth = 1;
-gain2_smooth = 1;
-gain3_smooth = 1;
-gain4_smooth = 1;
 master_smooth = 1;
+num_ch = 64;  // Max channels to sum
 
 @slider
-gain1 = slider6 ? 0 : 10 ^ (slider1 / 20);
-gain2 = slider7 ? 0 : 10 ^ (slider2 / 20);
-gain3 = slider8 ? 0 : 10 ^ (slider3 / 20);
-gain4 = slider9 ? 0 : 10 ^ (slider4 / 20);
-master = 10 ^ (slider5 / 20);
+master = 10 ^ (slider1 / 20);
 
 @sample
-// Smooth gain changes
-gain1_smooth = gain1_smooth * smooth_coeff + gain1 * (1 - smooth_coeff);
-gain2_smooth = gain2_smooth * smooth_coeff + gain2 * (1 - smooth_coeff);
-gain3_smooth = gain3_smooth * smooth_coeff + gain3 * (1 - smooth_coeff);
-gain4_smooth = gain4_smooth * smooth_coeff + gain4 * (1 - smooth_coeff);
+// Smooth master gain
 master_smooth = master_smooth * smooth_coeff + master * (1 - smooth_coeff);
 
-// Sum all chains
-out_l = spl0 * gain1_smooth + spl2 * gain2_smooth + spl4 * gain3_smooth + spl6 * gain4_smooth;
-out_r = spl1 * gain1_smooth + spl3 * gain2_smooth + spl5 * gain3_smooth + spl7 * gain4_smooth;
+// Sum all stereo pairs to output on 1/2
+out_l = 0;
+out_r = 0;
 
-// Apply master and output
+// Sum channels 0-63 in pairs
+ch = 0;
+while (ch < num_ch) (
+  out_l += spl(ch);
+  out_r += spl(ch + 1);
+  ch += 2;
+);
+
+// Output to channels 1/2
 spl0 = out_l * master_smooth;
 spl1 = out_r * master_smooth;
 

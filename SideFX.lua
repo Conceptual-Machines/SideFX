@@ -637,8 +637,8 @@ local function add_rack_to_track(position)
         -- Rename the rack
         rack:set_named_config_param("renamed_name", rack_name)
         
-        -- Set up for parallel routing (8 channels for 4 stereo chains)
-        rack:set_container_channels(8)
+        -- Set up for parallel routing (64 channels for up to 32 stereo chains)
+        rack:set_container_channels(64)
         
         -- Add the mixer JSFX at track level, then move into rack
         local mixer_fx = state.track:add_fx_by_name(MIXER_JSFX, false, -1)
@@ -700,9 +700,9 @@ local function add_chain_to_rack(rack, plugin)
     -- Chain index (1-based)
     local chain_idx = chain_count + 1
     
-    -- Max 4 chains (limited by 8 channels / 2 per chain)
-    if chain_idx > 4 then
-        r.ShowConsoleMsg("SideFX: Maximum 4 chains per rack (limited by channel count)\n")
+    -- Max 32 chains (64 channels / 2 per stereo chain)
+    if chain_idx > 32 then
+        r.ShowConsoleMsg("SideFX: Maximum 32 chains per rack (64 channel limit)\n")
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Chain to Rack (failed)", -1)
         return nil
