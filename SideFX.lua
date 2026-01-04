@@ -2446,13 +2446,13 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
         if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, chain_content_flags) then
             
             if #devices == 0 then
-                -- Empty chain - show drop zone
+                -- Empty chain - show drop zone (wider for better UX)
                 if has_plugin_payload then
                     ctx:push_style_color(r.ImGui_Col_Button(), 0x4488FF66)
                 else
                     ctx:push_style_color(r.ImGui_Col_Button(), 0x33333344)
                 end
-                ctx:button("+ Drop plugin to add first device", 200, chain_content_h - 20)
+                ctx:button("+ Drop plugin to add first device", 400, chain_content_h - 20)
                 ctx:pop_style_color()
                 
                 if ctx:begin_drag_drop_target() then
@@ -2510,19 +2510,23 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                 end
                 
                 -- Drop zone / add button at end of chain
-                ctx:same_line(0, 4)
+                ctx:same_line(0, 8)
                 local add_btn_h = chain_content_h - 20
                 if has_plugin_payload then
                     ctx:push_style_color(r.ImGui_Col_Button(), 0x4488FF66)
                     ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x66AAFF88)
-                    ctx:button("+##chain_drop", 40, add_btn_h)
+                    ctx:button("+##chain_drop", 60, add_btn_h)
                     ctx:pop_style_color(2)
                 else
                     ctx:push_style_color(r.ImGui_Col_Button(), 0x3A4A5A88)
                     ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x4A6A8AAA)
-                    ctx:button("+##chain_add", 40, add_btn_h)
+                    ctx:button("+##chain_add", 60, add_btn_h)
                     ctx:pop_style_color(2)
                 end
+                
+                -- Add padding at end for visual balance
+                ctx:same_line()
+                r.ImGui_Dummy(ctx.ctx, 20, 1)
                 
                 if ctx:begin_drag_drop_target() then
                     local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
