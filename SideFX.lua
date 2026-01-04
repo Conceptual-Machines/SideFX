@@ -1204,7 +1204,7 @@ local function draw_toolbar(ctx)
 
     ctx:same_line()
 
-    -- Add Rack button
+    -- Add Rack button (also draggable)
     ctx:push_style_color(imgui.Col.Button(), 0x446688FF)
     if ctx:button("+ Rack") then
         if state.track then
@@ -1212,7 +1212,13 @@ local function draw_toolbar(ctx)
         end
     end
     ctx:pop_style_color()
-    if ctx:is_item_hovered() then ctx:set_tooltip("Add new parallel rack") end
+    -- Drag source for rack
+    if ctx:begin_drag_drop_source() then
+        ctx:set_drag_drop_payload("RACK_ADD", "new_rack")
+        ctx:text("Drop to create Rack")
+        ctx:end_drag_drop_source()
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Click to add rack at end\nOr drag to drop anywhere") end
 
     ctx:same_line()
 
@@ -1946,25 +1952,37 @@ local function draw_rack_panel(ctx, rack, avail_height)
                 end
             end
 
-            -- Drop zone for creating new chains
+            -- Drop zone for creating new chains or nested racks
             ctx:spacing()
             local drop_h = 40
-            local has_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
-            if has_payload then
+            local has_plugin = ctx:get_drag_drop_payload("PLUGIN_ADD")
+            local has_rack = ctx:get_drag_drop_payload("RACK_ADD")
+            local has_drop_payload = has_plugin or has_rack
+            if has_drop_payload then
                 ctx:push_style_color(imgui.Col.Button(), 0x4488FF66)
                 ctx:push_style_color(imgui.Col.ButtonHovered(), 0x66AAFF88)
             else
                 ctx:push_style_color(imgui.Col.Button(), 0x33333344)
                 ctx:push_style_color(imgui.Col.ButtonHovered(), 0x44444466)
             end
-            ctx:button("+ Drop plugin to create new chain##rack_drop", -1, drop_h)
+            ctx:button("+ Drop plugin or rack##rack_drop", -1, drop_h)
             ctx:pop_style_color(2)
 
             if ctx:begin_drag_drop_target() then
+                -- Accept plugin drops -> create new chain
                 local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
                 if accepted and plugin_name then
                     local plugin = { full_name = plugin_name, name = plugin_name }
                     add_chain_to_rack(rack, plugin)
+                end
+                -- Accept rack drops -> create nested rack as new chain
+                local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+                if rack_accepted then
+                    -- For nested racks: create a chain, then add a rack inside it
+                    -- For now, we create a chain with Container as the FX
+                    local plugin = { full_name = "Container", name = "Nested Rack" }
+                    local chain = add_chain_to_rack(rack, plugin)
+                    -- TODO: Convert the chain's device into a proper rack structure
                 end
                 ctx:end_drag_drop_target()
             end
@@ -2036,7 +2054,10 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
 
     if #display_fx == 0 then
         -- Empty chain - full height drop zone (always visible)
-        local is_dragging = ctx:get_drag_drop_payload("PLUGIN_ADD") or ctx:get_drag_drop_payload("FX_GUID")
+        local has_plugin = ctx:get_drag_drop_payload("PLUGIN_ADD")
+        local has_fx = ctx:get_drag_drop_payload("FX_GUID")
+        local has_rack = ctx:get_drag_drop_payload("RACK_ADD")
+        local is_dragging = has_plugin or has_fx or has_rack
         local drop_h = avail_height - 10
 
         if is_dragging then
@@ -2049,17 +2070,23 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
             ctx:push_style_color(imgui.Col.ButtonActive(), 0x5A8ABAAA)
         end
 
-        ctx:button("+ Drop plugin to add first device##empty_drop", 200, drop_h)
+        ctx:button("+ Drop plugin or rack##empty_drop", 200, drop_h)
         ctx:pop_style_color(3)
 
         if ctx:is_item_hovered() then
-            ctx:set_tooltip("Drag plugin here to add")
+            ctx:set_tooltip("Drag plugin or rack here")
         end
 
         if ctx:begin_drag_drop_target() then
+            -- Accept plugin drops
             local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
             if accepted and plugin_name then
                 add_plugin_by_name(plugin_name, 0)
+            end
+            -- Accept rack drops
+            local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+            if rack_accepted then
+                add_rack_to_track(0)
             end
             ctx:end_drag_drop_target()
         end
@@ -2159,6 +2186,11 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                         local insert_pos = container and container.pointer or insert_before_idx
                         add_plugin_by_name(plugin_name, insert_pos)
                     end,
+                    on_rack_drop = function(insert_before_idx)
+                        -- Add rack before this FX/container
+                        local insert_pos = container and container.pointer or insert_before_idx
+                        add_rack_to_track(insert_pos)
+                    end,
                 })
             else
                 -- Fallback if device_panel not loaded
@@ -2254,7 +2286,10 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
     ctx:same_line()
 
     local add_btn_h = avail_height - 10
-    local is_dragging = ctx:get_drag_drop_payload("PLUGIN_ADD") or ctx:get_drag_drop_payload("FX_GUID")
+    local has_plugin = ctx:get_drag_drop_payload("PLUGIN_ADD")
+    local has_fx = ctx:get_drag_drop_payload("FX_GUID")
+    local has_rack = ctx:get_drag_drop_payload("RACK_ADD")
+    local is_dragging = has_plugin or has_fx or has_rack
 
     if is_dragging then
         ctx:push_style_color(imgui.Col.Button(), 0x4488FF44)
@@ -2270,14 +2305,19 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
     ctx:pop_style_color(3)
 
     if ctx:is_item_hovered() then
-        ctx:set_tooltip("Drag plugin here to add\nor click to add FX")
+        ctx:set_tooltip("Drag plugin or rack here")
     end
 
-    -- Drop target for plugins
+    -- Drop target for plugins and racks
     if ctx:begin_drag_drop_target() then
         local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
         if accepted and plugin_name then
             add_plugin_by_name(plugin_name, nil)  -- nil = add at end
+        end
+        -- Accept rack drops
+        local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+        if rack_accepted then
+            add_rack_to_track(nil)  -- nil = add at end
         end
         ctx:end_drag_drop_target()
     end
