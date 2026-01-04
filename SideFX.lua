@@ -877,14 +877,14 @@ local function draw_fx_detail_column(ctx, width)
                 if use_two_cols then
                     local half = math.ceil(param_count / 2)
 
-                    if r.ImGui_BeginTable(ctx.ctx, "ParamTable", 2) then
-                        r.ImGui_TableSetupColumn(ctx.ctx, "Col1", r.ImGui_TableColumnFlags_WidthStretch())
-                        r.ImGui_TableSetupColumn(ctx.ctx, "Col2", r.ImGui_TableColumnFlags_WidthStretch())
+                    if ctx:begin_table("ParamTable", 2) then
+                        ctx:table_setup_column("Col1", imgui.TableColumnFlags.WidthStretch())
+                        ctx:table_setup_column("Col2", imgui.TableColumnFlags.WidthStretch())
 
                         for row = 0, half - 1 do
-                            r.ImGui_TableNextRow(ctx.ctx)
+                            ctx:table_next_row()
 
-                            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+                            ctx:table_set_column_index(0)
                             local i = row
                             if i < param_count then
                                 local name = fx:get_param_name(i)
@@ -901,7 +901,7 @@ local function draw_fx_detail_column(ctx, width)
                                 ctx:pop_id()
                             end
 
-                            r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+                            ctx:table_set_column_index(1)
                             local j = row + half
                             if j < param_count then
                                 local name = fx:get_param_name(j)
@@ -919,7 +919,7 @@ local function draw_fx_detail_column(ctx, width)
                             end
                         end
 
-                        r.ImGui_EndTable(ctx.ctx)
+                        ctx:end_table()
                     end
                 else
                     for i = 0, param_count - 1 do
