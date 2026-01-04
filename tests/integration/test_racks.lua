@@ -27,10 +27,10 @@ package.path = reawrap_path .. "lua/?.lua;" .. package.path
 
 local r = reaper
 local assert = require("assertions")
-local naming = require("naming")
-local fx_utils = require("fx_utils")
-local rack_module = require("rack")
-local state_module = require("state")
+local naming = require("lib.naming")
+local fx_utils = require("lib.fx_utils")
+local rack_module = require("lib.rack")
+local state_module = require("lib.state")
 
 -- Load ReaWrap
 local Track = require("track")

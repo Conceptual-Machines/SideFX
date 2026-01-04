@@ -4,7 +4,7 @@
 -- @author Nomad Monad
 -- @license MIT
 
-local naming = require('naming')
+local naming = require('lib.naming')
 
 local M = {}
 
@@ -39,10 +39,10 @@ function M.is_device_container(fx)
     if not fx then return false end
     local ok, is_cont = pcall(function() return fx:is_container() end)
     if not ok or not is_cont then return false end
-    
+
     local ok2, name = pcall(function() return fx:get_name() end)
     if not ok2 or not name then return false end
-    
+
     return naming.is_device_name(name)
 end
 
@@ -53,10 +53,10 @@ function M.is_chain_container(fx)
     if not fx then return false end
     local ok, is_cont = pcall(function() return fx:is_container() end)
     if not ok or not is_cont then return false end
-    
+
     local ok2, name = pcall(function() return fx:get_name() end)
     if not ok2 or not name then return false end
-    
+
     return naming.is_chain_name(name)
 end
 
@@ -67,10 +67,10 @@ function M.is_rack_container(fx)
     if not fx then return false end
     local ok, is_cont = pcall(function() return fx:is_container() end)
     if not ok or not is_cont then return false end
-    
+
     local ok2, name = pcall(function() return fx:get_name() end)
     if not ok2 or not name then return false end
-    
+
     return naming.is_rack_name(name)
 end
 
@@ -93,7 +93,7 @@ end
 -- @return string Clean display name
 function M.get_display_name(fx)
     if not fx then return "Unknown" end
-    
+
     -- Try renamed name first
     local ok, renamed = pcall(function() return fx:get_named_config_param("renamed_name") end)
     local name
@@ -103,7 +103,7 @@ function M.get_display_name(fx)
         local ok2, raw_name = pcall(function() return fx:get_name() end)
         name = ok2 and raw_name or "Unknown"
     end
-    
+
     return naming.strip_sidefx_prefixes(name)
 end
 
@@ -129,8 +129,8 @@ function M.rename_fx(fx, new_display_name)
     local internal_name = M.get_internal_name(fx)
     local prefix = naming.extract_prefix(internal_name)
     local new_internal_name = prefix .. new_display_name
-    local ok = pcall(function() 
-        fx:set_named_config_param("renamed_name", new_internal_name) 
+    local ok = pcall(function()
+        fx:set_named_config_param("renamed_name", new_internal_name)
     end)
     return ok
 end
@@ -184,11 +184,11 @@ end
 -- @return TrackFX|nil Paired utility or nil
 function M.find_paired_utility(track, fx)
     if not track or not fx then return nil end
-    
+
     local fx_idx = fx.pointer
     local next_idx = fx_idx + 1
     local total = track:get_track_fx_count()
-    
+
     if next_idx < total then
         local next_fx = track:get_track_fx(next_idx)
         if next_fx and M.is_utility_fx(next_fx) then
@@ -283,4 +283,3 @@ function M.count_chains_in_rack(rack)
 end
 
 return M
-

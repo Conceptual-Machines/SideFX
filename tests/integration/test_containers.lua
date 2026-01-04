@@ -27,8 +27,8 @@ package.path = reawrap_path .. "lua/?.lua;" .. package.path
 
 local r = reaper
 local assert = require("assertions")
-local naming = require("naming")
-local fx_utils = require("fx_utils")
+local naming = require("lib.naming")
+local fx_utils = require("lib.fx_utils")
 
 -- Load ReaWrap
 local Project = require("project")
