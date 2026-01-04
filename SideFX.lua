@@ -301,7 +301,7 @@ local function draw_pan_slider(ctx, label, pan_val, width)
     r.ImGui_InvisibleButton(ctx.ctx, label .. "_slider_btn", width, slider_h)
     
     -- Handle dragging
-    if r.ImGui_IsItemActive(ctx.ctx) then
+    if ctx:is_item_active() then
         local mouse_x = r.ImGui_GetMousePos(ctx.ctx)
         local new_norm = (mouse_x - screen_x) / width
         new_norm = math.max(0, math.min(1, new_norm))
@@ -310,7 +310,7 @@ local function draw_pan_slider(ctx, label, pan_val, width)
     end
     
     -- Double-click on slider to reset to center
-    if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+    if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
         new_val = 0
         changed = true
     end
@@ -324,12 +324,12 @@ local function draw_pan_slider(ctx, label, pan_val, width)
     r.ImGui_InvisibleButton(ctx.ctx, label .. "_text_btn", width, text_h)
     
     -- Double-click on text to edit value
-    if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
-        r.ImGui_OpenPopup(ctx.ctx, label .. "_edit_popup")
+    if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
+        ctx:open_popup(label .. "_edit_popup")
     end
     
     -- Edit popup
-    if r.ImGui_BeginPopup(ctx.ctx, label .. "_edit_popup") then
+    if ctx:begin_popup(label .. "_edit_popup") then
         ctx:set_next_item_width(60)
         r.ImGui_SetKeyboardFocusHere(ctx.ctx)
         local input_changed, input_val = r.ImGui_InputDouble(ctx.ctx, "##" .. label .. "_input", pan_val, 0, 0, "%.0f")
@@ -337,15 +337,15 @@ local function draw_pan_slider(ctx, label, pan_val, width)
             new_val = math.max(-100, math.min(100, input_val))
             changed = true
         end
-        if r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Enter()) or r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Escape()) then
-            r.ImGui_CloseCurrentPopup(ctx.ctx)
+        if ctx:is_key_pressed(imgui.Key.Enter()) or ctx:is_key_pressed(imgui.Key.Escape()) then
+            ctx:close_current_popup()
         end
-        r.ImGui_EndPopup(ctx.ctx)
+        ctx:end_popup()
     end
     
     -- Advance cursor
     r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, screen_y + total_h)
-    r.ImGui_Dummy(ctx.ctx, width, 0)
+    ctx:dummy(width, 0)
     
     return changed, new_val
 end
@@ -737,7 +737,7 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
                     state.rename_text = ""
                 end
                 -- Check if item was deactivated after edit (clicked away)
-                if r.ImGui_IsItemDeactivatedAfterEdit(ctx.ctx) then
+                if ctx:is_item_deactivated_after_edit() then
                     if state.rename_text ~= "" then
                         -- Save renamed name
                         fx:set_named_config_param("renamed_name", state.rename_text)
@@ -746,7 +746,7 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
                     state.rename_text = ""
                 end
                 -- Cancel on Escape
-                if ctx:is_key_pressed(r.ImGui_Key_Escape()) then
+                if ctx:is_key_pressed(imgui.Key.Escape()) then
                     -- Cancel rename
                     state.renaming_fx = nil
                     state.rename_text = ""
@@ -1062,27 +1062,27 @@ local function draw_modulator_column(ctx, width)
                     
                     -- Dropdown 1: Select target FX
                     ctx:set_next_item_width(width - 20)
-                    if r.ImGui_BeginCombo(ctx.ctx, "##targetfx_" .. i, fx_preview) then
+                    if ctx:begin_combo("##targetfx_" .. i, fx_preview) then
                         for _, fx in ipairs(linkable_fx) do
-                            if r.ImGui_Selectable(ctx.ctx, fx.name .. "##fx_" .. fx.fx_idx) then
+                            if ctx:selectable(fx.name .. "##fx_" .. fx.fx_idx) then
                                 state.mod_selected_target[mod.fx_idx] = {fx_idx = fx.fx_idx, name = fx.name, params = fx.params}
                             end
                         end
-                        r.ImGui_EndCombo(ctx.ctx)
+                        ctx:end_combo()
                     end
                     
                     -- Dropdown 2: Select parameter (only if FX is selected)
                     if selected_target then
                         ctx:set_next_item_width(width - 20)
-                        if r.ImGui_BeginCombo(ctx.ctx, "##targetparam_" .. i, "Select param...") then
+                        if ctx:begin_combo("##targetparam_" .. i, "Select param...") then
                             for _, param in ipairs(selected_target.params) do
-                                if r.ImGui_Selectable(ctx.ctx, param.name .. "##p_" .. param.idx) then
+                                if ctx:selectable(param.name .. "##p_" .. param.idx) then
                                     create_param_link(mod.fx_idx, selected_target.fx_idx, param.idx)
                                     -- Clear selection after linking
                                     state.mod_selected_target[mod.fx_idx] = nil
                                 end
                             end
-                            r.ImGui_EndCombo(ctx.ctx)
+                            ctx:end_combo()
                         end
                     end
                 end
@@ -1220,7 +1220,7 @@ local function draw_drop_zone(ctx, position, is_empty, avail_height)
         if not is_empty then
             return false  -- Don't reserve space between items when not dragging
         end
-        r.ImGui_Dummy(ctx.ctx, btn_w, zone_h)
+        ctx:dummy(btn_w, zone_h)
     end
     return true
 end
@@ -1335,7 +1335,7 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected)
                 local new_norm = (new_vol_db + 24) / 36
                 pcall(function() mixer:set_param_normalized(vol_param, new_norm) end)
             end
-            if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+            if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
                 pcall(function() mixer:set_param_normalized(vol_param, (0 + 24) / 36) end)
             end
         else
@@ -1431,7 +1431,7 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                 end
             else
                 -- Draw each device HORIZONTALLY with arrows
-                r.ImGui_BeginGroup(ctx.ctx)
+                ctx:begin_group()
                 
                 for k, dev in ipairs(devices) do
                     local dev_name = get_fx_display_name(dev)
@@ -1503,7 +1503,7 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                     ctx:set_tooltip("Drag plugin here to add device")
                 end
                 
-                r.ImGui_EndGroup(ctx.ctx)
+                ctx:end_group()
             end
             
                 ctx:end_child()
@@ -1592,7 +1592,7 @@ local function draw_rack_panel(ctx, rack, avail_height)
                         if gain_changed then
                             pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
                         end
-                        if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                        if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
                             pcall(function() mixer:set_param_normalized(0, (0 + 24) / 36) end)
                         end
                     else
@@ -1978,7 +1978,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
     
     -- Extra padding at end to ensure scrolling doesn't cut off the + button
     ctx:same_line()
-    r.ImGui_Dummy(ctx.ctx, 20, 1)
+    ctx:dummy(20, 1)
 end
 
 --------------------------------------------------------------------------------
