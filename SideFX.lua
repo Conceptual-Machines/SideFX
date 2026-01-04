@@ -663,8 +663,8 @@ local function add_rack_to_track(position)
             -- Rename mixer
             local mixer_inside = nil
             for child in rack:iter_container_children() do
-                local name = child:get_name()
-                if name:find("SideFX_Mixer") or name:find("SideFX Mixer") then
+                local ok, name = pcall(function() return child:get_name() end)
+                if ok and name and (name:find("SideFX_Mixer") or name:find("SideFX Mixer")) then
                     mixer_inside = child
                     break
                 end
@@ -704,8 +704,8 @@ local function add_chain_to_rack(rack, plugin)
     -- Count existing chains in this rack (exclude mixer)
     local chain_count = 0
     for child in rack:iter_container_children() do
-        local name = child:get_name()
-        if not name:match("^_") and not name:find("Mixer") then
+        local ok, name = pcall(function() return child:get_name() end)
+        if ok and name and not name:match("^_") and not name:find("Mixer") then
             chain_count = chain_count + 1
         end
     end
@@ -767,8 +767,8 @@ local function add_chain_to_rack(rack, plugin)
         local mixer_pos = 0
         local pos = 0
         for child in rack:iter_container_children() do
-            local name = child:get_name()
-            if name:match("^_") or name:find("Mixer") then
+            local ok, name = pcall(function() return child:get_name() end)
+            if ok and name and (name:match("^_") or name:find("Mixer")) then
                 mixer_pos = pos
                 break
             end
@@ -780,8 +780,8 @@ local function add_chain_to_rack(rack, plugin)
         -- Re-find chain inside rack to set pin mappings
         local chain_inside = nil
         for child in rack:iter_container_children() do
-            local name = child:get_name()
-            if name == chain_name then
+            local ok, name = pcall(function() return child:get_name() end)
+            if ok and name == chain_name then
                 chain_inside = child
                 break
             end
@@ -844,7 +844,10 @@ local function dissolve_container(container)
     -- Get all children before we start moving them
     local children = {}
     for child in container:iter_container_children() do
-        children[#children + 1] = child:get_guid()
+        local ok, guid = pcall(function() return child:get_guid() end)
+        if ok and guid then
+            children[#children + 1] = guid
+        end
     end
 
     if #children == 0 then
@@ -1945,9 +1948,9 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
             -- Get chains from rack (filter out internal mixer)
             local chains = {}
             for child in rack:iter_container_children() do
-                local child_name = child:get_name()
+                local ok, child_name = pcall(function() return child:get_name() end)
                 -- Skip internal mixer (prefixed with _)
-                if not child_name:match("^_") and not child_name:find("Mixer") then
+                if ok and child_name and not child_name:match("^_") and not child_name:find("Mixer") then
                     table.insert(chains, child)
                 end
             end
