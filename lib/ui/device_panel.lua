@@ -702,7 +702,47 @@ function M.draw(ctx, fx, opts)
                 ctx:spacing()
                 ctx:separator()
                 
-                -- Wet/Dry control as KNOB
+                -- Container Mix control (parallel dry/wet blend) - only if we have a container
+                local container = opts.container
+                if container then
+                    local ok_mix, mix_idx = pcall(function() return container:get_param_from_ident(":wet") end)
+                    if ok_mix and mix_idx and mix_idx >= 0 then
+                        local ok_mv, mix_val = pcall(function() return container:get_param_normalized(mix_idx) end)
+                        if ok_mv and mix_val then
+                            -- Center "Mix" label
+                            local mix_text = "Mix"
+                            local mix_text_w = r.ImGui_CalcTextSize(ctx.ctx, mix_text)
+                            center_item(mix_text_w)
+                            ctx:push_style_color(r.ImGui_Col_Text(), 0xCC88FFFF)  -- Purple for container
+                            ctx:text(mix_text)
+                            ctx:pop_style_color()
+                            
+                            -- Center the knob
+                            center_item(cfg.knob_size)
+                            local mix_changed, new_mix = draw_knob(ctx, "##mix_knob", mix_val, cfg.knob_size)
+                            if mix_changed then
+                                pcall(function() container:set_param_normalized(mix_idx, new_mix) end)
+                                interacted = true
+                            end
+                            
+                            -- Center value below knob
+                            local mix_val_text = string.format("%.0f%%", mix_val * 100)
+                            local mix_val_text_w = r.ImGui_CalcTextSize(ctx.ctx, mix_val_text)
+                            center_item(mix_val_text_w)
+                            ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAAAAFF)
+                            ctx:text(mix_val_text)
+                            ctx:pop_style_color()
+                            
+                            if r.ImGui_IsItemHovered(ctx.ctx) then
+                                ctx:set_tooltip(string.format("Device Mix: %.0f%% (parallel blend)", mix_val * 100))
+                            end
+                            
+                            ctx:spacing()
+                        end
+                    end
+                end
+                
+                -- FX Wet/Dry control as KNOB (internal FX wet/dry)
                 local ok_wet, wet_idx = pcall(function() return fx:get_param_from_ident(":wet") end)
                 if ok_wet and wet_idx and wet_idx >= 0 then
                     local ok_wv, wet_val = pcall(function() return fx:get_param_normalized(wet_idx) end)

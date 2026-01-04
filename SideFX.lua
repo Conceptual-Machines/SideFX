@@ -339,7 +339,9 @@ local UTILITY_JSFX = "JS:SideFX/SideFX_Utility"
 local function is_utility_fx(fx)
     if not fx then return false end
     local name = fx:get_name()
-    return name and (name:find("SideFX_Utility") or name:find("SideFX Utility"))
+    if not name then return false end
+    -- Check for original JSFX name or renamed D{n}_Util format
+    return name:find("SideFX_Utility") or name:find("SideFX Utility") or name:match("^D%d+_Util$")
 end
 
 local function find_paired_utility(track, fx)
