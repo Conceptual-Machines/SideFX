@@ -188,11 +188,6 @@ local is_rack_container = fx_utils.is_rack_container
 local get_device_main_fx = fx_utils.get_device_main_fx
 get_device_utility = fx_utils.get_device_utility
 
--- Wrapper functions using fx_utils and naming modules
-local function get_next_device_index()
-    return fx_utils.get_next_device_index(state.track)
-end
-
 local get_short_plugin_name = naming.get_short_plugin_name
 
 -- Renumber all D-containers after chain changes
@@ -262,10 +257,6 @@ local MIXER_JSFX = rack_module.MIXER_JSFX
 local get_rack_mixer = fx_utils.get_rack_mixer
 local get_mixer_chain_volume_param = rack_module.get_mixer_chain_volume_param
 local get_mixer_chain_pan_param = rack_module.get_mixer_chain_pan_param
-
-local function get_next_rack_index()
-    return fx_utils.get_next_rack_index(state.track)
-end
 
 -- Custom pan slider with center line indicator
 -- Returns: changed (bool), new_value (-100 to +100)
