@@ -365,7 +365,7 @@ end
 -- D-Container (Device) Helpers
 --------------------------------------------------------------------------------
 
--- Check if a container is a SideFX device container (D-prefix)
+-- Check if a container is a SideFX device container (D-prefix for top-level)
 local function is_device_container(fx)
     if not fx then return false end
     local ok, is_cont = pcall(function() return fx:is_container() end)
@@ -377,7 +377,20 @@ local function is_device_container(fx)
     return name:match("^D%d") ~= nil
 end
 
--- Check if a container is a SideFX rack container (R-prefix)
+-- Check if a container is a SideFX chain container (R{n}_C{n} pattern for chains inside racks)
+local function is_chain_container(fx)
+    if not fx then return false end
+    local ok, is_cont = pcall(function() return fx:is_container() end)
+    if not ok or not is_cont then return false end
+    
+    local ok2, name = pcall(function() return fx:get_name() end)
+    if not ok2 or not name then return false end
+    
+    -- Match R{n}_C{n}: pattern (e.g., R1_C1: ReaComp)
+    return name:match("^R%d+_C%d+") ~= nil
+end
+
+-- Check if a container is a SideFX rack container (R-prefix, not a chain)
 local function is_rack_container(fx)
     if not fx then return false end
     local ok, is_cont = pcall(function() return fx:is_container() end)
@@ -386,7 +399,8 @@ local function is_rack_container(fx)
     local ok2, name = pcall(function() return fx:get_name() end)
     if not ok2 or not name then return false end
     
-    return name:match("^R%d") ~= nil
+    -- Match R{n}: pattern but NOT R{n}_C{n} (which is a chain)
+    return name:match("^R%d+:") ~= nil and not name:match("^R%d+_C%d+")
 end
 
 -- Get the main FX from a D-container (first non-utility child)
@@ -662,7 +676,7 @@ local function add_rack_to_track(position)
     return rack
 end
 
--- Add a chain (D-container) to an existing rack (R-container)
+-- Add a chain (C-container) to an existing rack (R-container)
 local function add_chain_to_rack(rack, plugin)
     if not rack or not plugin then return nil end
     if not is_rack_container(rack) then return nil end
@@ -670,23 +684,34 @@ local function add_chain_to_rack(rack, plugin)
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
     
-    -- Get rack index from name
+    -- Get rack name for prefix (e.g., "R1")
     local rack_name = rack:get_name()
-    local rack_idx = rack_name:match("^R(%d+)") or "1"
+    local rack_prefix = rack_name:match("^(R%d+)") or "R1"
     
-    -- Count existing chains in this rack
+    -- Count existing chains in this rack (exclude mixer)
     local chain_count = 0
     for child in rack:iter_container_children() do
         local name = child:get_name()
-        if is_device_container(child) or name:match("^D%d+%.%d+") then
+        if not name:match("^_") and not name:find("Mixer") then
             chain_count = chain_count + 1
         end
     end
     
-    -- Create D-container for this chain with nested numbering (e.g., D2.1)
+    -- Chain index (1-based)
     local chain_idx = chain_count + 1
+    
+    -- Max 4 chains (limited by 8 channels / 2 per chain)
+    if chain_idx > 4 then
+        r.ShowConsoleMsg("SideFX: Maximum 4 chains per rack (limited by channel count)\n")
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Chain to Rack (failed)", -1)
+        return nil
+    end
+    
+    -- Hierarchical naming: R1_C1: <plugin name>
     local short_name = get_short_plugin_name(plugin.full_name)
-    local chain_name = string.format("D%s.%d: %s", rack_idx, chain_idx, short_name)
+    local chain_prefix = string.format("%s_C%d", rack_prefix, chain_idx)
+    local chain_name = string.format("%s: %s", chain_prefix, short_name)
     
     -- Create the chain container at track level first
     local chain = state.track:add_fx_by_name("Container", false, -1)
@@ -700,13 +725,16 @@ local function add_chain_to_rack(rack, plugin)
         if main_fx and main_fx.pointer >= 0 then
             chain:add_fx_to_container(main_fx, 0)
             
-            -- Set wet to 100%
+            -- Re-find FX inside container and configure
             local fx_inside = get_device_main_fx(chain)
             if fx_inside then
+                -- Set wet to 100%
                 local wet_idx = fx_inside:get_param_from_ident(":wet")
-                if wet_idx >= 0 then
+                if wet_idx and wet_idx >= 0 then
                     fx_inside:set_param_normalized(wet_idx, 1.0)
                 end
+                -- Rename FX with parent prefix
+                fx_inside:set_named_config_param("renamed_name", string.format("%s: %s", chain_prefix, short_name))
             end
             
             -- Add utility
@@ -714,16 +742,15 @@ local function add_chain_to_rack(rack, plugin)
             if util_fx and util_fx.pointer >= 0 then
                 chain:add_fx_to_container(util_fx, 1)
                 
-                -- Rename utility
+                -- Rename utility with parent prefix
                 local util_inside = get_device_utility(chain)
                 if util_inside then
-                    util_inside:set_named_config_param("renamed_name", string.format("D%s.%d_Util", rack_idx, chain_idx))
+                    util_inside:set_named_config_param("renamed_name", string.format("%s_Util", chain_prefix))
                 end
             end
         end
         
         -- Move the chain container into the rack (before the internal mixer)
-        -- Find mixer position (internal mixer has _ prefix or "Mixer" in name)
         local mixer_pos = 0
         local pos = 0
         for child in rack:iter_container_children() do
@@ -736,6 +763,33 @@ local function add_chain_to_rack(rack, plugin)
         end
         
         rack:add_fx_to_container(chain, mixer_pos)
+        
+        -- Re-find chain inside rack to set pin mappings
+        local chain_inside = nil
+        for child in rack:iter_container_children() do
+            local name = child:get_name()
+            if name == chain_name then
+                chain_inside = child
+                break
+            end
+        end
+        
+        if chain_inside then
+            -- Set output channel routing for this chain
+            -- All chains read from 1/2, output to different channel pairs:
+            -- Chain 1 → 1/2, Chain 2 → 3/4, Chain 3 → 5/6, Chain 4 → 7/8
+            -- Pin mappings use bitmask: bit N = channel N (0-indexed)
+            local out_channel = (chain_idx - 1) * 2  -- 0, 2, 4, 6 (0-indexed)
+            
+            -- Calculate bitmasks: 2^out_channel for left, 2^(out_channel+1) for right
+            local left_bits = math.floor(2 ^ out_channel)      -- 1, 4, 16, 64
+            local right_bits = math.floor(2 ^ (out_channel + 1)) -- 2, 8, 32, 128
+            
+            chain_inside:set_pin_mappings(1, 0, left_bits, 0)   -- output pin 0 (left)
+            chain_inside:set_pin_mappings(1, 1, right_bits, 0)  -- output pin 1 (right)
+            
+            -- Input pins stay on 1/2 (default) so all chains process the same input
+        end
         
         refresh_fx_list()
     end
