@@ -80,9 +80,11 @@ end
 
 local function find_fx_by_name_pattern(pattern)
     if not test_track then return nil end
-    for fx in test_track:iter_track_fx_chain() do
-        local name = fx:get_name()
-        if name and name:match(pattern) then
+    -- Search recursively through all FX including inside containers
+    for entry in test_track:iter_all_fx_flat() do
+        local fx = entry.fx
+        local ok, name = pcall(function() return fx:get_name() end)
+        if ok and name and name:match(pattern) then
             return fx
         end
     end
@@ -292,6 +294,10 @@ local function test_deeply_nested_racks()
     -- Level 2: Create nested rack inside rack1
     local rack2 = rack_module.add_nested_rack_to_rack(rack1)
     assert.not_nil(rack2, "Level 2 rack should be created")
+
+    -- Re-find rack2 before adding to it (reference may be stale after move)
+    rack2 = find_fx_by_name_pattern("^R2:")
+    assert.not_nil(rack2, "Should find R2 before nesting")
 
     -- Level 3: Create nested rack inside rack2
     local rack3 = rack_module.add_nested_rack_to_rack(rack2)
