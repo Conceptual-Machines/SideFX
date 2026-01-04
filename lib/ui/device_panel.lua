@@ -742,40 +742,8 @@ function M.draw(ctx, fx, opts)
                     end
                 end
                 
-                -- FX Wet/Dry control as KNOB (internal FX wet/dry)
-                local ok_wet, wet_idx = pcall(function() return fx:get_param_from_ident(":wet") end)
-                if ok_wet and wet_idx and wet_idx >= 0 then
-                    local ok_wv, wet_val = pcall(function() return fx:get_param_normalized(wet_idx) end)
-                    if ok_wv and wet_val then
-                        -- Center "Wet" label
-                        local wet_text = "Wet"
-                        local wet_text_w = r.ImGui_CalcTextSize(ctx.ctx, wet_text)
-                        center_item(wet_text_w)
-                        ctx:push_style_color(r.ImGui_Col_Text(), 0x88AACCFF)
-                        ctx:text(wet_text)
-                        ctx:pop_style_color()
-                        
-                        -- Center the knob
-                        center_item(cfg.knob_size)
-                        local wet_changed, new_wet = draw_knob(ctx, "##wet_knob", wet_val, cfg.knob_size)
-                        if wet_changed then
-                            pcall(function() fx:set_param_normalized(wet_idx, new_wet) end)
-                            interacted = true
-                        end
-                        
-                        -- Center value below knob
-                        local val_text = string.format("%.0f%%", wet_val * 100)
-                        local val_text_w = r.ImGui_CalcTextSize(ctx.ctx, val_text)
-                        center_item(val_text_w)
-                        ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAAAAFF)
-                        ctx:text(val_text)
-                        ctx:pop_style_color()
-                        
-                        if r.ImGui_IsItemHovered(ctx.ctx) then
-                            ctx:set_tooltip(string.format("Wet: %.0f%%", wet_val * 100))
-                        end
-                    end
-                end
+                -- Internal FX Wet/Dry is hidden (set to 100% internally)
+                -- Container Mix control above serves as the main parallel blend
                 
                 -- Delta Solo control
                 local ok_delta, delta_idx = pcall(function() return fx:get_param_from_ident(":delta") end)
