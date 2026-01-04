@@ -354,8 +354,11 @@ local function is_utility_fx(fx)
     if not fx then return false end
     local name = fx:get_name()
     if not name then return false end
-    -- Check for original JSFX name or renamed D{n}_Util format
-    return name:find("SideFX_Utility") or name:find("SideFX Utility") or name:match("^D%d+_Util$")
+    -- Check for original JSFX name or renamed utility formats:
+    -- D{n}_Util (top-level device)
+    -- R{n}_C{m}_D{p}_Util (device inside chain inside rack)
+    return name:find("SideFX_Utility") or name:find("SideFX Utility") or 
+           name:match("^D%d+_Util$") or name:match("_Util$")
 end
 
 local function find_paired_utility(track, fx)
@@ -640,6 +643,133 @@ local function get_next_rack_index()
     return max_idx + 1
 end
 
+-- Get the mixer FX from a rack container
+local function get_rack_mixer(rack)
+    if not rack then return nil end
+    for child in rack:iter_container_children() do
+        local ok, name = pcall(function() return child:get_name() end)
+        if ok and name then
+            -- Mixer is named _R{n}_M or contains "Mixer"
+            if name:match("^_R%d+_M$") or (name:find("SideFX") and name:find("Mixer")) then
+                return child
+            end
+        end
+    end
+    return nil
+end
+
+-- Get the parameter index for chain volume in the mixer
+-- Parameter index is based on DECLARATION ORDER in JSFX, not slider number!
+-- slider1 (Master Gain) = param 0
+-- slider2 (Master Pan) = param 1
+-- slider10-25 (Chain 1-16 Vol) = param 2-17
+-- slider30-45 (Chain 1-16 Pan) = param 18-33
+local function get_mixer_chain_volume_param(chain_index)
+    return 1 + chain_index  -- Chain 1 = param 2, Chain 2 = param 3, etc.
+end
+
+-- Get the parameter index for chain pan in the mixer
+local function get_mixer_chain_pan_param(chain_index)
+    return 17 + chain_index  -- Chain 1 Pan = param 18, Chain 2 Pan = param 19, etc.
+end
+
+-- Custom pan slider with center line indicator
+-- Returns: changed (bool), new_value (-100 to +100)
+local function draw_pan_slider(ctx, label, pan_val, width)
+    width = width or 50
+    local slider_h = 6
+    local text_h = 16
+    local gap = 2
+    local total_h = slider_h + gap + text_h
+    
+    -- Format label
+    local pan_format
+    if pan_val <= -1 then
+        pan_format = string.format("%.0fL", -pan_val)
+    elseif pan_val >= 1 then
+        pan_format = string.format("%.0fR", pan_val)
+    else
+        pan_format = "C"
+    end
+    
+    local screen_x, screen_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+    
+    -- Background track
+    r.ImGui_DrawList_AddRectFilled(draw_list, screen_x, screen_y, screen_x + width, screen_y + slider_h, 0x333333FF, 2)
+    
+    -- Center line (vertical tick)
+    local center_x = screen_x + width / 2
+    r.ImGui_DrawList_AddLine(draw_list, center_x, screen_y - 1, center_x, screen_y + slider_h + 1, 0x666666FF, 1)
+    
+    -- Pan indicator line from center
+    local pan_norm = (pan_val + 100) / 200  -- 0 to 1
+    local pan_x = screen_x + pan_norm * width
+    
+    -- Draw filled region from center to pan position
+    if pan_val < -1 then
+        r.ImGui_DrawList_AddRectFilled(draw_list, pan_x, screen_y + 1, center_x, screen_y + slider_h - 1, 0x5588AAFF, 1)
+    elseif pan_val > 1 then
+        r.ImGui_DrawList_AddRectFilled(draw_list, center_x, screen_y + 1, pan_x, screen_y + slider_h - 1, 0x5588AAFF, 1)
+    end
+    
+    -- Pan position indicator (small line)
+    r.ImGui_DrawList_AddLine(draw_list, pan_x, screen_y, pan_x, screen_y + slider_h, 0xAADDFFFF, 2)
+    
+    -- Text label background (full width)
+    local text_y = screen_y + slider_h + gap
+    r.ImGui_DrawList_AddRectFilled(draw_list, screen_x, text_y, screen_x + width, text_y + text_h, 0x222222FF, 2)
+    
+    -- Invisible slider for dragging interaction (covers slider area)
+    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_FrameBg(), 0x00000000)
+    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_FrameBgHovered(), 0x00000000)
+    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_FrameBgActive(), 0x00000000)
+    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_SliderGrab(), 0x00000000)
+    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_SliderGrabActive(), 0x00000000)
+    
+    r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, screen_y)
+    ctx:set_next_item_width(width)
+    local changed, new_val = ctx:slider_double(label, pan_val, -100, 100, "")
+    
+    -- Double-click to reset to center
+    if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+        new_val = 0
+        changed = true
+    end
+    
+    r.ImGui_PopStyleColor(ctx.ctx, 5)
+    
+    -- Draw formatted text centered (clickable to edit)
+    local text_w = r.ImGui_CalcTextSize(ctx.ctx, pan_format)
+    r.ImGui_DrawList_AddText(draw_list, screen_x + (width - text_w) / 2, text_y + 2, 0xCCCCCCFF, pan_format)
+    
+    -- Invisible button for click detection
+    r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, text_y)
+    r.ImGui_InvisibleButton(ctx.ctx, label .. "_text_btn", width, text_h)
+    
+    -- Ctrl+click to type value
+    if r.ImGui_IsItemClicked(ctx.ctx) and r.ImGui_GetKeyMods(ctx.ctx) == r.ImGui_Mod_Ctrl() then
+        r.ImGui_OpenPopup(ctx.ctx, label .. "_edit_popup")
+    end
+    
+    -- Edit popup
+    if r.ImGui_BeginPopup(ctx.ctx, label .. "_edit_popup") then
+        ctx:set_next_item_width(60)
+        r.ImGui_SetKeyboardFocusHere(ctx.ctx)
+        local input_changed, input_val = r.ImGui_InputDouble(ctx.ctx, "##" .. label .. "_input", pan_val, 0, 0, "%.0f")
+        if input_changed then
+            new_val = math.max(-100, math.min(100, input_val))
+            changed = true
+        end
+        if r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Enter()) or r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Escape()) then
+            r.ImGui_CloseCurrentPopup(ctx.ctx)
+        end
+        r.ImGui_EndPopup(ctx.ctx)
+    end
+    
+    return changed, new_val
+end
+
 -- Add a new rack (R-container) to the track
 local function add_rack_to_track(position)
     if not state.track then return nil end
@@ -684,6 +814,23 @@ local function add_rack_to_track(position)
             if mixer_inside then
                 -- Use consistent naming: _R1_M (underscore = internal/hidden)
                 mixer_inside:set_named_config_param("renamed_name", string.format("_R%d_M", rack_idx))
+                
+                -- Initialize master and chain params:
+                -- Param 0 = Master Gain (0 dB = 0.667 in range -24 to +12)
+                -- Param 1 = Master Pan (center = 0.5)
+                -- Params 2-17 = Chain volumes (0 dB = 0.833 in range -60 to +12)
+                -- Params 18-33 = Chain pans (center = 0.5)
+                local master_0db_norm = (0 + 24) / 36  -- 0.667
+                local pan_center_norm = 0.5
+                local vol_0db_norm = (0 + 60) / 72  -- 0.833
+                
+                pcall(function() mixer_inside:set_param_normalized(0, master_0db_norm) end)  -- Master gain
+                pcall(function() mixer_inside:set_param_normalized(1, pan_center_norm) end)  -- Master pan
+                
+                for i = 1, 16 do
+                    pcall(function() mixer_inside:set_param_normalized(1 + i, vol_0db_norm) end)  -- Vol params 2-17
+                    pcall(function() mixer_inside:set_param_normalized(17 + i, pan_center_norm) end)  -- Pan params 18-33
+                end
             end
         else
             r.ShowConsoleMsg("SideFX: Could not add mixer JSFX. Make sure SideFX_Mixer.jsfx is installed in REAPER's Effects/SideFX folder.\n")
@@ -816,6 +963,10 @@ local function add_chain_to_rack(rack, plugin)
         end
         
         if chain_inside then
+            -- CRITICAL: Set chain container to have enough internal channels
+            -- Without this, output pin mappings to channels 3+ have nowhere to go!
+            chain_inside:set_container_channels(64)
+            
             -- Set output channel routing for this chain
             -- All chains read from 1/2 (main signal), output to sideband channels:
             -- Chain 1 → 3/4, Chain 2 → 5/6, Chain 3 → 7/8, Chain 4 → 9/10, etc.
@@ -1984,11 +2135,13 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                 end
             end
             
-            local rack_w = is_expanded and 200 or 150
-            local rack_h = math.min(avail_height - 20, is_expanded and 450 or 120)
+            local rack_w = is_expanded and 350 or 150
+            local rack_h = avail_height - 10  -- Use full available height
             
             ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252535FF)
-            if ctx:begin_child("rack_" .. rack_guid, rack_w, rack_h, imgui.ChildFlags.Border()) then
+            -- Add vertical scrollbar flag for rack panel
+            local rack_scroll_flags = r.ImGui_WindowFlags_None()  -- Vertical scroll auto-appears
+            if ctx:begin_child("rack_" .. rack_guid, rack_w, rack_h, imgui.ChildFlags.Border(), rack_scroll_flags) then
                 
                 -- Rack header
                 local expand_icon = is_expanded and "▼" or "▶"
@@ -2001,9 +2154,18 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                 end
                 
                 ctx:same_line()
-                if ctx:small_button("UI##rack_ui") then
-                    rack:show(3)
+                -- Rack enable/disable button
+                local rack_enabled = rack:get_enabled()
+                if rack_enabled then
+                    ctx:push_style_color(r.ImGui_Col_Button(), 0x44AA44FF)
+                else
+                    ctx:push_style_color(r.ImGui_Col_Button(), 0xAA4444FF)
                 end
+                if ctx:small_button(rack_enabled and "ON" or "OF") then
+                    rack:set_enabled(not rack_enabled)
+                end
+                ctx:pop_style_color()
+                
                 ctx:same_line()
                 ctx:push_style_color(r.ImGui_Col_Button(), 0x664444FF)
                 if ctx:small_button("×##rack_del") then
@@ -2015,6 +2177,74 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                 if is_expanded then
                     ctx:separator()
                     
+                    -- Get the mixer for volume controls
+                    local mixer = get_rack_mixer(rack)
+                    
+                    -- Master output controls - single line with label, gain, pan
+                    if mixer then
+                        if r.ImGui_BeginTable(ctx.ctx, "master_controls", 3, r.ImGui_TableFlags_SizingStretchProp()) then
+                            r.ImGui_TableSetupColumn(ctx.ctx, "label", r.ImGui_TableColumnFlags_WidthFixed(), 50)
+                            r.ImGui_TableSetupColumn(ctx.ctx, "gain", r.ImGui_TableColumnFlags_WidthStretch(), 1)
+                            r.ImGui_TableSetupColumn(ctx.ctx, "pan", r.ImGui_TableColumnFlags_WidthFixed(), 70)
+                            r.ImGui_TableNextRow(ctx.ctx)
+                            
+                            -- Label
+                            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+                            ctx:text_colored(0xAAAAAAFF, "Master")
+                            
+                            -- Master Gain (param 0 = slider1)
+                            r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+                            local ok_gain, gain_norm = pcall(function() 
+                                return mixer:get_param_normalized(0)
+                            end)
+                            if ok_gain and gain_norm then
+                                local gain_db = -24 + gain_norm * 36
+                                local gain_format
+                                if gain_db >= 0 then
+                                    gain_format = string.format("+%.1f", gain_db)
+                                else
+                                    gain_format = string.format("%.1f", gain_db)
+                                end
+                                
+                                ctx:set_next_item_width(-1)
+                                local gain_changed, new_gain_db = ctx:slider_double("##master_gain", gain_db, -24, 12, gain_format)
+                                if gain_changed then
+                                    local new_norm = (new_gain_db + 24) / 36
+                                    pcall(function() mixer:set_param_normalized(0, new_norm) end)
+                                end
+                                -- Double-click to reset to 0 dB
+                                if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                                    pcall(function() mixer:set_param_normalized(0, (0 + 24) / 36) end)  -- 0 dB
+                                end
+                            else
+                                ctx:text_disabled("--")
+                            end
+                            
+                            -- Master Pan (param 1 = slider2)
+                            r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+                            local ok_pan, pan_norm = pcall(function() 
+                                return mixer:get_param_normalized(1)
+                            end)
+                            if ok_pan and pan_norm then
+                                local pan_val = -100 + pan_norm * 200
+                                local pan_changed, new_pan = draw_pan_slider(ctx, "##master_pan", pan_val, 60)
+                                if pan_changed then
+                                    pcall(function() mixer:set_param_normalized(1, (new_pan + 100) / 200) end)
+                                end
+                                -- Double-click to reset to center
+                                if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                                    pcall(function() mixer:set_param_normalized(1, 0.5) end)
+                                end
+                            else
+                                ctx:text_disabled("C")
+                            end
+                            
+                            r.ImGui_EndTable(ctx.ctx)
+                        end
+                    end
+                    
+                    ctx:separator()
+                    
                     -- Chains area
                     ctx:text_colored(0xAAAAAAFF, "Chains:")
                     ctx:same_line()
@@ -2024,77 +2254,149 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                     end
                     ctx:pop_style_color()
                     
-                    -- Draw each chain as a row
                     if #chains == 0 then
                         ctx:spacing()
                         ctx:text_disabled("No chains yet")
                         ctx:text_disabled("Drag plugins here to create chains")
                     else
-                        for j, chain in ipairs(chains) do
-                            ctx:push_id("chain_" .. j)
-                            local ok_name, chain_raw_name = pcall(function() return chain:get_name() end)
-                            local chain_name = ok_name and get_fx_display_name(chain) or "Unknown"
-                            local ok_en, chain_enabled = pcall(function() return chain:get_enabled() end)
-                            chain_enabled = ok_en and chain_enabled or false
+                        -- Use table for chain rows: Name | Enable | Delete | Volume | Pan
+                        if r.ImGui_BeginTable(ctx.ctx, "chains_table", 5, r.ImGui_TableFlags_SizingStretchProp()) then
+                            r.ImGui_TableSetupColumn(ctx.ctx, "name", r.ImGui_TableColumnFlags_WidthFixed(), 80)
+                            r.ImGui_TableSetupColumn(ctx.ctx, "enable", r.ImGui_TableColumnFlags_WidthFixed(), 28)
+                            r.ImGui_TableSetupColumn(ctx.ctx, "delete", r.ImGui_TableColumnFlags_WidthFixed(), 24)
+                            r.ImGui_TableSetupColumn(ctx.ctx, "volume", r.ImGui_TableColumnFlags_WidthStretch(), 1)
+                            r.ImGui_TableSetupColumn(ctx.ctx, "pan", r.ImGui_TableColumnFlags_WidthFixed(), 60)
                             
-                            -- Chain row with controls
-                            local row_color = chain_enabled and 0x3A4A5AFF or 0x2A2A35FF
-                            ctx:push_style_color(r.ImGui_Col_Button(), row_color)
-                            
-                            -- Chain button (click to expand into column)
-                            local chain_guid = chain:get_guid()
-                            local is_chain_selected = state.expanded_path[2] == chain_guid
-                            if is_chain_selected then
-                                ctx:push_style_color(r.ImGui_Col_Button(), 0x5588AAFF)
-                            end
-                            if ctx:button(chain_name:sub(1, 25) .. "##chain", -90, 28) then
-                                -- Toggle chain expansion (adds to expanded_path)
+                            for j, chain in ipairs(chains) do
+                                r.ImGui_TableNextRow(ctx.ctx)
+                                ctx:push_id("chain_" .. j)
+                                
+                                local ok_name, chain_raw_name = pcall(function() return chain:get_name() end)
+                                local chain_name = ok_name and get_fx_display_name(chain) or "Unknown"
+                                local ok_en, chain_enabled = pcall(function() return chain:get_enabled() end)
+                                chain_enabled = ok_en and chain_enabled or false
+                                local chain_guid = chain:get_guid()
+                                local is_chain_selected = state.expanded_path[2] == chain_guid
+                                
+                                -- Column 1: Chain name button
+                                r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+                                local row_color = chain_enabled and 0x3A4A5AFF or 0x2A2A35FF
                                 if is_chain_selected then
-                                    state.expanded_path[2] = nil
-                                else
-                                    state.expanded_path[2] = chain_guid
+                                    row_color = 0x5588AAFF
                                 end
-                            end
-                            if is_chain_selected then
+                                ctx:push_style_color(r.ImGui_Col_Button(), row_color)
+                                if ctx:button(chain_name:sub(1, 10) .. "##chain", -1, 22) then
+                                    if is_chain_selected then
+                                        state.expanded_path[2] = nil
+                                    else
+                                        state.expanded_path[2] = chain_guid
+                                    end
+                                end
                                 ctx:pop_style_color()
-                            end
-                            ctx:pop_style_color()
-                            
-                            -- Drop target on chain
-                            if ctx:begin_drag_drop_target() then
-                                local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
-                                if accepted and plugin_name then
-                                    -- Add FX to this chain
-                                    local plugin = { full_name = plugin_name, name = plugin_name }
-                                    -- TODO: Add to existing chain instead of creating new
+                                
+                                -- Drop target on chain name
+                                if ctx:begin_drag_drop_target() then
+                                    local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                                    if accepted and plugin_name then
+                                        -- TODO: Add FX to this chain
+                                    end
+                                    ctx:end_drag_drop_target()
                                 end
-                                ctx:end_drag_drop_target()
+                                
+                                -- Column 2: Enable/disable button
+                                r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+                                if chain_enabled then
+                                    ctx:push_style_color(r.ImGui_Col_Button(), 0x44AA44FF)
+                                else
+                                    ctx:push_style_color(r.ImGui_Col_Button(), 0xAA4444FF)
+                                end
+                                if ctx:button(chain_enabled and "ON" or "OF", -1, 22) then
+                                    chain:set_enabled(not chain_enabled)
+                                end
+                                ctx:pop_style_color()
+                                
+                                -- Column 3: Delete button
+                                r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+                                ctx:push_style_color(r.ImGui_Col_Button(), 0x553333FF)
+                                if ctx:button("×", -1, 22) then
+                                    chain:delete()
+                                    refresh_fx_list()
+                                end
+                                ctx:pop_style_color()
+                                
+                                -- Column 4: Volume slider
+                                r.ImGui_TableSetColumnIndex(ctx.ctx, 3)
+                                if mixer then
+                                    local vol_param_idx = get_mixer_chain_volume_param(j)
+                                    -- Get normalized value (0-1) and convert to dB
+                                    -- Slider range is -60 to +12 dB (72 dB range)
+                                    local ok_vol, vol_norm = pcall(function() 
+                                        return mixer:get_param_normalized(vol_param_idx)
+                                    end)
+                                    
+                                    if ok_vol and vol_norm then
+                                        -- Convert normalized (0-1) to dB (-60 to +12)
+                                        -- 0.0 = -60 dB, 1.0 = +12 dB
+                                        -- Default 0 dB = normalized 0.833
+                                        local vol_db = -60 + vol_norm * 72
+                                        
+                                        -- Format display
+                                        local vol_format
+                                        if vol_db <= -59 then
+                                            vol_format = "-∞"
+                                        elseif vol_db >= 0 then
+                                            vol_format = string.format("+%.0f", vol_db)
+                                        else
+                                            vol_format = string.format("%.0f", vol_db)
+                                        end
+                                        
+                                        ctx:set_next_item_width(-1)
+                                        local vol_changed, new_vol_db = ctx:slider_double("##vol", vol_db, -60, 12, vol_format)
+                                        if vol_changed then
+                                            -- Convert dB back to normalized
+                                            local new_norm = (new_vol_db + 60) / 72
+                                            pcall(function() mixer:set_param_normalized(vol_param_idx, new_norm) end)
+                                        end
+                                        -- Double-click to reset to 0 dB
+                                        if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                                            pcall(function() mixer:set_param_normalized(vol_param_idx, (0 + 60) / 72) end)  -- 0 dB
+                                        end
+                                    else
+                                        ctx:text_disabled("--")
+                                    end
+                                else
+                                    ctx:text_disabled("--")
+                                end
+                                
+                                -- Column 5: Pan slider
+                                r.ImGui_TableSetColumnIndex(ctx.ctx, 4)
+                                if mixer then
+                                    local pan_param_idx = get_mixer_chain_pan_param(j)
+                                    local ok_pan, pan_norm = pcall(function() 
+                                        return mixer:get_param_normalized(pan_param_idx)
+                                    end)
+                                    
+                                    if ok_pan and pan_norm then
+                                        local pan_val = -100 + pan_norm * 200
+                                        local pan_changed, new_pan = draw_pan_slider(ctx, "##pan", pan_val, 50)
+                                        if pan_changed then
+                                            pcall(function() mixer:set_param_normalized(pan_param_idx, (new_pan + 100) / 200) end)
+                                        end
+                                        -- Double-click to reset to center
+                                        if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                                            pcall(function() mixer:set_param_normalized(pan_param_idx, 0.5) end)
+                                        end
+                                    else
+                                        ctx:text_disabled("C")
+                                    end
+                                else
+                                    ctx:text_disabled("C")
+                                end
+                                
+                                ctx:pop_id()
                             end
                             
-                            ctx:same_line()
-                            
-                            -- Enable/disable button
-                            if chain_enabled then
-                                ctx:push_style_color(r.ImGui_Col_Button(), 0x44AA44FF)
-                            else
-                                ctx:push_style_color(r.ImGui_Col_Button(), 0xAA4444FF)
-                            end
-                            if ctx:small_button(chain_enabled and "ON" or "OFF") then
-                                chain:set_enabled(not chain_enabled)
-                            end
-                            ctx:pop_style_color()
-                            
-                            ctx:same_line()
-                            
-                            -- Delete chain button
-                            ctx:push_style_color(r.ImGui_Col_Button(), 0x553333FF)
-                            if ctx:small_button("×##del_chain_" .. j) then
-                                chain:delete()
-                                refresh_fx_list()
-                            end
-                            ctx:pop_style_color()
-                            
-                            ctx:pop_id()
+                            r.ImGui_EndTable(ctx.ctx)
                         end
                     end
                     
@@ -2122,11 +2424,171 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                         end
                         ctx:end_drag_drop_target()
                     end
-                    
-                    -- Mixer is internal - no UI shown
                 else
-                    -- Collapsed view
+                    -- Collapsed view - full height fader with meter and scale
                     ctx:text_disabled(string.format("%d chains", #chains))
+                    
+                    local mixer = get_rack_mixer(rack)
+                    if mixer then
+                        local avail_w, avail_h = r.ImGui_GetContentRegionAvail(ctx.ctx)
+                        local fader_w = 24
+                        local meter_w = 12  -- Stereo meter (2x6px)
+                        local scale_w = 20
+                        local total_w = scale_w + fader_w + meter_w + 4  -- scale + fader + meter + gaps
+                        
+                        -- Helper to center items
+                        local function center_offset(item_w)
+                            return math.max(0, (avail_w - item_w) / 2)
+                        end
+                        
+                        -- Pan slider at top (centered)
+                        local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(1) end)
+                        if ok_pan and pan_norm then
+                            local pan_val = -100 + pan_norm * 200
+                            local pan_w = math.min(avail_w - 4, 80)
+                            local pan_offset = math.max(0, (avail_w - pan_w) / 2)
+                            ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + pan_offset)
+                            local pan_changed, new_pan = draw_pan_slider(ctx, "##master_pan_c", pan_val, pan_w)
+                            if pan_changed then
+                                pcall(function() mixer:set_param_normalized(1, (new_pan + 100) / 200) end)
+                            end
+                            -- Double-click to reset to center
+                            if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                                pcall(function() mixer:set_param_normalized(1, 0.5) end)
+                            end
+                        end
+                        
+                        ctx:spacing()
+                        
+                        -- Calculate remaining height for fader
+                        local _, remaining_h = r.ImGui_GetContentRegionAvail(ctx.ctx)
+                        local fader_h = remaining_h - 20
+                        fader_h = math.max(50, fader_h)
+                        
+                        -- Gain fader with meter and scale
+                        local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
+                        if ok_gain and gain_norm then
+                            local gain_db = -24 + gain_norm * 36
+                            local gain_format = gain_db >= 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db)
+                            
+                            -- Position for the whole control group
+                            local cursor_x_start = ctx:get_cursor_pos_x()
+                            local group_x = cursor_x_start + center_offset(total_w)
+                            ctx:set_cursor_pos_x(group_x)
+                            
+                            local screen_x, screen_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+                            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                            
+                            -- Positions
+                            local scale_x = screen_x
+                            local fader_x = screen_x + scale_w + 2
+                            local meter_x = fader_x + fader_w + 2
+                            
+                            -- dB scale markings on left
+                            local db_marks = {12, 6, 0, -6, -12, -18, -24}
+                            for _, db in ipairs(db_marks) do
+                                local mark_norm = (db + 24) / 36
+                                local mark_y = screen_y + fader_h - (fader_h * mark_norm)
+                                -- Tick line
+                                r.ImGui_DrawList_AddLine(draw_list, scale_x + scale_w - 6, mark_y, scale_x + scale_w, mark_y, 0x666666FF, 1)
+                                -- dB label (only for key values)
+                                if db == 0 or db == -12 or db == 12 then
+                                    local label = db == 0 and "0" or tostring(db)
+                                    r.ImGui_DrawList_AddText(draw_list, scale_x, mark_y - 5, 0x888888FF, label)
+                                end
+                            end
+                            
+                            -- Fader background
+                            r.ImGui_DrawList_AddRectFilled(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x1A1A1AFF, 3)
+                            
+                            -- Fader fill from bottom (gain setting)
+                            local fill_h = fader_h * gain_norm
+                            if fill_h > 2 then
+                                local fill_top = screen_y + fader_h - fill_h
+                                r.ImGui_DrawList_AddRectFilled(draw_list, fader_x + 2, fill_top, fader_x + fader_w - 2, screen_y + fader_h - 2, 0x5588AACC, 2)
+                            end
+                            
+                            -- Fader border
+                            r.ImGui_DrawList_AddRect(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x555555FF, 3)
+                            
+                            -- 0dB line on fader
+                            local zero_db_norm = 24 / 36  -- 0dB position
+                            local zero_y = screen_y + fader_h - (fader_h * zero_db_norm)
+                            r.ImGui_DrawList_AddLine(draw_list, fader_x, zero_y, fader_x + fader_w, zero_y, 0xFFFFFF44, 1)
+                            
+                            -- Stereo level meters on right
+                            local meter_l_x = meter_x
+                            local meter_r_x = meter_x + meter_w / 2 + 1
+                            local half_meter_w = meter_w / 2 - 1
+                            
+                            -- Meter backgrounds
+                            r.ImGui_DrawList_AddRectFilled(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
+                            r.ImGui_DrawList_AddRectFilled(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
+                            
+                            -- Get track peak levels (stereo)
+                            if state.track and state.track.pointer then
+                                local peak_l = r.Track_GetPeakInfo(state.track.pointer, 0)
+                                local peak_r = r.Track_GetPeakInfo(state.track.pointer, 1)
+                                
+                                -- Helper to draw a meter bar
+                                local function draw_meter_bar(x, w, peak)
+                                    if peak > 0 then
+                                        local peak_db = 20 * math.log(peak, 10)
+                                        peak_db = math.max(-60, math.min(12, peak_db))
+                                        local peak_norm = (peak_db + 60) / 72
+                                        
+                                        local meter_fill_h = fader_h * peak_norm
+                                        if meter_fill_h > 1 then
+                                            local meter_top = screen_y + fader_h - meter_fill_h
+                                            -- Color based on level
+                                            local meter_color
+                                            if peak_db > 0 then
+                                                meter_color = 0xFF4444FF  -- Red
+                                            elseif peak_db > -6 then
+                                                meter_color = 0xFFAA44FF  -- Orange
+                                            elseif peak_db > -18 then
+                                                meter_color = 0x44FF44FF  -- Green
+                                            else
+                                                meter_color = 0x44AA44FF  -- Dark green
+                                            end
+                                            r.ImGui_DrawList_AddRectFilled(draw_list, x, meter_top, x + w, screen_y + fader_h - 1, meter_color, 0)
+                                        end
+                                    end
+                                end
+                                
+                                draw_meter_bar(meter_l_x + 1, half_meter_w - 1, peak_l)
+                                draw_meter_bar(meter_r_x + 1, half_meter_w - 1, peak_r)
+                            end
+                            
+                            -- Meter borders
+                            r.ImGui_DrawList_AddRect(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
+                            r.ImGui_DrawList_AddRect(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
+                            
+                            -- Invisible slider for fader interaction
+                            r.ImGui_SetCursorScreenPos(ctx.ctx, fader_x, screen_y)
+                            r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_FrameBg(), 0x00000000)
+                            r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_FrameBgHovered(), 0x00000000)
+                            r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_FrameBgActive(), 0x00000000)
+                            r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_SliderGrab(), 0xAAAAAAFF)
+                            r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_SliderGrabActive(), 0xFFFFFFFF)
+                            
+                            local gain_changed, new_gain_db = r.ImGui_VSliderDouble(ctx.ctx, "##master_gain_v", fader_w, fader_h, gain_db, -24, 12, "")
+                            if gain_changed then
+                                pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
+                            end
+                            -- Double-click to reset to 0 dB
+                            if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                                pcall(function() mixer:set_param_normalized(0, (0 + 24) / 36) end)
+                            end
+                            
+                            r.ImGui_PopStyleColor(ctx.ctx, 5)
+                            
+                            -- dB value at bottom (centered under fader)
+                            local db_w = r.ImGui_CalcTextSize(ctx.ctx, gain_format)
+                            ctx:set_cursor_pos_x(group_x + scale_w + (fader_w - db_w) / 2)
+                            ctx:text_colored(0xAAAAAAFF, gain_format)
+                        end
+                    end
                 end
                 
                 ctx:end_child()
@@ -2160,7 +2622,9 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                     -- Draw chain contents column
                     local chain_col_w = 500
                     ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x2A2A35FF)
-                    if ctx:begin_child("chain_contents_" .. selected_chain_guid, chain_col_w, rack_h, imgui.ChildFlags.Border()) then
+                    -- Add scroll flags for both horizontal and vertical scrolling
+                    local chain_scroll_flags = r.ImGui_WindowFlags_HorizontalScrollbar()
+                    if ctx:begin_child("chain_contents_" .. selected_chain_guid, chain_col_w, rack_h, imgui.ChildFlags.Border(), chain_scroll_flags) then
                         -- Chain header
                         local selected_chain_name = get_fx_display_name(selected_chain)
                         ctx:text_colored(0xAADDFFFF, "Chain: " .. selected_chain_name)
