@@ -1,0 +1,561 @@
+desc:SideFX Modulator
+author:Nomad Monad
+version:2.0
+
+// Rate
+slider1:0<0,1,1{Free,Sync}>Tempo Mode
+slider2:1<0.01,20,0.01>Rate (Hz)
+slider3:5<0,17,1{8 bars,4 bars,2 bars,1 bar,1/2,1/4,1/4T,1/4.,1/8,1/8T,1/8.,1/16,1/16T,1/16.,1/32,1/32T,1/32.,1/64}>Sync Rate
+slider4:0<0,1,0.001>-Output
+slider5:0<0,1,0.001>Phase
+slider6:1<0,1,0.01>Depth
+
+// Trigger
+slider20:0<0,3,1{Free,Transport,MIDI,Audio}>Trigger Mode
+slider21:0<0,1,1{This Track,MIDI Bus}>MIDI Source
+slider22:0<0,127,1>MIDI Note (0=any)
+slider23:0.5<0,1,0.01>Audio Threshold
+slider24:100<1,2000,1>Attack (ms)
+slider25:500<1,5000,1>Release (ms)
+
+// LFO Mode
+slider28:0<0,1,1{Loop,One Shot}>LFO Mode
+
+// Editor
+slider26:2<0,4,1{Off,4,8,16,32}>Grid
+slider27:1<0,1,1{Off,On}>Snap
+
+// Number of points (2-16)
+slider30:4<2,16,1>-Num Points
+
+// Curve points stored in sliders (X1,Y1,X2,Y2,...) - these persist!
+slider40:0<0,1,0.001>-P1X
+slider41:0<0,1,0.001>-P1Y
+slider42:0.33<0,1,0.001>-P2X
+slider43:0.33<0,1,0.001>-P2Y
+slider44:0.66<0,1,0.001>-P3X
+slider45:0.66<0,1,0.001>-P3Y
+slider46:1<0,1,0.001>-P4X
+slider47:1<0,1,0.001>-P4Y
+slider48:0.5<0,1,0.001>-P5X
+slider49:0.5<0,1,0.001>-P5Y
+slider50:0.5<0,1,0.001>-P6X
+slider51:0.5<0,1,0.001>-P6Y
+slider52:0.5<0,1,0.001>-P7X
+slider53:0.5<0,1,0.001>-P7Y
+slider54:0.5<0,1,0.001>-P8X
+slider55:0.5<0,1,0.001>-P8Y
+slider56:0.5<0,1,0.001>-P9X
+slider57:0.5<0,1,0.001>-P9Y
+slider58:0.5<0,1,0.001>-P10X
+slider59:0.5<0,1,0.001>-P10Y
+slider60:0.5<0,1,0.001>-P11X
+slider61:0.5<0,1,0.001>-P11Y
+slider62:0.5<0,1,0.001>-P12X
+slider63:0.5<0,1,0.001>-P12Y
+slider64:0.5<0,1,0.001>-P13X
+slider65:0.5<0,1,0.001>-P13Y
+slider66:0.5<0,1,0.001>-P14X
+slider67:0.5<0,1,0.001>-P14Y
+slider68:0.5<0,1,0.001>-P15X
+slider69:0.5<0,1,0.001>-P15Y
+slider70:0.5<0,1,0.001>-P16X
+slider71:0.5<0,1,0.001>-P16Y
+
+@init
+MAX_NODES = 16;
+
+// Memory for spline coefficients only (points are in sliders)
+mem_c1 = 1000;
+mem_c2 = 1020;
+mem_c3 = 1040;
+mem_tempx = 1060;
+mem_tempy = 1080;
+
+// Temp arrays for sorted points
+mem_sorted_x = 1100;
+mem_sorted_y = 1120;
+
+// State
+lfo_phase = 0;
+env_value = 1;
+triggered = 0;
+current_tempo = 120;
+rate = 1;
+last_play_state = 0;
+
+// Drag state
+drag_node = -1;
+hover_node = -1;
+cap_mode = 0;
+last_mouse_cap = 0;
+drag_start_x = 0;
+drag_start_y = 0;
+
+// Get X value from slider
+function get_x(i) (
+  i == 0 ? slider40 : i == 1 ? slider42 : i == 2 ? slider44 : i == 3 ? slider46 :
+  i == 4 ? slider48 : i == 5 ? slider50 : i == 6 ? slider52 : i == 7 ? slider54 :
+  i == 8 ? slider56 : i == 9 ? slider58 : i == 10 ? slider60 : i == 11 ? slider62 :
+  i == 12 ? slider64 : i == 13 ? slider66 : i == 14 ? slider68 : slider70;
+);
+
+// Get Y value from slider
+function get_y(i) (
+  i == 0 ? slider41 : i == 1 ? slider43 : i == 2 ? slider45 : i == 3 ? slider47 :
+  i == 4 ? slider49 : i == 5 ? slider51 : i == 6 ? slider53 : i == 7 ? slider55 :
+  i == 8 ? slider57 : i == 9 ? slider59 : i == 10 ? slider61 : i == 11 ? slider63 :
+  i == 12 ? slider65 : i == 13 ? slider67 : i == 14 ? slider69 : slider71;
+);
+
+// Set X value to slider
+function set_x(i, v) (
+  i == 0 ? (slider40 = v; slider_automate(slider40);) :
+  i == 1 ? (slider42 = v; slider_automate(slider42);) :
+  i == 2 ? (slider44 = v; slider_automate(slider44);) :
+  i == 3 ? (slider46 = v; slider_automate(slider46);) :
+  i == 4 ? (slider48 = v; slider_automate(slider48);) :
+  i == 5 ? (slider50 = v; slider_automate(slider50);) :
+  i == 6 ? (slider52 = v; slider_automate(slider52);) :
+  i == 7 ? (slider54 = v; slider_automate(slider54);) :
+  i == 8 ? (slider56 = v; slider_automate(slider56);) :
+  i == 9 ? (slider58 = v; slider_automate(slider58);) :
+  i == 10 ? (slider60 = v; slider_automate(slider60);) :
+  i == 11 ? (slider62 = v; slider_automate(slider62);) :
+  i == 12 ? (slider64 = v; slider_automate(slider64);) :
+  i == 13 ? (slider66 = v; slider_automate(slider66);) :
+  i == 14 ? (slider68 = v; slider_automate(slider68);) :
+  (slider70 = v; slider_automate(slider70););
+);
+
+// Set Y value to slider  
+function set_y(i, v) (
+  i == 0 ? (slider41 = v; slider_automate(slider41);) :
+  i == 1 ? (slider43 = v; slider_automate(slider43);) :
+  i == 2 ? (slider45 = v; slider_automate(slider45);) :
+  i == 3 ? (slider47 = v; slider_automate(slider47);) :
+  i == 4 ? (slider49 = v; slider_automate(slider49);) :
+  i == 5 ? (slider51 = v; slider_automate(slider51);) :
+  i == 6 ? (slider53 = v; slider_automate(slider53);) :
+  i == 7 ? (slider55 = v; slider_automate(slider55);) :
+  i == 8 ? (slider57 = v; slider_automate(slider57);) :
+  i == 9 ? (slider59 = v; slider_automate(slider59);) :
+  i == 10 ? (slider61 = v; slider_automate(slider61);) :
+  i == 11 ? (slider63 = v; slider_automate(slider63);) :
+  i == 12 ? (slider65 = v; slider_automate(slider65);) :
+  i == 13 ? (slider67 = v; slider_automate(slider67);) :
+  i == 14 ? (slider69 = v; slider_automate(slider69);) :
+  (slider71 = v; slider_automate(slider71););
+);
+
+// Sort points and copy to temp arrays
+function sort_and_copy() local(i, j, min_idx, min_x, temp_x, temp_y, n) (
+  n = slider30;
+  
+  // Copy to temp
+  i = 0;
+  loop(n,
+    mem_sorted_x[i] = get_x(i);
+    mem_sorted_y[i] = get_y(i);
+    i += 1;
+  );
+  
+  // Selection sort by X
+  i = 0;
+  loop(n - 1,
+    min_idx = i;
+    min_x = mem_sorted_x[i];
+    j = i + 1;
+    loop(n - i - 1,
+      mem_sorted_x[j] < min_x ? (
+        min_idx = j;
+        min_x = mem_sorted_x[j];
+      );
+      j += 1;
+    );
+    min_idx != i ? (
+      temp_x = mem_sorted_x[i];
+      temp_y = mem_sorted_y[i];
+      mem_sorted_x[i] = mem_sorted_x[min_idx];
+      mem_sorted_y[i] = mem_sorted_y[min_idx];
+      mem_sorted_x[min_idx] = temp_x;
+      mem_sorted_y[min_idx] = temp_y;
+    );
+    i += 1;
+  );
+);
+
+// Calculate spline coefficients
+function update_spline() local(i, dx, m, m_next, cm, dx_next, n) (
+  n = slider30;
+  sort_and_copy();
+  
+  // Calculate slopes
+  i = 0;
+  loop(n - 1,
+    dx = mem_sorted_x[i + 1] - mem_sorted_x[i];
+    dx < 0.0001 ? dx = 0.0001;
+    mem_tempy[i] = (mem_sorted_y[i + 1] - mem_sorted_y[i]) / dx;
+    mem_tempx[i] = dx;
+    i += 1;
+  );
+  
+  // First derivatives (c1)
+  mem_c1[0] = mem_tempy[0];
+  i = 1;
+  loop(n - 2,
+    m = mem_tempy[i - 1];
+    m_next = mem_tempy[i];
+    m * m_next <= 0 ? (
+      mem_c1[i] = 0;
+    ) : (
+      dx = mem_tempx[i - 1];
+      dx_next = mem_tempx[i];
+      cm = dx + dx_next;
+      mem_c1[i] = 3.0 * cm / ((cm + dx_next) / m + (cm + dx) / m_next);
+    );
+    i += 1;
+  );
+  mem_c1[n - 1] = mem_tempy[n - 2];
+  
+  // c2 and c3
+  i = 0;
+  loop(n - 1,
+    dx = mem_tempx[i];
+    dx < 0.0001 ? dx = 0.0001;
+    m = mem_tempy[i];
+    cm = mem_c1[i] + mem_c1[i + 1] - m - m;
+    mem_c2[i] = (m - mem_c1[i] - cm) / dx;
+    mem_c3[i] = cm / (dx * dx);
+    i += 1;
+  );
+);
+
+// Evaluate spline
+function eval_spline(x) local(i, diff, diff_sq, out, n) (
+  n = slider30;
+  x = max(0, min(1, x));
+  
+  i = 0;
+  while (i < n - 1 && mem_sorted_x[i + 1] < x) ( i += 1; );
+  i = max(0, min(i, n - 2));
+  
+  diff = x - mem_sorted_x[i];
+  diff_sq = diff * diff;
+  out = mem_sorted_y[i] + mem_c1[i] * diff + mem_c2[i] * diff_sq + mem_c3[i] * diff * diff_sq;
+  max(0, min(1, out));
+);
+
+// Find nearest node
+function find_nearest(mx, my, threshold) local(i, best, min_dist, dx, dy, dist, n) (
+  n = slider30;
+  best = -1;
+  min_dist = threshold * threshold;
+  i = 0;
+  loop(n,
+    dx = mx - get_x(i);
+    dy = my - get_y(i);
+    dist = dx * dx + dy * dy;
+    dist < min_dist ? ( min_dist = dist; best = i; );
+    i += 1;
+  );
+  best;
+);
+
+// Add node
+function add_node(x, y) local(n) (
+  n = slider30;
+  n < MAX_NODES ? (
+    set_x(n, x);
+    set_y(n, y);
+    slider30 = n + 1;
+    slider_automate(slider30);
+    update_spline();
+  );
+);
+
+// Remove node
+function remove_node(idx) local(i, n) (
+  n = slider30;
+  idx > 0 && idx < n - 1 && n > 2 ? (
+    i = idx;
+    loop(n - idx - 1,
+      set_x(i, get_x(i + 1));
+      set_y(i, get_y(i + 1));
+      i += 1;
+    );
+    slider30 = n - 1;
+    slider_automate(slider30);
+    update_spline();
+  );
+);
+
+function calc_coeff(time_ms) (
+  time_ms > 0 ? exp(-1.0 / (srate * time_ms / 1000)) : 0;
+);
+
+// Initial spline calc
+update_spline();
+
+@slider
+attack_coeff = calc_coeff(slider24);
+release_coeff = calc_coeff(slider25);
+update_spline();
+
+@block
+trigger_mode = slider20;
+midi_note = slider22;
+
+trigger_mode == 1 ? (
+  play_state & 1 ? (
+    triggered = 1;
+    last_play_state == 0 ? lfo_phase = 0;
+  ) : ( triggered = 0; );
+  last_play_state = play_state & 1;
+);
+
+while (midirecv(offset, msg1, msg2, msg3)) (
+  trigger_mode == 2 ? (
+    status = msg1 & 0xF0;
+    note = msg2;
+    velocity = msg3;
+    // Note on
+    status == 0x90 && velocity > 0 ? (
+      (midi_note == 0 || note == midi_note) ? (
+        triggered = 1;
+        lfo_phase = 0;
+      );
+    );
+    // Note off (0x80 or 0x90 with velocity 0)
+    (status == 0x80 || (status == 0x90 && velocity == 0)) ? (
+      (midi_note == 0 || note == midi_note) ? (
+        triggered = 0;
+      );
+    );
+  );
+  midisend(offset, msg1, msg2, msg3);
+);
+
+@sample
+trigger_mode = slider20;
+
+trigger_mode == 0 ? ( env_value = 1; );
+trigger_mode == 1 ? ( triggered ? env_value = 1 : env_value = env_value * release_coeff; );
+trigger_mode == 2 ? ( triggered ? env_value = 1 : env_value = env_value * release_coeff; );
+trigger_mode == 3 ? (
+  input_level = max(abs(spl0), abs(spl1));
+  input_level > slider23 ? (
+    triggered = 1;
+    env_value = env_value * attack_coeff + (1 - attack_coeff);
+  ) : (
+    triggered = 0;
+    env_value = env_value * release_coeff;
+  );
+);
+
+// Rate
+slider1 == 1 ? (
+  current_tempo = tempo;
+  current_tempo <= 0 ? current_tempo = 120;
+  // 0=8bars,1=4bars,2=2bars,3=1bar,4=1/2,5=1/4,6=1/4T,7=1/4.,8=1/8,9=1/8T,10=1/8.,11=1/16,12=1/16T,13=1/16.,14=1/32,15=1/32T,16=1/32.,17=1/64
+  sr = slider3;
+  sr == 0 ? beats = 32 : sr == 1 ? beats = 16 : sr == 2 ? beats = 8 : sr == 3 ? beats = 4 :
+  sr == 4 ? beats = 2 : sr == 5 ? beats = 1 : sr == 6 ? beats = 1*2/3 : sr == 7 ? beats = 1.5 :
+  sr == 8 ? beats = 0.5 : sr == 9 ? beats = 0.5*2/3 : sr == 10 ? beats = 0.75 :
+  sr == 11 ? beats = 0.25 : sr == 12 ? beats = 0.25*2/3 : sr == 13 ? beats = 0.375 :
+  sr == 14 ? beats = 0.125 : sr == 15 ? beats = 0.125*2/3 : sr == 16 ? beats = 0.1875 : beats = 0.0625;
+  rate = current_tempo / 60 / beats;
+) : ( rate = slider2; );
+
+// Only advance LFO in Free mode OR when triggered in other modes
+one_shot = slider28;
+trigger_mode == 0 || triggered ? (
+  lfo_phase += rate / srate;
+  one_shot ? (
+    // One shot: clamp at 1, don't wrap
+    lfo_phase >= 1 ? lfo_phase = 1;
+  ) : (
+    // Loop: wrap around
+    lfo_phase >= 1 ? lfo_phase -= 1;
+  );
+);
+
+phase = lfo_phase + slider5;
+phase >= 1 ? phase -= 1;
+
+raw_lfo = eval_spline(phase);
+final_output = raw_lfo * slider6 * env_value;
+slider4 = final_output;
+
+@gfx 500 400
+gfx_clear = 0x1a1a1a;
+
+margin = 50;
+curve_x = margin;
+curve_y = margin;
+curve_w = gfx_w - margin * 2;
+curve_h = gfx_h - margin * 2 - 50;
+
+gfx_set(0.12, 0.12, 0.14, 1);
+gfx_rect(curve_x, curve_y, curve_w, curve_h);
+
+// Grid based on slider26: 0=Off, 1=4, 2=8, 3=16, 4=32
+grid_div = slider26 == 0 ? 0 : slider26 == 1 ? 4 : slider26 == 2 ? 8 : slider26 == 3 ? 16 : 32;
+gfx_set(0.22, 0.22, 0.25, 1);
+grid_div > 0 ? (
+  i = 0;
+  loop(grid_div + 1,
+    gx = curve_x + i * curve_w / grid_div;
+    gfx_line(gx, curve_y, gx, curve_y + curve_h);
+    i += 1;
+  );
+);
+// Y grid always 4
+i = 0;
+loop(5,
+  gy = curve_y + i * curve_h / 4;
+  gfx_line(curve_x, gy, curve_x + curve_w, gy);
+  i += 1;
+);
+
+// Draw curve
+gfx_set(0.2, 0.9, 0.5, 1);
+resolution = 200;
+i = 0;
+loop(resolution,
+  t = i / resolution;
+  t_next = (i + 1) / resolution;
+  y1 = eval_spline(t);
+  y2 = eval_spline(t_next);
+  px1 = curve_x + t * curve_w;
+  py1 = curve_y + curve_h - y1 * curve_h;
+  px2 = curve_x + t_next * curve_w;
+  py2 = curve_y + curve_h - y2 * curve_h;
+  gfx_line(px1, py1, px2, py2);
+  i += 1;
+);
+
+// LFO position
+gfx_set(1, 0.5, 0.2, 0.6);
+lfo_px = curve_x + phase * curve_w;
+gfx_line(lfo_px, curve_y, lfo_px, curve_y + curve_h);
+
+gfx_set(0.2, 0.9, 0.5, 1);
+out_py = curve_y + curve_h - final_output * curve_h;
+gfx_circle(lfo_px, out_py, 5, 1);
+
+// Mouse
+mouse_in_area = mouse_x >= curve_x && mouse_x <= curve_x + curve_w &&
+                mouse_y >= curve_y && mouse_y <= curve_y + curve_h;
+
+norm_mx = (mouse_x - curve_x) / curve_w;
+norm_my = 1.0 - (mouse_y - curve_y) / curve_h;
+
+node_threshold = 0.05;
+hover_node = find_nearest(norm_mx, norm_my, node_threshold);
+
+left_click = mouse_cap & 1;
+right_click = mouse_cap & 2;
+last_left = last_mouse_cap & 1;
+last_right = last_mouse_cap & 2;
+// Modifiers: Shift=4, Ctrl=8, Alt=16
+shift_held = mouse_cap & 4;
+ctrl_held = mouse_cap & 8;
+alt_held = mouse_cap & 16;
+
+left_click ? (
+  cap_mode == 0 && !last_left ? (
+    drag_node = find_nearest(norm_mx, norm_my, node_threshold);
+    drag_node >= 0 ? (
+      cap_mode = 1;
+      drag_start_x = get_x(drag_node);
+      drag_start_y = get_y(drag_node);
+    ) : mouse_in_area ? (
+      add_node(norm_mx, norm_my);
+      drag_node = find_nearest(norm_mx, norm_my, node_threshold);
+      drag_node >= 0 ? (
+        cap_mode = 1;
+        drag_start_x = norm_mx;
+        drag_start_y = norm_my;
+      );
+    );
+  ) : cap_mode == 1 && drag_node >= 0 ? (
+    new_x = max(0.001, min(0.999, norm_mx));
+    new_y = max(0, min(1, norm_my));
+    
+    // Shift = Y-only (lock X), Ctrl = X-only (lock Y)
+    shift_held ? ( new_x = drag_start_x; );
+    ctrl_held ? ( new_y = drag_start_y; );
+    
+    // Snap to grid (slider27=On, unless Alt held)
+    slider27 == 1 && !alt_held && grid_div > 0 ? (
+      new_x = floor(new_x * grid_div + 0.5) / grid_div;
+      new_y = floor(new_y * 4 + 0.5) / 4;
+    );
+    
+    // Lock endpoints
+    drag_start_x < 0.01 ? ( new_x = 0; );
+    drag_start_x > 0.99 ? ( new_x = 1; );
+    
+    set_x(drag_node, new_x);
+    set_y(drag_node, new_y);
+    update_spline();
+  );
+) : ( cap_mode == 1 ? cap_mode = 0; drag_node = -1; );
+
+right_click && !last_right && mouse_in_area ? (
+  click_node = find_nearest(norm_mx, norm_my, node_threshold);
+  click_node > 0 && click_node < slider30 - 1 && slider30 > 2 ? remove_node(click_node);
+);
+
+last_mouse_cap = mouse_cap;
+
+// Draw nodes
+i = 0;
+n = slider30;
+loop(n,
+  nx = curve_x + get_x(i) * curve_w;
+  ny = curve_y + curve_h - get_y(i) * curve_h;
+  i == hover_node || i == drag_node ? (
+    gfx_set(1, 0.7, 0.3, 1); node_size = 8;
+  ) : ( gfx_set(1, 0.5, 0.1, 1); node_size = 6; );
+  gfx_circle(nx, ny, node_size, 1);
+  gfx_set(1, 1, 1, 0.5);
+  gfx_circle(nx, ny, node_size, 0);
+  i += 1;
+);
+
+// Status
+gfx_set(0.7, 0.7, 0.7, 1);
+gfx_x = curve_x; gfx_y = 12;
+gfx_drawstr("SideFX Modulator");
+
+gfx_x = curve_x; gfx_y = curve_y + curve_h + 12;
+slider1 == 1 ? (
+  sr = slider3;
+  sr == 0 ? strcpy(#sn, "8 bars") : sr == 1 ? strcpy(#sn, "4 bars") :
+  sr == 2 ? strcpy(#sn, "2 bars") : sr == 3 ? strcpy(#sn, "1 bar") :
+  sr == 4 ? strcpy(#sn, "1/2") : sr == 5 ? strcpy(#sn, "1/4") :
+  sr == 6 ? strcpy(#sn, "1/4T") : sr == 7 ? strcpy(#sn, "1/4.") :
+  sr == 8 ? strcpy(#sn, "1/8") : sr == 9 ? strcpy(#sn, "1/8T") :
+  sr == 10 ? strcpy(#sn, "1/8.") : sr == 11 ? strcpy(#sn, "1/16") :
+  sr == 12 ? strcpy(#sn, "1/16T") : sr == 13 ? strcpy(#sn, "1/16.") :
+  sr == 14 ? strcpy(#sn, "1/32") : sr == 15 ? strcpy(#sn, "1/32T") :
+  sr == 16 ? strcpy(#sn, "1/32.") : strcpy(#sn, "1/64");
+  gfx_drawstr(sprintf(#, "SYNC: %s @ %.0f BPM | Out: %.3f", #sn, current_tempo, final_output));
+) : (
+  gfx_drawstr(sprintf(#, "FREE: %.2f Hz | Out: %.3f", rate, final_output));
+);
+
+gfx_y += 16;
+trigger_mode == 0 ? strcpy(#tm, "FREE") : trigger_mode == 1 ? strcpy(#tm, "TRANSPORT") :
+trigger_mode == 2 ? strcpy(#tm, "MIDI") : strcpy(#tm, "AUDIO");
+env_value > 0.01 ? gfx_set(0.2, 1, 0.5, 1) : gfx_set(0.3, 0.3, 0.3, 1);
+gfx_circle(curve_x + 5, gfx_y + 5, 5, 1);
+gfx_set(0.7, 0.7, 0.7, 1);
+gfx_x = curve_x + 16;
+gfx_drawstr(sprintf(#, "%s | Pts: %d", #tm, slider30));
+
+gfx_x = curve_x; gfx_y += 18;
+gfx_set(0.45, 0.45, 0.45, 1);
+gfx_drawstr("LMB: add/drag | RMB: delete | Shift: Y-only | Cmd/Ctrl: X-only | Alt: no snap");

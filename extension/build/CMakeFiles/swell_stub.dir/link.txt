@@ -1,0 +1,2 @@
+/usr/bin/ar qc libswell_stub.a "CMakeFiles/swell_stub.dir/WDL/WDL/swell/swell-modstub.mm.o"
+/usr/bin/ranlib libswell_stub.a

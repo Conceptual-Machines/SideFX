@@ -1,0 +1,66 @@
+desc:SideFX Utility
+author:Nomad Monad
+version:1.1
+options:no_meter
+
+// Gain/Pan/Phase utility - controlled exclusively by SideFX UI
+// All sliders hidden (- prefix), no native JSFX interface
+
+slider1:0<-24,24,0.1>-Gain (dB)
+slider2:0<-100,100,1>-Pan (%)
+slider3:0<0,1,1{Off,On}>-Phase Invert L
+slider4:0<0,1,1{Off,On}>-Phase Invert R
+slider5:1<0,1,0.01>-Output Level (for metering)
+
+@init
+// Smoothing coefficients
+smooth_coeff = exp(-1 / (srate * 0.01));  // 10ms smoothing
+gain_smooth = 1;
+pan_l_smooth = 1;
+pan_r_smooth = 1;
+
+@slider
+// Calculate gain multiplier
+gain_lin = 10 ^ (slider1 / 20);
+
+// Calculate pan (constant power)
+pan_norm = (slider2 + 100) / 200;  // 0 to 1
+pan_l = cos(pan_norm * $pi / 2);
+pan_r = sin(pan_norm * $pi / 2);
+
+// Phase invert
+phase_l = slider3 ? -1 : 1;
+phase_r = slider4 ? -1 : 1;
+
+@sample
+// Smooth gain changes to avoid clicks
+gain_smooth = gain_smooth * smooth_coeff + gain_lin * (1 - smooth_coeff);
+pan_l_smooth = pan_l_smooth * smooth_coeff + pan_l * (1 - smooth_coeff);
+pan_r_smooth = pan_r_smooth * smooth_coeff + pan_r * (1 - smooth_coeff);
+
+// Apply gain
+spl0 *= gain_smooth;
+spl1 *= gain_smooth;
+
+// Apply pan (constant power)
+tmp_l = spl0;
+tmp_r = spl1;
+spl0 = (tmp_l + tmp_r) * pan_l_smooth * 0.707;
+spl1 = (tmp_l + tmp_r) * pan_r_smooth * 0.707;
+
+// Maintain stereo width when not panned
+slider2 == 0 ? (
+  spl0 = tmp_l * gain_smooth;
+  spl1 = tmp_r * gain_smooth;
+);
+
+// Phase invert
+spl0 *= phase_l;
+spl1 *= phase_r;
+
+// Output level for metering (RMS-ish, smoothed)
+level = max(abs(spl0), abs(spl1));
+slider5 = slider5 * 0.95 + level * 0.05;
+
+// No @gfx - controlled exclusively by SideFX UI
+

@@ -1,0 +1,196 @@
+desc:SideFX Chain Mixer
+author:Nomad Monad
+version:1.6
+options:no_meter
+
+// Internal mixer for R-containers - sums parallel chain outputs to stereo
+// Chains output to sideband channels (3/4, 5/6, 7/8, etc.)
+// This mixer sums those sidebands back to channels 1/2
+
+// Explicit pin declarations - required for audio to flow!
+in_pin:input 1 L
+in_pin:input 1 R
+in_pin:input 2 L
+in_pin:input 2 R
+in_pin:input 3 L
+in_pin:input 3 R
+in_pin:input 4 L
+in_pin:input 4 R
+in_pin:input 5 L
+in_pin:input 5 R
+in_pin:input 6 L
+in_pin:input 6 R
+in_pin:input 7 L
+in_pin:input 7 R
+in_pin:input 8 L
+in_pin:input 8 R
+in_pin:input 9 L
+in_pin:input 9 R
+in_pin:input 10 L
+in_pin:input 10 R
+in_pin:input 11 L
+in_pin:input 11 R
+in_pin:input 12 L
+in_pin:input 12 R
+in_pin:input 13 L
+in_pin:input 13 R
+in_pin:input 14 L
+in_pin:input 14 R
+in_pin:input 15 L
+in_pin:input 15 R
+in_pin:input 16 L
+in_pin:input 16 R
+out_pin:output L
+out_pin:output R
+
+// Master controls (hidden, controlled via SideFX)
+slider1:0<-24,12,0.1>-Master (dB)
+slider2:0<-100,100,1>-Master Pan
+
+// Per-chain volumes (up to 16 chains) - Hidden, controlled via SideFX
+slider10:0<-60,12,0.1>-Chain 1 Vol (dB)
+slider11:0<-60,12,0.1>-Chain 2 Vol (dB)
+slider12:0<-60,12,0.1>-Chain 3 Vol (dB)
+slider13:0<-60,12,0.1>-Chain 4 Vol (dB)
+slider14:0<-60,12,0.1>-Chain 5 Vol (dB)
+slider15:0<-60,12,0.1>-Chain 6 Vol (dB)
+slider16:0<-60,12,0.1>-Chain 7 Vol (dB)
+slider17:0<-60,12,0.1>-Chain 8 Vol (dB)
+slider18:0<-60,12,0.1>-Chain 9 Vol (dB)
+slider19:0<-60,12,0.1>-Chain 10 Vol (dB)
+slider20:0<-60,12,0.1>-Chain 11 Vol (dB)
+slider21:0<-60,12,0.1>-Chain 12 Vol (dB)
+slider22:0<-60,12,0.1>-Chain 13 Vol (dB)
+slider23:0<-60,12,0.1>-Chain 14 Vol (dB)
+slider24:0<-60,12,0.1>-Chain 15 Vol (dB)
+slider25:0<-60,12,0.1>-Chain 16 Vol (dB)
+
+// Per-chain pan/balance (up to 16 chains) - Hidden, controlled via SideFX
+slider30:0<-100,100,1>-Chain 1 Pan
+slider31:0<-100,100,1>-Chain 2 Pan
+slider32:0<-100,100,1>-Chain 3 Pan
+slider33:0<-100,100,1>-Chain 4 Pan
+slider34:0<-100,100,1>-Chain 5 Pan
+slider35:0<-100,100,1>-Chain 6 Pan
+slider36:0<-100,100,1>-Chain 7 Pan
+slider37:0<-100,100,1>-Chain 8 Pan
+slider38:0<-100,100,1>-Chain 9 Pan
+slider39:0<-100,100,1>-Chain 10 Pan
+slider40:0<-100,100,1>-Chain 11 Pan
+slider41:0<-100,100,1>-Chain 12 Pan
+slider42:0<-100,100,1>-Chain 13 Pan
+slider43:0<-100,100,1>-Chain 14 Pan
+slider44:0<-100,100,1>-Chain 15 Pan
+slider45:0<-100,100,1>-Chain 16 Pan
+
+@init
+smooth_coeff = exp(-1 / (srate * 0.005));  // 5ms smoothing
+master_smooth = 1;
+master_bal_l_smooth = 1;
+master_bal_r_smooth = 1;
+
+@slider
+master = 10 ^ (slider1 / 20);
+
+// Master balance
+master_bal_l = slider2 <= 0 ? 1 : (100 - slider2) / 100;
+master_bal_r = slider2 >= 0 ? 1 : (slider2 + 100) / 100;
+
+// Calculate per-chain gains (using same formula as IX mixer: 2^(dB/6))
+level1 = slider10 <= -60 ? 0 : 2 ^ (slider10 / 6);
+level2 = slider11 <= -60 ? 0 : 2 ^ (slider11 / 6);
+level3 = slider12 <= -60 ? 0 : 2 ^ (slider12 / 6);
+level4 = slider13 <= -60 ? 0 : 2 ^ (slider13 / 6);
+level5 = slider14 <= -60 ? 0 : 2 ^ (slider14 / 6);
+level6 = slider15 <= -60 ? 0 : 2 ^ (slider15 / 6);
+level7 = slider16 <= -60 ? 0 : 2 ^ (slider16 / 6);
+level8 = slider17 <= -60 ? 0 : 2 ^ (slider17 / 6);
+level9 = slider18 <= -60 ? 0 : 2 ^ (slider18 / 6);
+level10 = slider19 <= -60 ? 0 : 2 ^ (slider19 / 6);
+level11 = slider20 <= -60 ? 0 : 2 ^ (slider20 / 6);
+level12 = slider21 <= -60 ? 0 : 2 ^ (slider21 / 6);
+level13 = slider22 <= -60 ? 0 : 2 ^ (slider22 / 6);
+level14 = slider23 <= -60 ? 0 : 2 ^ (slider23 / 6);
+level15 = slider24 <= -60 ? 0 : 2 ^ (slider24 / 6);
+level16 = slider25 <= -60 ? 0 : 2 ^ (slider25 / 6);
+
+// Calculate per-chain balance
+// -100 = full left, 0 = center (unity), +100 = full right
+bal_l_1 = slider30 <= 0 ? 1 : (100 - slider30) / 100;
+bal_r_1 = slider30 >= 0 ? 1 : (slider30 + 100) / 100;
+bal_l_2 = slider31 <= 0 ? 1 : (100 - slider31) / 100;
+bal_r_2 = slider31 >= 0 ? 1 : (slider31 + 100) / 100;
+bal_l_3 = slider32 <= 0 ? 1 : (100 - slider32) / 100;
+bal_r_3 = slider32 >= 0 ? 1 : (slider32 + 100) / 100;
+bal_l_4 = slider33 <= 0 ? 1 : (100 - slider33) / 100;
+bal_r_4 = slider33 >= 0 ? 1 : (slider33 + 100) / 100;
+bal_l_5 = slider34 <= 0 ? 1 : (100 - slider34) / 100;
+bal_r_5 = slider34 >= 0 ? 1 : (slider34 + 100) / 100;
+bal_l_6 = slider35 <= 0 ? 1 : (100 - slider35) / 100;
+bal_r_6 = slider35 >= 0 ? 1 : (slider35 + 100) / 100;
+bal_l_7 = slider36 <= 0 ? 1 : (100 - slider36) / 100;
+bal_r_7 = slider36 >= 0 ? 1 : (slider36 + 100) / 100;
+bal_l_8 = slider37 <= 0 ? 1 : (100 - slider37) / 100;
+bal_r_8 = slider37 >= 0 ? 1 : (slider37 + 100) / 100;
+bal_l_9 = slider38 <= 0 ? 1 : (100 - slider38) / 100;
+bal_r_9 = slider38 >= 0 ? 1 : (slider38 + 100) / 100;
+bal_l_10 = slider39 <= 0 ? 1 : (100 - slider39) / 100;
+bal_r_10 = slider39 >= 0 ? 1 : (slider39 + 100) / 100;
+bal_l_11 = slider40 <= 0 ? 1 : (100 - slider40) / 100;
+bal_r_11 = slider40 >= 0 ? 1 : (slider40 + 100) / 100;
+bal_l_12 = slider41 <= 0 ? 1 : (100 - slider41) / 100;
+bal_r_12 = slider41 >= 0 ? 1 : (slider41 + 100) / 100;
+bal_l_13 = slider42 <= 0 ? 1 : (100 - slider42) / 100;
+bal_r_13 = slider42 >= 0 ? 1 : (slider42 + 100) / 100;
+bal_l_14 = slider43 <= 0 ? 1 : (100 - slider43) / 100;
+bal_r_14 = slider43 >= 0 ? 1 : (slider43 + 100) / 100;
+bal_l_15 = slider44 <= 0 ? 1 : (100 - slider44) / 100;
+bal_r_15 = slider44 >= 0 ? 1 : (slider44 + 100) / 100;
+bal_l_16 = slider45 <= 0 ? 1 : (100 - slider45) / 100;
+bal_r_16 = slider45 >= 0 ? 1 : (slider45 + 100) / 100;
+
+@sample
+// Smooth master gain and balance
+master_smooth = master_smooth * smooth_coeff + master * (1 - smooth_coeff);
+master_bal_l_smooth = master_bal_l_smooth * smooth_coeff + master_bal_l * (1 - smooth_coeff);
+master_bal_r_smooth = master_bal_r_smooth * smooth_coeff + master_bal_r * (1 - smooth_coeff);
+
+// Sum all chain inputs to stereo output
+// Chain 1 = inputs 3/4 (spl2/spl3), Chain 2 = inputs 5/6 (spl4/spl5), etc.
+// Note: inputs 1/2 (spl0/spl1) are dry signal, not summed
+
+spl0 = (spl2 * level1 * bal_l_1) +
+       (spl4 * level2 * bal_l_2) +
+       (spl6 * level3 * bal_l_3) +
+       (spl8 * level4 * bal_l_4) +
+       (spl10 * level5 * bal_l_5) +
+       (spl12 * level6 * bal_l_6) +
+       (spl14 * level7 * bal_l_7) +
+       (spl16 * level8 * bal_l_8) +
+       (spl18 * level9 * bal_l_9) +
+       (spl20 * level10 * bal_l_10) +
+       (spl22 * level11 * bal_l_11) +
+       (spl24 * level12 * bal_l_12) +
+       (spl26 * level13 * bal_l_13) +
+       (spl28 * level14 * bal_l_14) +
+       (spl30 * level15 * bal_l_15);
+
+spl1 = (spl3 * level1 * bal_r_1) +
+       (spl5 * level2 * bal_r_2) +
+       (spl7 * level3 * bal_r_3) +
+       (spl9 * level4 * bal_r_4) +
+       (spl11 * level5 * bal_r_5) +
+       (spl13 * level6 * bal_r_6) +
+       (spl15 * level7 * bal_r_7) +
+       (spl17 * level8 * bal_r_8) +
+       (spl19 * level9 * bal_r_9) +
+       (spl21 * level10 * bal_r_10) +
+       (spl23 * level11 * bal_r_11) +
+       (spl25 * level12 * bal_r_12) +
+       (spl27 * level13 * bal_r_13) +
+       (spl29 * level14 * bal_r_14) +
+       (spl31 * level15 * bal_r_15);
+
+// Apply master gain and balance
+spl0 *= master_smooth * master_bal_l_smooth;
+spl1 *= master_smooth * master_bal_r_smooth;

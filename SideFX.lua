@@ -1,16 +1,29 @@
 -- @description SideFX - Smart FX Container Manager
 -- @author Nomad Monad
--- @version 0.4.1
+-- @version 0.5.0
 -- @provides
 --   [nomain] lib/*.lua
+--   [nomain] lib/ui/*.lua
 -- @link https://github.com/Conceptual-Machines/SideFX
 -- @about
 --   # SideFX
 --
 --   Rack-style FX container management for Reaper 7+.
---   Ableton/Bitwig-inspired UI for FX chains.
+--   Ableton/Bitwig-inspired horizontal device chain UI.
+--
+--   ## Features
+--   - Horizontal device chain layout
+--   - Device panels with inline parameter control
+--   - Parallel rack containers
+--   - Modulator routing with parameter links
+--   - Plugin browser with search
 --
 -- @changelog
+--   v0.5.0 - Horizontal Device Chain UI
+--     + New Ableton-style horizontal device layout
+--     + Device panels with expand/collapse parameters
+--     + Rack containers with stacked chains
+--     + Donation link added
 --   v0.4.1 - UI fixes
 --     + Horizontal scrolling for nested columns
 --     + Fixed container toggle behavior
@@ -128,6 +141,11 @@ local state = {
         filtered = {},
         scanned = false,
     },
+    
+    -- Modulator state
+    modulators = {},  -- List of {fx_idx, links = {{target_fx_idx, param_idx}, ...}}
+    mod_link_selecting = nil,  -- {mod_idx, selecting = true} when choosing target
+    mod_selected_target = {},  -- {[mod_fx_idx] = {fx_idx, fx_name}} for two-dropdown linking
 }
 
 -- Create dynamic REAPER theme (reads actual theme colors)
@@ -138,6 +156,11 @@ local reaper_theme = theme.from_reaper_theme("REAPER Dynamic")
 --------------------------------------------------------------------------------
 
 local project = Project:new()
+
+-- Forward declarations for functions defined later
+local renumber_device_chain
+local get_device_utility
+local renumber_chains_in_rack
 
 local function get_selected_track()
     if not project:has_selected_tracks() then
@@ -161,6 +184,9 @@ local function refresh_fx_list()
         end
     end
     state.last_fx_count = state.track:get_track_fx_count()
+    
+    -- Renumber D-containers after any chain change
+    renumber_device_chain()
 end
 
 local function clear_multi_select()
@@ -221,13 +247,27 @@ local function get_multi_select_count()
 end
 
 -- Get display name for FX (uses renamed_name if set, otherwise default name)
+-- Strips internal prefixes (R1_C1_D1_FX:, D1:, etc.) for clean UI display
 local function get_fx_display_name(fx)
     if not fx then return "Unknown" end
     local ok, renamed = pcall(function() return fx:get_named_config_param("renamed_name") end)
+    local name
     if ok and renamed and renamed ~= "" then
-        return renamed
+        name = renamed
+    else
+        name = fx:get_name()
     end
-    return fx:get_name()
+    
+    -- Strip SideFX internal prefixes for clean UI display
+    -- Patterns from most specific to least specific
+    name = name:gsub("^R%d+_C%d+_D%d+_FX:%s*", "")  -- R1_C1_D1_FX: prefix
+    name = name:gsub("^R%d+_C%d+_D%d+:%s*", "")     -- R1_C1_D1: prefix
+    name = name:gsub("^R%d+_C%d+:%s*", "")          -- R1_C1: prefix
+    name = name:gsub("^D%d+_FX:%s*", "")            -- D1_FX: prefix
+    name = name:gsub("^D%d+:%s*", "")               -- D1: prefix
+    name = name:gsub("^R%d+:%s*", "")               -- R1: prefix
+    
+    return name
 end
 
 -- Collapse all columns from a certain depth onwards
@@ -307,12 +347,947 @@ local function filter_plugins()
     state.browser.filtered = results
 end
 
-local function add_plugin_to_track(plugin)
-    if not state.track then return end
+-- JSFX name - when installed via ReaPack, this will be in the SideFX folder
+-- Use just the name and let REAPER find it, or use full path for dev
+local UTILITY_JSFX = "JS:SideFX/SideFX_Utility"
 
-    local fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
-    if fx then
+local function is_utility_fx(fx)
+    if not fx then return false end
+    local name = fx:get_name()
+    if not name then return false end
+    -- Check for original JSFX name or renamed utility formats:
+    -- D{n}_Util (top-level device)
+    -- R{n}_C{m}_D{p}_Util (device inside chain inside rack)
+    return name:find("SideFX_Utility") or name:find("SideFX Utility") or 
+           name:match("^D%d+_Util$") or name:match("_Util$")
+end
+
+local function find_paired_utility(track, fx)
+    -- Find the SideFX_Utility immediately after this FX
+    if not track or not fx then return nil end
+    
+    local fx_idx = fx.pointer
+    local next_idx = fx_idx + 1
+    local total = track:get_track_fx_count()
+    
+    if next_idx < total then
+        local next_fx = track:get_track_fx(next_idx)
+        if next_fx and is_utility_fx(next_fx) then
+            return next_fx
+        end
+    end
+    return nil
+end
+
+--------------------------------------------------------------------------------
+-- D-Container (Device) Helpers
+--------------------------------------------------------------------------------
+
+-- Check if a container is a SideFX device container (D-prefix for top-level)
+local function is_device_container(fx)
+    if not fx then return false end
+    local ok, is_cont = pcall(function() return fx:is_container() end)
+    if not ok or not is_cont then return false end
+    
+    local ok2, name = pcall(function() return fx:get_name() end)
+    if not ok2 or not name then return false end
+    
+    return name:match("^D%d") ~= nil
+end
+
+-- Check if a container is a SideFX chain container (R{n}_C{n} pattern for chains inside racks)
+local function is_chain_container(fx)
+    if not fx then return false end
+    local ok, is_cont = pcall(function() return fx:is_container() end)
+    if not ok or not is_cont then return false end
+    
+    local ok2, name = pcall(function() return fx:get_name() end)
+    if not ok2 or not name then return false end
+    
+    -- Match R{n}_C{n}: pattern (e.g., R1_C1: ReaComp)
+    return name:match("^R%d+_C%d+") ~= nil
+end
+
+-- Check if a container is a SideFX rack container (R-prefix, not a chain)
+local function is_rack_container(fx)
+    if not fx then return false end
+    local ok, is_cont = pcall(function() return fx:is_container() end)
+    if not ok or not is_cont then return false end
+    
+    local ok2, name = pcall(function() return fx:get_name() end)
+    if not ok2 or not name then return false end
+    
+    -- Match R{n}: pattern but NOT R{n}_C{n} (which is a chain)
+    return name:match("^R%d+:") ~= nil and not name:match("^R%d+_C%d+")
+end
+
+-- Get the main FX from a D-container (first non-utility child)
+local function get_device_main_fx(container)
+    if not container then return nil end
+    for child in container:iter_container_children() do
+        if not is_utility_fx(child) then
+            return child
+        end
+    end
+    return nil
+end
+
+-- Get the utility FX from a D-container
+get_device_utility = function(container)
+    if not container then return nil end
+    for child in container:iter_container_children() do
+        if is_utility_fx(child) then
+            return child
+        end
+    end
+    return nil
+end
+
+-- Count D-containers at top level to get next index
+local function get_next_device_index()
+    if not state.track then return 1 end
+    local max_idx = 0
+    for fx in state.track:iter_track_fx_chain() do
+        local parent = fx:get_parent_container()
+        if not parent then  -- Top level only
+            local name = fx:get_name()
+            local idx = name:match("^D(%d+)")
+            if idx then
+                max_idx = math.max(max_idx, tonumber(idx))
+            end
+        end
+    end
+    return max_idx + 1
+end
+
+-- Get short name from plugin full name (strip prefixes)
+local function get_short_plugin_name(full_name)
+    local name = full_name
+    -- Strip common prefixes
+    name = name:gsub("^VST3?: ", "")
+    name = name:gsub("^AU: ", "")
+    name = name:gsub("^JS: ", "")
+    name = name:gsub("^CLAP: ", "")
+    name = name:gsub("^VSTi: ", "")
+    -- Strip path for JS
+    name = name:gsub("^.+/", "")
+    return name
+end
+
+-- Renumber all D-containers after chain changes
+renumber_device_chain = function()
+    if not state.track then return end
+    
+    local device_idx = 0
+    for fx in state.track:iter_track_fx_chain() do
+        local parent = fx:get_parent_container()
+        if not parent then  -- Top level only
+            local name = fx:get_name()
+            
+            -- Check if it's a D-container
+            local old_idx, fx_name = name:match("^D(%d+): (.+)$")
+            if old_idx and fx_name then
+                device_idx = device_idx + 1
+                local new_name = string.format("D%d: %s", device_idx, fx_name)
+                if new_name ~= name then
+                    r.TrackFX_SetNamedConfigParm(state.track.pointer, fx.pointer, "renamed_name", new_name)
+                    
+                    -- Also rename FX inside (has _FX suffix)
+                    local main_fx = get_device_main_fx(fx)
+                    if main_fx then
+                        local main_fx_name = string.format("D%d_FX: %s", device_idx, fx_name)
+                        r.TrackFX_SetNamedConfigParm(state.track.pointer, main_fx.pointer, "renamed_name", main_fx_name)
+                    end
+                    
+                    -- Also rename utility inside
+                    local utility = get_device_utility(fx)
+                    if utility then
+                        local util_name = string.format("D%d_Util", device_idx)
+                        r.TrackFX_SetNamedConfigParm(state.track.pointer, utility.pointer, "renamed_name", util_name)
+                    end
+                end
+            end
+            
+            -- Check if it's an R-container (rack)
+            local rack_idx = name:match("^R(%d+)")
+            if rack_idx then
+                device_idx = device_idx + 1
+                -- TODO: Renumber rack and its children
+            end
+        end
+    end
+end
+
+local function add_plugin_to_track(plugin, position)
+    if not state.track then return end
+    
+    local name_lower = plugin.full_name:lower()
+    
+    -- Don't wrap modulators in containers
+    if name_lower:find("sidefx_modulator") then
+        r.Undo_BeginBlock()
+        local fx_position = position and (-1000 - position) or -1
+        local fx = state.track:add_fx_by_name(plugin.full_name, false, fx_position)
+        r.Undo_EndBlock("SideFX: Add Modulator", -1)
         refresh_fx_list()
+        return fx
+    end
+    
+    -- Don't wrap utilities in containers (shouldn't be added directly anyway)
+    if name_lower:find("sidefx_utility") then
+        return nil
+    end
+
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+    
+    -- Get next device index
+    local device_idx = get_next_device_index()
+    local short_name = get_short_plugin_name(plugin.full_name)
+    local container_name = string.format("D%d: %s", device_idx, short_name)
+    
+    -- Position for the container
+    local container_position = position and (-1000 - position) or -1
+    
+    -- Create the container first
+    local container = state.track:add_fx_by_name("Container", false, container_position)
+    
+    if container and container.pointer >= 0 then
+        -- Rename the container using ReaWrap
+        container:set_named_config_param("renamed_name", container_name)
+        
+        -- Add the main FX at track level first
+        local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
+        
+        if main_fx and main_fx.pointer >= 0 then
+            -- Move the FX into the container using ReaWrap
+            container:add_fx_to_container(main_fx, 0)
+            
+            -- Re-find the FX inside the container (pointer changed after move)
+            local fx_inside = get_device_main_fx(container)
+            
+            if fx_inside then
+                -- Set wet/dry to 100% by default
+                local wet_idx = fx_inside:get_param_from_ident(":wet")
+                if wet_idx >= 0 then
+                    fx_inside:set_param_normalized(wet_idx, 1.0)
+                end
+                -- Rename FX with _FX suffix to distinguish from container
+                local fx_name = string.format("D%d_FX: %s", device_idx, short_name)
+                fx_inside:set_named_config_param("renamed_name", fx_name)
+            end
+            
+            -- Add utility at track level, then move into container
+            local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, -1)
+            
+            if not util_fx or util_fx.pointer < 0 then
+                r.ShowConsoleMsg("SideFX: Could not add utility JSFX. Make sure SideFX_Utility.jsfx is installed in REAPER's Effects/SideFX folder.\n")
+            else
+                -- Move utility into container at position 1
+                container:add_fx_to_container(util_fx, 1)
+                
+                -- Re-find utility inside container and rename it
+                local util_inside = get_device_utility(container)
+                if util_inside then
+                    local util_name = string.format("D%d_Util", device_idx)
+                    util_inside:set_named_config_param("renamed_name", util_name)
+                end
+            end
+        else
+            r.ShowConsoleMsg("SideFX: Could not add FX.\n")
+        end
+        
+        refresh_fx_list()
+    end
+    
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Add Device", -1)
+    
+    return container
+end
+
+-- Add plugin by name at a specific position
+local function add_plugin_by_name(plugin_name, position)
+    if not state.track or not plugin_name then return end
+    
+    -- Create a minimal plugin object for add_plugin_to_track
+    local plugin = { full_name = plugin_name, name = plugin_name }
+    return add_plugin_to_track(plugin, position)
+end
+
+--------------------------------------------------------------------------------
+-- R-Container (Rack) Functions
+--------------------------------------------------------------------------------
+
+local MIXER_JSFX = "JS:SideFX/SideFX_Mixer"
+
+-- Get next rack index for R-naming
+local function get_next_rack_index()
+    if not state.track then return 1 end
+    local max_idx = 0
+    for fx in state.track:iter_track_fx_chain() do
+        local parent = fx:get_parent_container()
+        if not parent then  -- Top level only
+            local name = fx:get_name()
+            -- Check for R-containers
+            local idx = name:match("^R(%d+)")
+            if idx then
+                max_idx = math.max(max_idx, tonumber(idx))
+            end
+            -- Also count D-containers for overall numbering
+            local d_idx = name:match("^D(%d+)")
+            if d_idx then
+                max_idx = math.max(max_idx, tonumber(d_idx))
+            end
+        end
+    end
+    return max_idx + 1
+end
+
+-- Get the mixer FX from a rack container
+local function get_rack_mixer(rack)
+    if not rack then return nil end
+    for child in rack:iter_container_children() do
+        local ok, name = pcall(function() return child:get_name() end)
+        if ok and name then
+            -- Mixer is named _R{n}_M or contains "Mixer"
+            if name:match("^_R%d+_M$") or (name:find("SideFX") and name:find("Mixer")) then
+                return child
+            end
+        end
+    end
+    return nil
+end
+
+-- Get the parameter index for chain volume in the mixer
+-- Parameter index is based on DECLARATION ORDER in JSFX, not slider number!
+-- slider1 (Master Gain) = param 0
+-- slider2 (Master Pan) = param 1
+-- slider10-25 (Chain 1-16 Vol) = param 2-17
+-- slider30-45 (Chain 1-16 Pan) = param 18-33
+local function get_mixer_chain_volume_param(chain_index)
+    return 1 + chain_index  -- Chain 1 = param 2, Chain 2 = param 3, etc.
+end
+
+-- Get the parameter index for chain pan in the mixer
+local function get_mixer_chain_pan_param(chain_index)
+    return 17 + chain_index  -- Chain 1 Pan = param 18, Chain 2 Pan = param 19, etc.
+end
+
+-- Custom pan slider with center line indicator
+-- Returns: changed (bool), new_value (-100 to +100)
+local function draw_pan_slider(ctx, label, pan_val, width)
+    width = width or 50
+    local slider_h = 12
+    local text_h = 16
+    local gap = 2
+    local total_h = slider_h + gap + text_h
+    
+    local changed = false
+    local new_val = pan_val
+    
+    -- Format label
+    local pan_format
+    if pan_val <= -1 then
+        pan_format = string.format("%.0fL", -pan_val)
+    elseif pan_val >= 1 then
+        pan_format = string.format("%.0fR", pan_val)
+    else
+        pan_format = "C"
+    end
+    
+    local screen_x, screen_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+    
+    -- Background track
+    r.ImGui_DrawList_AddRectFilled(draw_list, screen_x, screen_y, screen_x + width, screen_y + slider_h, 0x333333FF, 2)
+    
+    -- Center line (vertical tick)
+    local center_x = screen_x + width / 2
+    r.ImGui_DrawList_AddLine(draw_list, center_x, screen_y - 1, center_x, screen_y + slider_h + 1, 0x666666FF, 1)
+    
+    -- Pan indicator line from center
+    local pan_norm = (pan_val + 100) / 200  -- 0 to 1
+    local pan_x = screen_x + pan_norm * width
+    
+    -- Draw filled region from center to pan position
+    if pan_val < -1 then
+        r.ImGui_DrawList_AddRectFilled(draw_list, pan_x, screen_y + 1, center_x, screen_y + slider_h - 1, 0x5588AAFF, 1)
+    elseif pan_val > 1 then
+        r.ImGui_DrawList_AddRectFilled(draw_list, center_x, screen_y + 1, pan_x, screen_y + slider_h - 1, 0x5588AAFF, 1)
+    end
+    
+    -- Pan position indicator (small line)
+    r.ImGui_DrawList_AddLine(draw_list, pan_x, screen_y, pan_x, screen_y + slider_h, 0xAADDFFFF, 2)
+    
+    -- Text label background (full width)
+    local text_y = screen_y + slider_h + gap
+    r.ImGui_DrawList_AddRectFilled(draw_list, screen_x, text_y, screen_x + width, text_y + text_h, 0x222222FF, 2)
+    
+    -- Invisible button for slider dragging (only covers slider area)
+    r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, screen_y)
+    r.ImGui_InvisibleButton(ctx.ctx, label .. "_slider_btn", width, slider_h)
+    
+    -- Handle dragging
+    if r.ImGui_IsItemActive(ctx.ctx) then
+        local mouse_x = r.ImGui_GetMousePos(ctx.ctx)
+        local new_norm = (mouse_x - screen_x) / width
+        new_norm = math.max(0, math.min(1, new_norm))
+        new_val = -100 + new_norm * 200
+        changed = true
+    end
+    
+    -- Double-click on slider to reset to center
+    if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+        new_val = 0
+        changed = true
+    end
+    
+    -- Draw formatted text centered
+    local text_w = r.ImGui_CalcTextSize(ctx.ctx, pan_format)
+    r.ImGui_DrawList_AddText(draw_list, screen_x + (width - text_w) / 2, text_y + 2, 0xCCCCCCFF, pan_format)
+    
+    -- Invisible button for text label (separate from slider)
+    r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, text_y)
+    r.ImGui_InvisibleButton(ctx.ctx, label .. "_text_btn", width, text_h)
+    
+    -- Double-click on text to edit value
+    if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+        r.ImGui_OpenPopup(ctx.ctx, label .. "_edit_popup")
+    end
+    
+    -- Edit popup
+    if r.ImGui_BeginPopup(ctx.ctx, label .. "_edit_popup") then
+        ctx:set_next_item_width(60)
+        r.ImGui_SetKeyboardFocusHere(ctx.ctx)
+        local input_changed, input_val = r.ImGui_InputDouble(ctx.ctx, "##" .. label .. "_input", pan_val, 0, 0, "%.0f")
+        if input_changed then
+            new_val = math.max(-100, math.min(100, input_val))
+            changed = true
+        end
+        if r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Enter()) or r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Escape()) then
+            r.ImGui_CloseCurrentPopup(ctx.ctx)
+        end
+        r.ImGui_EndPopup(ctx.ctx)
+    end
+    
+    -- Advance cursor
+    r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, screen_y + total_h)
+    r.ImGui_Dummy(ctx.ctx, width, 0)
+    
+    return changed, new_val
+end
+
+-- Add a new rack (R-container) to the track
+local function add_rack_to_track(position)
+    if not state.track then return nil end
+    
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+    
+    -- Get next index
+    local rack_idx = get_next_rack_index()
+    local rack_name = string.format("R%d: Rack", rack_idx)
+    
+    -- Position for the container
+    local container_position = position and (-1000 - position) or -1
+    
+    -- Create the rack container
+    local rack = state.track:add_fx_by_name("Container", false, container_position)
+    
+    if rack and rack.pointer >= 0 then
+        -- Rename the rack
+        rack:set_named_config_param("renamed_name", rack_name)
+        
+        -- Set up for parallel routing (64 channels for up to 32 stereo chains)
+        rack:set_container_channels(64)
+        
+        -- Add the mixer JSFX at track level, then move into rack
+        local mixer_fx = state.track:add_fx_by_name(MIXER_JSFX, false, -1)
+        
+        if mixer_fx and mixer_fx.pointer >= 0 then
+            -- Move mixer into rack
+            rack:add_fx_to_container(mixer_fx, 0)
+            
+            -- Rename mixer
+            local mixer_inside = nil
+            for child in rack:iter_container_children() do
+                local ok, name = pcall(function() return child:get_name() end)
+                -- Match various mixer name patterns: original JSFX name or already renamed
+                if ok and name and ((name:find("SideFX") and name:find("Mixer")) or name:match("^_R%d+_M$")) then
+                    mixer_inside = child
+                    break
+                end
+            end
+            if mixer_inside then
+                -- Use consistent naming: _R1_M (underscore = internal/hidden)
+                mixer_inside:set_named_config_param("renamed_name", string.format("_R%d_M", rack_idx))
+                
+                -- Initialize master and chain params:
+                -- Param 0 = Master Gain (0 dB = 0.667 in range -24 to +12)
+                -- Param 1 = Master Pan (center = 0.5)
+                -- Params 2-17 = Chain volumes (0 dB = 0.833 in range -60 to +12)
+                -- Params 18-33 = Chain pans (center = 0.5)
+                local master_0db_norm = (0 + 24) / 36  -- 0.667
+                local pan_center_norm = 0.5
+                local vol_0db_norm = (0 + 60) / 72  -- 0.833
+                
+                pcall(function() mixer_inside:set_param_normalized(0, master_0db_norm) end)  -- Master gain
+                pcall(function() mixer_inside:set_param_normalized(1, pan_center_norm) end)  -- Master pan
+                
+                for i = 1, 16 do
+                    pcall(function() mixer_inside:set_param_normalized(1 + i, vol_0db_norm) end)  -- Vol params 2-17
+                    pcall(function() mixer_inside:set_param_normalized(17 + i, pan_center_norm) end)  -- Pan params 18-33
+                end
+            end
+        else
+            r.ShowConsoleMsg("SideFX: Could not add mixer JSFX. Make sure SideFX_Mixer.jsfx is installed in REAPER's Effects/SideFX folder.\n")
+        end
+        
+        -- Expand the rack to show it
+        state.expanded_path = { rack:get_guid() }
+        
+        refresh_fx_list()
+    end
+    
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Add Rack", -1)
+    
+    return rack
+end
+
+-- Add a chain (C-container) to an existing rack (R-container)
+local function add_chain_to_rack(rack, plugin)
+    if not rack or not plugin then return nil end
+    if not is_rack_container(rack) then return nil end
+    
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+    
+    -- Get rack name for prefix (e.g., "R1")
+    local rack_name = rack:get_name()
+    local rack_prefix = rack_name:match("^(R%d+)") or "R1"
+    
+    -- Count existing chains in this rack (exclude mixer)
+    local chain_count = 0
+    for child in rack:iter_container_children() do
+        local ok, name = pcall(function() return child:get_name() end)
+        if ok and name and not name:match("^_") and not name:find("Mixer") then
+            chain_count = chain_count + 1
+        end
+    end
+    
+    -- Chain index (1-based)
+    local chain_idx = chain_count + 1
+    
+    -- Max 31 chains (channels 3-64, since 1/2 reserved for dry signal)
+    if chain_idx > 31 then
+        r.ShowConsoleMsg("SideFX: Maximum 31 chains per rack (channels 3-64, 1/2 reserved)\n")
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Chain to Rack (failed)", -1)
+        return nil
+    end
+    
+    -- Hierarchical naming (fully recursive):
+    -- Chain container:  R1_C1 (routing only)
+    -- Device container: R1_C1_D1: <name>
+    -- FX inside device: R1_C1_D1_FX: <name>
+    -- Utility:          R1_C1_D1_Util
+    local short_name = get_short_plugin_name(plugin.full_name)
+    local chain_prefix = string.format("%s_C%d", rack_prefix, chain_idx)
+    local chain_name = chain_prefix  -- Chain container has no suffix, just the prefix
+    local device_prefix = string.format("%s_D1", chain_prefix)  -- First device in chain
+    local device_name = string.format("%s: %s", device_prefix, short_name)
+    
+    -- Build device container completely at track level first, then nest it
+    -- This avoids issues with nested container addressing
+    
+    -- Step 1: Create device container at track level
+    local device = state.track:add_fx_by_name("Container", false, -1)
+    if not device or device.pointer < 0 then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Chain (failed)", -1)
+        return nil
+    end
+    device:set_named_config_param("renamed_name", device_name)
+    
+    -- Step 2: Add FX to device container (while still at track level)
+    local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
+    if main_fx and main_fx.pointer >= 0 then
+        device:add_fx_to_container(main_fx, 0)
+        
+        -- Re-find and configure FX
+        local fx_inside = get_device_main_fx(device)
+        if fx_inside then
+            local wet_idx = fx_inside:get_param_from_ident(":wet")
+            if wet_idx and wet_idx >= 0 then
+                fx_inside:set_param_normalized(wet_idx, 1.0)
+            end
+            fx_inside:set_named_config_param("renamed_name", string.format("%s_FX: %s", device_prefix, short_name))
+        end
+    end
+    
+    -- Step 3: Add utility to device container (while still at track level)
+    local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, -1)
+    if util_fx and util_fx.pointer >= 0 then
+        device:add_fx_to_container(util_fx, 1)
+        
+        local util_inside = get_device_utility(device)
+        if util_inside then
+            util_inside:set_named_config_param("renamed_name", string.format("%s_Util", device_prefix))
+        end
+    end
+    
+    -- Step 4: Create chain container at track level
+    local chain = state.track:add_fx_by_name("Container", false, -1)
+    if chain and chain.pointer >= 0 then
+        chain:set_named_config_param("renamed_name", chain_name)
+        
+        -- Step 5: Move device into chain (device is complete now)
+        chain:add_fx_to_container(device, 0)
+        
+        -- Move the chain container into the rack (before the internal mixer)
+        local mixer_pos = 0
+        local pos = 0
+        for child in rack:iter_container_children() do
+            local ok, name = pcall(function() return child:get_name() end)
+            if ok and name and (name:match("^_") or name:find("Mixer")) then
+                mixer_pos = pos
+                break
+            end
+            pos = pos + 1
+        end
+        
+        rack:add_fx_to_container(chain, mixer_pos)
+        
+        -- Re-find chain inside rack to set pin mappings
+        local chain_inside = nil
+        for child in rack:iter_container_children() do
+            local ok, name = pcall(function() return child:get_name() end)
+            if ok and name == chain_name then
+                chain_inside = child
+                break
+            end
+        end
+        
+        if chain_inside then
+            -- CRITICAL: Set chain container to have enough internal channels
+            -- Without this, output pin mappings to channels 3+ have nowhere to go!
+            chain_inside:set_container_channels(64)
+            
+            -- Set output channel routing for this chain
+            -- All chains read from 1/2 (main signal), output to sideband channels:
+            -- Chain 1 → 3/4, Chain 2 → 5/6, Chain 3 → 7/8, Chain 4 → 9/10, etc.
+            -- Channels 1/2 are reserved for the dry signal pass-through
+            -- Pin mappings use bitmask: bit N = channel N (0-indexed)
+            local out_channel = chain_idx * 2  -- 2, 4, 6, 8... (0-indexed, so 3/4, 5/6, 7/8, 9/10...)
+            
+            -- Calculate bitmasks: 2^out_channel for left, 2^(out_channel+1) for right
+            local left_bits = math.floor(2 ^ out_channel)      -- 4, 16, 64, 256...
+            local right_bits = math.floor(2 ^ (out_channel + 1)) -- 8, 32, 128, 512...
+            
+            chain_inside:set_pin_mappings(1, 0, left_bits, 0)   -- output pin 0 (left)
+            chain_inside:set_pin_mappings(1, 1, right_bits, 0)  -- output pin 1 (right)
+            
+            -- Input pins stay on 1/2 (default) so all chains process the same input
+        end
+        
+        refresh_fx_list()
+    end
+    
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Add Chain to Rack", -1)
+    
+    return chain
+end
+
+-- Add a device (D-container with FX + Utility) to an existing chain
+local function add_device_to_chain(chain, plugin)
+    if not chain or not plugin then return nil end
+    if not is_chain_container(chain) then return nil end
+    
+    -- CRITICAL: Capture GUID before ANY modifications to track!
+    local chain_guid = chain:get_guid()
+    if not chain_guid then return nil end
+    
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+    
+    -- Get chain name to extract prefix
+    local chain_name = chain:get_name()
+    local chain_prefix = chain_name:match("^(R%d+_C%d+)") or chain_name
+    
+    -- Count existing devices in this chain
+    local device_count = 0
+    for child in chain:iter_container_children() do
+        local ok, child_name = pcall(function() return child:get_name() end)
+        if ok and child_name then
+            if child_name:match("_D%d+") or (not child_name:match("^_") and not child_name:find("Util") and not child_name:find("Mixer")) then
+                device_count = device_count + 1
+            end
+        end
+    end
+    
+    local device_idx = device_count + 1
+    local short_name = get_short_plugin_name(plugin.full_name)
+    local device_prefix = string.format("%s_D%d", chain_prefix, device_idx)
+    local device_name = string.format("%s: %s", device_prefix, short_name)
+    
+    -- Step 1: Create device container at track level
+    local device = state.track:add_fx_by_name("Container", false, -1)
+    if not device or device.pointer < 0 then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Device to Chain (failed)", -1)
+        return nil
+    end
+    device:set_named_config_param("renamed_name", device_name)
+    
+    -- Step 2: Add FX to device container (while still at track level)
+    local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
+    if main_fx and main_fx.pointer >= 0 then
+        device:add_fx_to_container(main_fx, 0)
+        
+        -- Re-find and configure FX
+        local fx_inside = get_device_main_fx(device)
+        if fx_inside then
+            local wet_idx = fx_inside:get_param_from_ident(":wet")
+            if wet_idx and wet_idx >= 0 then
+                fx_inside:set_param_normalized(wet_idx, 1.0)
+            end
+            fx_inside:set_named_config_param("renamed_name", string.format("%s_FX: %s", device_prefix, short_name))
+        end
+    end
+    
+    -- Step 3: Add utility to device container (while still at track level)
+    local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, -1)
+    if util_fx and util_fx.pointer >= 0 then
+        device:add_fx_to_container(util_fx, 1)
+        
+        local util_inside = get_device_utility(device)
+        if util_inside then
+            util_inside:set_named_config_param("renamed_name", string.format("%s_Util", device_prefix))
+        end
+    end
+    
+    -- Step 4: Move device into chain
+    -- Following the WORKING pattern from add_chain_to_rack:
+    -- Both device AND chain must be at TRACK LEVEL when we add device to chain
+    -- So if chain is nested: move it OUT, add device, move it back IN
+    local device_guid = device:get_guid()
+    
+    -- Re-find chain (pointer may be stale after adding FX)
+    local fresh_chain = state.track:find_fx_by_guid(chain_guid)
+    if not fresh_chain then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Device to Chain (chain lost)", -1)
+        return nil
+    end
+    
+    local rack = fresh_chain:get_parent_container()
+    if rack then
+        -- Chain is nested - move it OUT to track level first
+        local rack_guid = rack:get_guid()
+        
+        -- Find chain's position in rack (to restore later)
+        local chain_pos_in_rack = 0
+        for child in rack:iter_container_children() do
+            if child:get_guid() == chain_guid then break end
+            chain_pos_in_rack = chain_pos_in_rack + 1
+        end
+        
+        -- Step 4a: Move chain OUT of rack to track level
+        fresh_chain:move_out_of_container()
+        
+        -- Re-find chain at track level
+        fresh_chain = state.track:find_fx_by_guid(chain_guid)
+        if not fresh_chain then
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Device to Chain (chain lost)", -1)
+            return nil
+        end
+        
+        -- Re-find device (pointer may have changed)
+        device = state.track:find_fx_by_guid(device_guid)
+        if not device then
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Device to Chain (device lost)", -1)
+            return nil
+        end
+        
+        -- Step 4b: Move device into chain (BOTH AT TRACK LEVEL NOW!)
+        local insert_pos = fresh_chain:get_container_child_count()
+        fresh_chain:add_fx_to_container(device, insert_pos)
+        
+        -- Re-find chain (pointer changed after adding device)
+        fresh_chain = state.track:find_fx_by_guid(chain_guid)
+        if not fresh_chain then
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Device to Chain (chain lost)", -1)
+            return nil
+        end
+        
+        -- Step 4c: Move chain back INTO rack
+        local fresh_rack = state.track:find_fx_by_guid(rack_guid)
+        if not fresh_rack then
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Device to Chain (rack lost)", -1)
+            return nil
+        end
+        fresh_rack:add_fx_to_container(fresh_chain, chain_pos_in_rack)
+    else
+        -- Chain is top-level - direct move works
+        local insert_pos = fresh_chain:get_container_child_count()
+        fresh_chain:add_fx_to_container(device, insert_pos)
+    end
+    
+    refresh_fx_list()
+    
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Add Device to Chain", -1)
+    
+    return device
+end
+
+-- Reorder a chain within a rack (move chain_guid to position before target_chain_guid)
+-- If target_chain_guid is nil, move to end
+local function reorder_chain_in_rack(rack, chain_guid, target_chain_guid)
+    if not rack or not chain_guid then return false end
+    if not is_rack_container(rack) then return false end
+    
+    local chain = state.track:find_fx_by_guid(chain_guid)
+    if not chain then return false end
+    
+    -- Check chain is actually in this rack
+    local parent = chain:get_parent_container()
+    if not parent or parent:get_guid() ~= rack:get_guid() then return false end
+    
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+    
+    -- Get list of children in rack (including mixer)
+    local children = {}
+    local chain_pos = nil
+    local target_pos = nil
+    local mixer_pos = nil
+    
+    local pos = 0
+    for child in rack:iter_container_children() do
+        local guid = child:get_guid()
+        local ok, name = pcall(function() return child:get_name() end)
+        
+        children[#children + 1] = { guid = guid, fx = child }
+        
+        if guid == chain_guid then
+            chain_pos = pos
+        end
+        if guid == target_chain_guid then
+            target_pos = pos
+        end
+        -- Mixer is at the end (prefixed with _)
+        if ok and name and (name:match("^_") or name:find("Mixer")) then
+            mixer_pos = pos
+        end
+        
+        pos = pos + 1
+    end
+    
+    if chain_pos == nil then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Reorder Chain (failed)", -1)
+        return false
+    end
+    
+    -- Calculate destination position
+    local dest_pos
+    if target_chain_guid == nil then
+        -- Move to end (before mixer if present)
+        dest_pos = mixer_pos or #children
+    else
+        dest_pos = target_pos or mixer_pos or #children
+    end
+    
+    -- Adjust destination if moving forward (position shifts after removal)
+    if dest_pos > chain_pos then
+        dest_pos = dest_pos - 1
+    end
+    
+    -- No move needed if already in position
+    if dest_pos == chain_pos then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Reorder Chain", -1)
+        return true
+    end
+    
+    -- Perform the move using ReaWrap container operations
+    -- Move out first, then back in at new position
+    chain:move_out_of_container()
+    
+    -- Re-find chain and rack (pointers may have changed)
+    chain = state.track:find_fx_by_guid(chain_guid)
+    rack = state.track:find_fx_by_guid(rack:get_guid())
+    
+    if chain and rack then
+        rack:add_fx_to_container(chain, dest_pos)
+        
+        -- Renumber chain names to maintain sequential ordering
+        renumber_chains_in_rack(rack)
+    end
+    
+    refresh_fx_list()
+    
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Reorder Chain", -1)
+    
+    return true
+end
+
+-- Renumber chains within a rack after reordering (R1_C1, R1_C2, etc.)
+renumber_chains_in_rack = function(rack)
+    if not rack then return end
+    
+    local rack_name = rack:get_name()
+    local rack_prefix = rack_name:match("^(R%d+)") or "R1"
+    
+    local chain_idx = 0
+    for child in rack:iter_container_children() do
+        local ok, name = pcall(function() return child:get_name() end)
+        if ok and name then
+            -- Skip internal elements (mixer, prefixed with _)
+            if not name:match("^_") and not name:find("Mixer") then
+                chain_idx = chain_idx + 1
+                local old_prefix = name:match("^(R%d+_C%d+)")
+                if old_prefix then
+                    local new_prefix = string.format("%s_C%d", rack_prefix, chain_idx)
+                    if old_prefix ~= new_prefix then
+                        -- Rename chain
+                        local new_name = name:gsub("^R%d+_C%d+", new_prefix)
+                        child:set_named_config_param("renamed_name", new_name)
+                        
+                        -- Also rename devices inside chain
+                        for device in child:iter_container_children() do
+                            local ok_d, device_name = pcall(function() return device:get_name() end)
+                            if ok_d and device_name then
+                                local new_device_name = device_name:gsub("^R%d+_C%d+", new_prefix)
+                                if new_device_name ~= device_name then
+                                    device:set_named_config_param("renamed_name", new_device_name)
+                                    
+                                    -- Rename FX and utility inside device
+                                    for inner in device:iter_container_children() do
+                                        local ok_i, inner_name = pcall(function() return inner:get_name() end)
+                                        if ok_i and inner_name then
+                                            local new_inner_name = inner_name:gsub("^R%d+_C%d+", new_prefix)
+                                            if new_inner_name ~= inner_name then
+                                                inner:set_named_config_param("renamed_name", new_inner_name)
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
     end
 end
 
@@ -347,7 +1322,10 @@ local function dissolve_container(container)
     -- Get all children before we start moving them
     local children = {}
     for child in container:iter_container_children() do
-        children[#children + 1] = child:get_guid()
+        local ok, guid = pcall(function() return child:get_guid() end)
+        if ok and guid then
+            children[#children + 1] = guid
+        end
     end
 
     if #children == 0 then
@@ -447,9 +1425,16 @@ local function draw_plugin_browser(ctx)
             if ctx:selectable(plugin.name, false) then
                 add_plugin_to_track(plugin)
             end
+            
+            -- Drag source for plugin (drag to add to chain)
+            if ctx:begin_drag_drop_source() then
+                ctx:set_drag_drop_payload("PLUGIN_ADD", plugin.full_name)
+                ctx:text("Add: " .. plugin.name)
+                ctx:end_drag_drop_source()
+            end
 
             if ctx:is_item_hovered() then
-                ctx:set_tooltip(plugin.full_name)
+                ctx:set_tooltip(plugin.full_name .. "\n(drag to chain or click to add)")
             end
 
             ctx:pop_id()
@@ -910,55 +1895,1192 @@ local function draw_fx_detail_column(ctx, width)
 end
 
 --------------------------------------------------------------------------------
--- UI: Toolbar
+-- Modulators
+--------------------------------------------------------------------------------
+
+local MODULATOR_JSFX = "JS:SideFX/SideFX_Modulator"
+
+local function find_modulators_on_track()
+    if not state.track then return {} end
+    local modulators = {}
+    for fx in state.track:iter_track_fx_chain() do
+        local name = fx:get_name()
+        if name and (name:find(MODULATOR_JSFX) or name:find("SideFX Modulator")) then
+            table.insert(modulators, {
+                fx = fx,
+                fx_idx = fx.pointer,
+                name = "LFO " .. (#modulators + 1),
+            })
+        end
+    end
+    return modulators
+end
+
+local function add_modulator()
+    if not state.track then return end
+    r.Undo_BeginBlock()
+    -- Add at position 0 (before instruments)
+    local fx = state.track:add_fx_by_name(MODULATOR_JSFX, false, -1000)  -- -1000 = position 0
+    r.Undo_EndBlock("Add SideFX Modulator", -1)
+    refresh_fx_list()
+end
+
+local function delete_modulator(fx_idx)
+    if not state.track then return end
+    r.Undo_BeginBlock()
+    r.TrackFX_Delete(state.track.pointer, fx_idx)
+    r.Undo_EndBlock("Delete SideFX Modulator", -1)
+    refresh_fx_list()
+end
+
+local function get_linkable_fx()
+    -- Get list of FX that can be modulated (exclude modulators and containers)
+    -- Uses iter_all_fx_flat to include FX inside containers
+    if not state.track then return {} end
+    local linkable = {}
+    for fx_info in state.track:iter_all_fx_flat() do
+        local fx = fx_info.fx
+        local name = fx:get_name()
+        -- Skip modulators and containers
+        if name and not name:find(MODULATOR_JSFX) and not name:find("SideFX Modulator") and not name:find("Container") then
+            local params = {}
+            local param_count = fx:get_num_params()
+            for p = 0, param_count - 1 do
+                local pname = fx:get_param_name(p)
+                table.insert(params, {idx = p, name = pname})
+            end
+            -- Add depth indicator to name for nested FX
+            local display_name = fx_info.depth > 0 and string.rep("  ", fx_info.depth) .. "↳ " .. name or name
+            table.insert(linkable, {fx = fx, fx_idx = fx.pointer, name = display_name, params = params})
+        end
+    end
+    return linkable
+end
+
+local function create_param_link(mod_fx_idx, target_fx_idx, target_param_idx)
+    -- Create parameter modulation link using REAPER API
+    -- The modulator output is slider4 (param index 3, 0-indexed)
+    if not state.track then return false end
+    
+    local MOD_OUTPUT_PARAM = 3  -- slider4 in JSFX
+    
+    -- Use TrackFX_SetNamedConfigParm to set up parameter modulation
+    -- Format: "param.X.plink.active", "param.X.plink.effect", "param.X.plink.param"
+    local plink_prefix = string.format("param.%d.plink.", target_param_idx)
+    
+    -- For FX in containers, we need the container-aware index
+    -- mod_fx_idx should be simple top-level index
+    -- target_fx_idx may be container-encoded (0x2000000+) for nested FX
+    
+    -- Enable parameter link
+    local ok1 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "active", "1")
+    -- Set source effect (modulator) - modulator must be at top level
+    local ok2 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "effect", tostring(mod_fx_idx))
+    -- Set source parameter (modulator output)
+    local ok3 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "param", tostring(MOD_OUTPUT_PARAM))
+    
+    if not (ok1 and ok2 and ok3) then
+        r.ShowConsoleMsg(string.format("Plink failed: mod=%d target=%d param=%d (ok: %s %s %s)\n", 
+            mod_fx_idx, target_fx_idx, target_param_idx, 
+            tostring(ok1), tostring(ok2), tostring(ok3)))
+    end
+    
+    return ok1 and ok2 and ok3
+end
+
+local function remove_param_link(target_fx_idx, target_param_idx)
+    if not state.track then return end
+    local plink_prefix = string.format("param.%d.plink.", target_param_idx)
+    r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "active", "0")
+end
+
+local function get_modulator_links(mod_fx_idx)
+    -- Find all parameters linked to this modulator (including FX in containers)
+    if not state.track then return {} end
+    local links = {}
+    local MOD_OUTPUT_PARAM = 3
+    
+    for fx_info in state.track:iter_all_fx_flat() do
+        local fx = fx_info.fx
+        local fx_name = fx:get_name()
+        local fx_idx = fx.pointer
+        -- Skip modulators and containers
+        if fx_name and not (fx_name:find(MODULATOR_JSFX) or fx_name:find("SideFX Modulator") or fx_name:find("Container")) then
+            local param_count = fx:get_num_params()
+            for param_idx = 0, param_count - 1 do
+                local plink_prefix = string.format("param.%d.plink.", param_idx)
+                local rv, active = r.TrackFX_GetNamedConfigParm(state.track.pointer, fx_idx, plink_prefix .. "active")
+                if rv and active == "1" then
+                    local _, effect = r.TrackFX_GetNamedConfigParm(state.track.pointer, fx_idx, plink_prefix .. "effect")
+                    local _, param = r.TrackFX_GetNamedConfigParm(state.track.pointer, fx_idx, plink_prefix .. "param")
+                    if tonumber(effect) == mod_fx_idx and tonumber(param) == MOD_OUTPUT_PARAM then
+                        local param_name = fx:get_param_name(param_idx)
+                        table.insert(links, {
+                            target_fx_idx = fx_idx,
+                            target_fx_name = fx_name,
+                            target_param_idx = param_idx,
+                            target_param_name = param_name,
+                        })
+                    end
+                end
+            end
+        end
+    end
+    return links
+end
+
+--------------------------------------------------------------------------------
+-- Presets
+--------------------------------------------------------------------------------
+
+local presets_folder = script_path .. "presets/"
+
+local function ensure_presets_folder()
+    r.RecursiveCreateDirectory(presets_folder, 0)
+    r.RecursiveCreateDirectory(presets_folder .. "chains/", 0)
+end
+
+local function save_chain_preset(preset_name)
+    -- Save the full FX chain with modulator links
+    if not state.track or not preset_name or preset_name == "" then return false end
+    
+    ensure_presets_folder()
+    
+    -- Use REAPER's native FX chain preset system
+    local path = presets_folder .. "chains/" .. preset_name .. ".RfxChain"
+    r.TrackFX_SavePresetBank(state.track.pointer, path)
+    return true
+end
+
+local function load_chain_preset(preset_name)
+    if not state.track or not preset_name then return false end
+    
+    local path = presets_folder .. "chains/" .. preset_name .. ".RfxChain"
+    r.Undo_BeginBlock()
+    -- Clear existing FX using ReaWrap
+    while state.track:get_track_fx_count() > 0 do
+        local fx = state.track:get_track_fx(0)
+        fx:delete()
+    end
+    -- Load chain
+    state.track:add_by_name(path, false, -1)
+    r.Undo_EndBlock("Load FX Chain Preset", -1)
+    refresh_fx_list()
+    return true
+end
+
+local function is_modulator_fx(fx)
+    if not fx then return false end
+    local name = fx:get_name()
+    return name and (name:find(MODULATOR_JSFX) or name:find("SideFX Modulator"))
+end
+
+local function draw_modulator_column(ctx, width)
+    if ctx:begin_child("Modulators", width, 0, imgui.ChildFlags.Border()) then
+    ctx:text("Modulators")
+    ctx:same_line()
+    if ctx:small_button("+ Add") then
+            add_modulator()
+    end
+    ctx:separator()
+    
+    if not state.track then
+        ctx:text_colored(0x888888FF, "Select a track")
+            ctx:end_child()
+        return
+    end
+    
+        local modulators = find_modulators_on_track()
+    
+    if #modulators == 0 then
+        ctx:text_colored(0x888888FF, "No modulators")
+            ctx:text_colored(0x666666FF, "Click '+ Add'")
+    else
+            local linkable_fx = get_linkable_fx()
+            
+        for i, mod in ipairs(modulators) do
+                ctx:push_id("mod_" .. mod.fx_idx)
+                
+                -- Header row: buttons first, then name
+                -- Show UI button
+                if ctx:small_button("UI##ui_" .. mod.fx_idx) then
+                    mod.fx:show(3)
+                end
+                ctx:same_line()
+                
+                -- Delete button
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x993333FF)
+                if ctx:small_button("X##del_" .. mod.fx_idx) then
+                    ctx:pop_style_color()
+                    ctx:pop_id()
+                    delete_modulator(mod.fx_idx)
+                    ctx:end_child()
+                    return
+                end
+                ctx:pop_style_color()
+                ctx:same_line()
+                
+                -- Modulator name as collapsing header
+                ctx:push_style_color(r.ImGui_Col_Header(), 0x445566FF)
+                ctx:push_style_color(r.ImGui_Col_HeaderHovered(), 0x556677FF)
+                local header_open = ctx:collapsing_header(mod.name, r.ImGui_TreeNodeFlags_DefaultOpen())
+                ctx:pop_style_color(2)
+                
+                if header_open then
+                    -- Show existing links
+                    local links = get_modulator_links(mod.fx_idx)
+                    if #links > 0 then
+                        ctx:text_colored(0xAAAAAAFF, "Links:")
+                        for _, link in ipairs(links) do
+                            ctx:push_id("link_" .. link.target_fx_idx .. "_" .. link.target_param_idx)
+                            
+                            -- Truncate names to fit
+                            local fx_short = link.target_fx_name:sub(1, 15)
+                            local param_short = link.target_param_name:sub(1, 12)
+                            
+                            ctx:text_colored(0x88CC88FF, "→")
+                            ctx:same_line()
+                            ctx:text_wrapped(fx_short .. " : " .. param_short)
+                            ctx:same_line(width - 30)
+                            
+                            -- Remove link button
+                            ctx:push_style_color(r.ImGui_Col_Button(), 0x664444FF)
+                            if ctx:small_button("×") then
+                                remove_param_link(link.target_fx_idx, link.target_param_idx)
+            end
+            ctx:pop_style_color()
+            
+            ctx:pop_id()
+        end
+                        ctx:spacing()
+                    end
+                    
+                    -- Two dropdowns to add new link
+                    ctx:text_colored(0xAAAAAAFF, "+ Add link:")
+                    
+                    -- Get current selection for this modulator
+                    local selected_target = state.mod_selected_target[mod.fx_idx]
+                    local fx_preview = selected_target and selected_target.name or "Select FX..."
+                    
+                    -- Dropdown 1: Select target FX
+                    ctx:set_next_item_width(width - 20)
+                    if r.ImGui_BeginCombo(ctx.ctx, "##targetfx_" .. i, fx_preview) then
+                        for _, fx in ipairs(linkable_fx) do
+                            if r.ImGui_Selectable(ctx.ctx, fx.name .. "##fx_" .. fx.fx_idx) then
+                                state.mod_selected_target[mod.fx_idx] = {fx_idx = fx.fx_idx, name = fx.name, params = fx.params}
+                            end
+                        end
+                        r.ImGui_EndCombo(ctx.ctx)
+                    end
+                    
+                    -- Dropdown 2: Select parameter (only if FX is selected)
+                    if selected_target then
+                        ctx:set_next_item_width(width - 20)
+                        if r.ImGui_BeginCombo(ctx.ctx, "##targetparam_" .. i, "Select param...") then
+                            for _, param in ipairs(selected_target.params) do
+                                if r.ImGui_Selectable(ctx.ctx, param.name .. "##p_" .. param.idx) then
+                                    create_param_link(mod.fx_idx, selected_target.fx_idx, param.idx)
+                                    -- Clear selection after linking
+                                    state.mod_selected_target[mod.fx_idx] = nil
+                                end
+                            end
+                            r.ImGui_EndCombo(ctx.ctx)
+                        end
+                    end
+                end
+                
+                ctx:spacing()
+                ctx:separator()
+                ctx:pop_id()
+            end
+        end
+        
+        ctx:end_child()
+    end
+end
+
+--------------------------------------------------------------------------------
+-- UI: Toolbar (v2 - horizontal layout)
 --------------------------------------------------------------------------------
 
 local function draw_toolbar(ctx)
-    -- Refresh button (icon only)
+    -- Refresh button
     if icon_font then r.ImGui_PushFont(ctx.ctx, icon_font, icon_size) end
     if ctx:button(icon_text(Icons.arrows_counterclockwise)) then
         refresh_fx_list()
     end
     if icon_font then r.ImGui_PopFont(ctx.ctx) end
-    if ctx:is_item_hovered() then ctx:set_tooltip("Refresh") end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Refresh FX list") end
 
     ctx:same_line()
 
-    -- Add to container button (icon only)
-    local sel_count = get_multi_select_count()
-    ctx:with_disabled(sel_count < 1, function()
-        if icon_font then r.ImGui_PushFont(ctx.ctx, icon_font, icon_size) end
-        if ctx:button(icon_text(Icons.package)) then
-            add_to_new_container(get_multi_selected_fx())
-            clear_multi_select()
+    -- Add Rack button
+    ctx:push_style_color(r.ImGui_Col_Button(), 0x446688FF)
+    if ctx:button("+ Rack") then
+        if state.track then
+            add_rack_to_track()
         end
-        if icon_font then r.ImGui_PopFont(ctx.ctx) end
-    end)
-    if ctx:is_item_hovered() then ctx:set_tooltip("Add selected to new container (" .. sel_count .. " selected)") end
+    end
+    ctx:pop_style_color()
+    if ctx:is_item_hovered() then ctx:set_tooltip("Add new parallel rack") end
+
+    ctx:same_line()
+
+    -- Add FX button
+    if ctx:button("+ FX") then
+        -- TODO: Open FX browser popup or add last used FX
+        if state.track then
+            -- For now, just focus the plugin browser
+        end
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Add FX at end of chain") end
 
     ctx:same_line()
     ctx:text("|")
     ctx:same_line()
+    
+    -- Track name
+    ctx:push_style_color(r.ImGui_Col_Text(), 0xAADDFFFF)
     ctx:text(state.track_name)
+    ctx:pop_style_color()
 
-    -- Breadcrumb trail
+    -- Breadcrumb trail (for navigating into containers)
     if #state.expanded_path > 0 then
         ctx:same_line()
-        ctx:text(">")
+        ctx:text_disabled(">")
         for i, guid in ipairs(state.expanded_path) do
             ctx:same_line()
             local container = state.track:find_fx_by_guid(guid)
             if container then
-                if ctx:small_button(get_fx_display_name(container)) then
+                if ctx:small_button(get_fx_display_name(container) .. "##bread_" .. i) then
                     collapse_from_depth(i + 1)
                 end
             end
             if i < #state.expanded_path then
                 ctx:same_line()
-                ctx:text(">")
+                ctx:text_disabled(">")
             end
         end
     end
+end
+
+--------------------------------------------------------------------------------
+-- UI: Horizontal Device Chain (v2)
+--------------------------------------------------------------------------------
+
+local device_panel = nil  -- Lazy loaded
+local rack_panel = nil    -- Lazy loaded
+
+-- Helper to draw a drop zone for adding plugins
+-- Always reserves space to prevent scroll jumping, but only shows visual when dragging
+local function draw_drop_zone(ctx, position, is_empty, avail_height)
+    local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
+    local has_fx_payload = ctx:get_drag_drop_payload("FX_GUID")
+    local is_dragging = has_plugin_payload or has_fx_payload
+    
+    local zone_w = 24
+    local zone_h = math.min(avail_height - 20, 80)
+    local label = is_empty and "+ Drop here" or "+"
+    local btn_w = is_empty and 100 or zone_w
+    
+    if is_dragging then
+        -- Show visible drop indicator when dragging
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x4488FF44)
+        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x66AAFF88)
+        ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x88CCFFAA)
+        
+        ctx:button(label .. "##drop_" .. position, btn_w, zone_h)
+        ctx:pop_style_color(3)
+        
+        if ctx:begin_drag_drop_target() then
+            -- Accept plugin drops
+            local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+            if accepted and plugin_name then
+                add_plugin_by_name(plugin_name, position)
+            end
+            
+            -- Accept FX reorder drops
+            local accepted_fx, fx_guid = ctx:accept_drag_drop_payload("FX_GUID")
+            if accepted_fx and fx_guid then
+                local fx = state.track:find_fx_by_guid(fx_guid)
+                if fx then
+                    -- Move FX to new position
+                    r.TrackFX_CopyToTrack(
+                        state.track.pointer, fx.pointer,
+                        state.track.pointer, position,
+                        true  -- move
+                    )
+                    refresh_fx_list()
+                end
+            end
+            
+            ctx:end_drag_drop_target()
+        end
+    else
+        -- Reserve space with invisible element to prevent scroll jumping
+        -- Don't show between items when not dragging (only at end)
+        if not is_empty then
+            return false  -- Don't reserve space between items when not dragging
+        end
+        r.ImGui_Dummy(ctx.ctx, btn_w, zone_h)
+    end
+    return true
+end
+
+--------------------------------------------------------------------------------
+-- Rack Drawing Helpers (extracted from draw_device_chain)
+--------------------------------------------------------------------------------
+
+-- Draw a single chain row in the chains table
+local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected)
+    local ok_name, chain_raw_name = pcall(function() return chain:get_name() end)
+    local chain_name = ok_name and get_fx_display_name(chain) or "Unknown"
+    local ok_en, chain_enabled = pcall(function() return chain:get_enabled() end)
+    chain_enabled = ok_en and chain_enabled or false
+    local chain_guid = chain:get_guid()
+    
+    -- Column 1: Chain name button
+    r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+    
+    -- Check if dragging for visual feedback
+    local has_plugin_drag = ctx:get_drag_drop_payload("PLUGIN_ADD")
+    local has_chain_drag = ctx:get_drag_drop_payload("CHAIN_REORDER")
+    
+    local row_color = chain_enabled and 0x3A4A5AFF or 0x2A2A35FF
+    if is_selected then
+        row_color = 0x5588AAFF
+    elseif has_plugin_drag then
+        row_color = 0x4488AA88  -- Blue tint when plugin dragging
+    elseif has_chain_drag then
+        row_color = 0x44AA4488  -- Green tint when chain dragging
+    end
+    
+    ctx:push_style_color(r.ImGui_Col_Button(), row_color)
+    if ctx:button(chain_name .. "##chain_btn", -1, 20) then
+        if is_selected then
+            state.expanded_path[2] = nil
+        else
+            state.expanded_path[2] = chain_guid
+        end
+    end
+    ctx:pop_style_color()
+    
+    -- Drag source for chain reordering
+    if ctx:begin_drag_drop_source() then
+        ctx:set_drag_drop_payload("CHAIN_REORDER", chain_guid)
+        ctx:text("Moving: " .. chain_name)
+        ctx:end_drag_drop_source()
+    end
+    
+    -- Drop target for chain reordering AND plugin adding
+    if ctx:begin_drag_drop_target() then
+        -- Handle chain reorder
+        local accepted_chain, dragged_guid = ctx:accept_drag_drop_payload("CHAIN_REORDER")
+        if accepted_chain and dragged_guid then
+            reorder_chain_in_rack(rack, dragged_guid, chain_guid)
+        end
+        -- Handle plugin drop onto chain
+        local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+        if accepted_plugin and plugin_name then
+            local plugin = { full_name = plugin_name, name = plugin_name }
+            add_device_to_chain(chain, plugin)
+        end
+        ctx:end_drag_drop_target()
+    end
+    
+    -- Tooltip
+    if ctx:is_item_hovered() then
+        if has_plugin_drag then
+            ctx:set_tooltip("Drop to add FX to " .. chain_name)
+        elseif has_chain_drag then
+            ctx:set_tooltip("Drop to reorder chain")
+        else
+            ctx:set_tooltip("Click to " .. (is_selected and "collapse" or "expand"))
+        end
+    end
+    
+    -- Column 2: Enable button
+    r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+    if chain_enabled then
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x44AA44FF)
+    else
+        ctx:push_style_color(r.ImGui_Col_Button(), 0xAA4444FF)
+    end
+    if ctx:small_button(chain_enabled and "ON" or "OF") then
+        pcall(function() chain:set_enabled(not chain_enabled) end)
+    end
+    ctx:pop_style_color()
+    
+    -- Column 3: Delete button
+    r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+    ctx:push_style_color(r.ImGui_Col_Button(), 0x664444FF)
+    if ctx:small_button("×") then
+        chain:delete()
+        if is_selected then
+            state.expanded_path[2] = nil
+        end
+        refresh_fx_list()
+    end
+    ctx:pop_style_color()
+    
+    -- Column 4: Volume slider
+    r.ImGui_TableSetColumnIndex(ctx.ctx, 3)
+    if mixer then
+        local vol_param = 2 + (chain_idx - 1)  -- Params 2-17 are channel volumes
+        local ok_vol, vol_norm = pcall(function() return mixer:get_param_normalized(vol_param) end)
+        if ok_vol and vol_norm then
+            local vol_db = -24 + vol_norm * 36
+            local vol_format = vol_db >= 0 and string.format("+%.0f", vol_db) or string.format("%.0f", vol_db)
+            ctx:set_next_item_width(-1)
+            local vol_changed, new_vol_db = ctx:slider_double("##vol_" .. chain_idx, vol_db, -24, 12, vol_format)
+            if vol_changed then
+                local new_norm = (new_vol_db + 24) / 36
+                pcall(function() mixer:set_param_normalized(vol_param, new_norm) end)
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                pcall(function() mixer:set_param_normalized(vol_param, (0 + 24) / 36) end)
+            end
+        else
+            ctx:text_disabled("--")
+        end
+    else
+        ctx:text_disabled("--")
+    end
+    
+    -- Column 5: Pan slider
+    r.ImGui_TableSetColumnIndex(ctx.ctx, 4)
+    if mixer then
+        local pan_param = 18 + (chain_idx - 1)  -- Params 18-33 are channel pans
+        local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(pan_param) end)
+        if ok_pan and pan_norm then
+            local pan_val = -100 + pan_norm * 200
+            local pan_changed, new_pan = draw_pan_slider(ctx, "##pan_" .. chain_idx, pan_val, 50)
+            if pan_changed then
+                pcall(function() mixer:set_param_normalized(pan_param, (new_pan + 100) / 200) end)
+            end
+        else
+            ctx:text_disabled("C")
+        end
+    else
+        ctx:text_disabled("C")
+    end
+end
+
+-- Draw expanded chain column with devices
+local function draw_chain_column(ctx, selected_chain, rack_h)
+    local selected_chain_guid = selected_chain:get_guid()
+    local chain_display_name = get_fx_display_name(selected_chain)
+    
+    -- Get devices from chain
+    local devices = {}
+    for child in selected_chain:iter_container_children() do
+        local ok, child_name = pcall(function() return child:get_name() end)
+        if ok and child_name then
+            table.insert(devices, child)
+        end
+    end
+    
+    local chain_content_h = rack_h - 30  -- Leave room for header
+    local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
+    
+    -- Auto-resize wrapper to fit content (Border=1, AutoResizeX=16)
+    local wrapper_flags = 17  -- Border + AutoResizeX
+    
+    -- Add padding around content, especially on the right
+    r.ImGui_PushStyleVar(ctx.ctx, r.ImGui_StyleVar_WindowPadding(), 12, 8)
+    
+    ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
+    if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, 0, rack_h, wrapper_flags) then
+        -- Use table layout so header width matches content width
+        local table_flags = r.ImGui_TableFlags_SizingStretchSame()
+        if r.ImGui_BeginTable(ctx.ctx, "chain_table_" .. selected_chain_guid, 1, table_flags) then
+            -- Row 1: Header
+            r.ImGui_TableNextRow(ctx.ctx)
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+            ctx:text_colored(0xAAAAAAFF, "Chain:")
+            ctx:same_line()
+            ctx:text(chain_display_name)
+            ctx:separator()
+            
+            -- Row 2: Content
+            r.ImGui_TableNextRow(ctx.ctx)
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+            
+            -- Chain contents - auto-resize to fit devices
+            -- Use same background as wrapper for seamless appearance
+            ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
+            -- ChildFlags: Border (1) + AutoResizeX (16) + AlwaysAutoResize (64) = 81
+            local chain_content_flags = 81
+            if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, chain_content_flags) then
+            
+            if #devices == 0 then
+                -- Empty chain - show drop zone
+                if has_plugin_payload then
+                    ctx:push_style_color(r.ImGui_Col_Button(), 0x4488FF66)
+                else
+                    ctx:push_style_color(r.ImGui_Col_Button(), 0x33333344)
+                end
+                ctx:button("+ Drop plugin to add first device", 250, chain_content_h - 20)
+                ctx:pop_style_color()
+                
+                if ctx:begin_drag_drop_target() then
+                    local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                    if accepted and plugin_name then
+                        local plugin = { full_name = plugin_name, name = plugin_name }
+                        add_device_to_chain(selected_chain, plugin)
+                    end
+                    ctx:end_drag_drop_target()
+                end
+            else
+                -- Draw each device HORIZONTALLY with arrows
+                r.ImGui_BeginGroup(ctx.ctx)
+                
+                for k, dev in ipairs(devices) do
+                    local dev_name = get_fx_display_name(dev)
+                    local dev_enabled = dev:get_enabled()
+                    
+                    -- Arrow connector between devices
+                    if k > 1 then
+                        ctx:same_line()
+                        ctx:push_style_color(r.ImGui_Col_Text(), 0x555555FF)
+                        ctx:text("→")
+                        ctx:pop_style_color()
+                        ctx:same_line()
+                    end
+                    
+                    -- Find the actual FX inside the device container
+                    local dev_main_fx = get_device_main_fx(dev)
+                    local dev_utility = get_device_utility(dev)
+                    
+                    if dev_main_fx and device_panel then
+                        device_panel.draw(ctx, dev_main_fx, {
+                            avail_height = chain_content_h - 20,
+                            utility = dev_utility,
+                            container = dev,
+                            on_delete = function()
+                                dev:delete()
+                                refresh_fx_list()
+                            end,
+                            on_plugin_drop = function(plugin_name, insert_before_idx)
+                                local plugin = { full_name = plugin_name, name = plugin_name }
+                                add_device_to_chain(selected_chain, plugin)
+                            end,
+                        })
+                    else
+                        -- Fallback: simple button
+                        local btn_color = dev_enabled and 0x3A5A4AFF or 0x2A2A35FF
+                        ctx:push_style_color(r.ImGui_Col_Button(), btn_color)
+                        if ctx:button(dev_name:sub(1, 20) .. "##dev_" .. k, 120, chain_content_h - 20) then
+                            dev:show(3)
+                        end
+                        ctx:pop_style_color()
+                    end
+                end
+                
+                -- Drop zone / add button at end of chain
+                ctx:same_line(0, 4)
+                local add_btn_h = chain_content_h - 20
+                if has_plugin_payload then
+                    ctx:push_style_color(r.ImGui_Col_Button(), 0x4488FF66)
+                    ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x66AAFF88)
+                    ctx:button("+##chain_drop", 40, add_btn_h)
+                    ctx:pop_style_color(2)
+                else
+                    ctx:push_style_color(r.ImGui_Col_Button(), 0x3A4A5A88)
+                    ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x4A6A8AAA)
+                    ctx:button("+##chain_add", 40, add_btn_h)
+                    ctx:pop_style_color(2)
+                end
+                
+                if ctx:begin_drag_drop_target() then
+                    local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                    if accepted and plugin_name then
+                        local plugin = { full_name = plugin_name, name = plugin_name }
+                        add_device_to_chain(selected_chain, plugin)
+                    end
+                    ctx:end_drag_drop_target()
+                end
+                
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip("Drag plugin here to add device")
+                end
+                
+                r.ImGui_EndGroup(ctx.ctx)
+            end
+            
+                ctx:end_child()
+            end
+            ctx:pop_style_color()
+            
+            r.ImGui_EndTable(ctx.ctx)
+        end
+        
+        ctx:end_child()
+    end
+    ctx:pop_style_color()
+    r.ImGui_PopStyleVar(ctx.ctx)
+end
+
+-- Draw the rack panel (main rack UI without chain column)
+local function draw_rack_panel(ctx, rack, avail_height)
+    local rack_guid = rack:get_guid()
+    local rack_name = get_fx_display_name(rack)
+    local is_expanded = state.expanded_path[1] == rack_guid
+    
+    -- Get chains from rack (filter out internal mixer)
+    local chains = {}
+    for child in rack:iter_container_children() do
+        local ok, child_name = pcall(function() return child:get_name() end)
+        if ok and child_name and not child_name:match("^_") and not child_name:find("Mixer") then
+            table.insert(chains, child)
+        end
+    end
+    
+    local rack_w = is_expanded and 350 or 150
+    local rack_h = avail_height - 10
+    
+    ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252535FF)
+    if ctx:begin_child("rack_" .. rack_guid, rack_w, rack_h, imgui.ChildFlags.Border()) then
+        
+        -- Rack header
+        local expand_icon = is_expanded and "▼" or "▶"
+        if ctx:button(expand_icon .. " " .. rack_name:sub(1, 20) .. "##rack_toggle", -60, 24) then
+            if is_expanded then
+                state.expanded_path = {}
+            else
+                state.expanded_path = { rack_guid }
+            end
+        end
+        
+        ctx:same_line()
+        local rack_enabled = rack:get_enabled()
+        ctx:push_style_color(r.ImGui_Col_Button(), rack_enabled and 0x44AA44FF or 0xAA4444FF)
+        if ctx:small_button(rack_enabled and "ON" or "OF") then
+            rack:set_enabled(not rack_enabled)
+        end
+        ctx:pop_style_color()
+        
+        ctx:same_line()
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x664444FF)
+        if ctx:small_button("×##rack_del") then
+            rack:delete()
+            refresh_fx_list()
+        end
+        ctx:pop_style_color()
+        
+        if is_expanded then
+            ctx:separator()
+            
+            local mixer = get_rack_mixer(rack)
+            
+            -- Master output controls
+            if mixer then
+                if r.ImGui_BeginTable(ctx.ctx, "master_controls", 3, r.ImGui_TableFlags_SizingStretchProp()) then
+                    r.ImGui_TableSetupColumn(ctx.ctx, "label", r.ImGui_TableColumnFlags_WidthFixed(), 50)
+                    r.ImGui_TableSetupColumn(ctx.ctx, "gain", r.ImGui_TableColumnFlags_WidthStretch(), 1)
+                    r.ImGui_TableSetupColumn(ctx.ctx, "pan", r.ImGui_TableColumnFlags_WidthFixed(), 70)
+                    r.ImGui_TableNextRow(ctx.ctx)
+                    
+                    r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+                    ctx:text_colored(0xAAAAAAFF, "Master")
+                    
+                    r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+                    local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
+                    if ok_gain and gain_norm then
+                        local gain_db = -24 + gain_norm * 36
+                        local gain_format = gain_db >= 0 and string.format("+%.1f", gain_db) or string.format("%.1f", gain_db)
+                        ctx:set_next_item_width(-1)
+                        local gain_changed, new_gain_db = ctx:slider_double("##master_gain", gain_db, -24, 12, gain_format)
+                        if gain_changed then
+                            pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
+                        end
+                        if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                            pcall(function() mixer:set_param_normalized(0, (0 + 24) / 36) end)
+                        end
+                    else
+                        ctx:text_disabled("--")
+                    end
+                    
+                    r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+                    local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(1) end)
+                    if ok_pan and pan_norm then
+                        local pan_val = -100 + pan_norm * 200
+                        local pan_changed, new_pan = draw_pan_slider(ctx, "##master_pan", pan_val, 60)
+                        if pan_changed then
+                            pcall(function() mixer:set_param_normalized(1, (new_pan + 100) / 200) end)
+                        end
+                    else
+                        ctx:text_disabled("C")
+                    end
+                    
+                    r.ImGui_EndTable(ctx.ctx)
+                end
+            end
+            
+            ctx:separator()
+            
+            -- Chains area header
+            ctx:text_colored(0xAAAAAAFF, "Chains:")
+            ctx:same_line()
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x446688FF)
+            if ctx:small_button("+ Chain") then
+                -- TODO: Open plugin selector
+            end
+            ctx:pop_style_color()
+            
+            if #chains == 0 then
+                ctx:spacing()
+                ctx:text_disabled("No chains yet")
+                ctx:text_disabled("Drag plugins here to create chains")
+            else
+                -- Chains table
+                if r.ImGui_BeginTable(ctx.ctx, "chains_table", 5, r.ImGui_TableFlags_SizingStretchProp()) then
+                    r.ImGui_TableSetupColumn(ctx.ctx, "name", r.ImGui_TableColumnFlags_WidthFixed(), 80)
+                    r.ImGui_TableSetupColumn(ctx.ctx, "enable", r.ImGui_TableColumnFlags_WidthFixed(), 28)
+                    r.ImGui_TableSetupColumn(ctx.ctx, "delete", r.ImGui_TableColumnFlags_WidthFixed(), 24)
+                    r.ImGui_TableSetupColumn(ctx.ctx, "volume", r.ImGui_TableColumnFlags_WidthStretch(), 1)
+                    r.ImGui_TableSetupColumn(ctx.ctx, "pan", r.ImGui_TableColumnFlags_WidthFixed(), 60)
+                    
+                    for j, chain in ipairs(chains) do
+                        r.ImGui_TableNextRow(ctx.ctx)
+                        ctx:push_id("chain_" .. j)
+                        local is_selected = state.expanded_path[2] == chain:get_guid()
+                        draw_chain_row(ctx, chain, j, rack, mixer, is_selected)
+                        ctx:pop_id()
+                    end
+                    
+                    r.ImGui_EndTable(ctx.ctx)
+                end
+            end
+            
+            -- Drop zone for creating new chains
+            ctx:spacing()
+            local drop_h = 40
+            local has_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
+            if has_payload then
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x4488FF66)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x66AAFF88)
+            else
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x33333344)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444466)
+            end
+            ctx:button("+ Drop plugin to create new chain##rack_drop", -1, drop_h)
+            ctx:pop_style_color(2)
+            
+            if ctx:begin_drag_drop_target() then
+                local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                if accepted and plugin_name then
+                    local plugin = { full_name = plugin_name, name = plugin_name }
+                    add_chain_to_rack(rack, plugin)
+                end
+                ctx:end_drag_drop_target()
+            end
+        end
+        
+        ctx:end_child()
+    end
+    ctx:pop_style_color()
+    
+    -- Return data needed for chain column
+    return {
+        is_expanded = is_expanded,
+        chains = chains,
+        rack_h = rack_h,
+    }
+end
+
+local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
+    -- Lazy load UI components
+    if not device_panel then
+        local ok, mod = pcall(require, 'ui.device_panel')
+        if ok then device_panel = mod end
+    end
+    if not rack_panel then
+        local ok, mod = pcall(require, 'ui.rack_panel')
+        if ok then rack_panel = mod end
+    end
+    
+    -- Build display list - handles D-containers and legacy FX
+    local display_fx = {}
+    for i, fx in ipairs(fx_list) do
+        if is_device_container(fx) then
+            -- D-container: extract main FX and utility from inside
+            local main_fx = get_device_main_fx(fx)
+            local utility = get_device_utility(fx)
+            if main_fx then
+                table.insert(display_fx, {
+                    fx = main_fx,
+                    utility = utility,
+                    container = fx,  -- Reference to the container
+                    original_idx = fx.pointer,
+                    is_device = true,
+                })
+            end
+        elseif is_rack_container(fx) then
+            -- R-container (rack) - handle differently
+            table.insert(display_fx, {
+                fx = fx,
+                container = fx,
+                original_idx = fx.pointer,
+                is_rack = true,
+            })
+        elseif not is_utility_fx(fx) and not fx:is_container() then
+            -- Legacy FX (not in container) - show with paired utility if exists
+            local utility = nil
+            if i < #fx_list and is_utility_fx(fx_list[i + 1]) then
+                utility = fx_list[i + 1]
+            end
+            table.insert(display_fx, {
+                fx = fx,
+                utility = utility,
+                original_idx = fx.pointer,
+                is_legacy = true,
+            })
+        end
+        -- Skip standalone utilities (they're shown in sidebar)
+        -- Skip unknown containers
+    end
+    
+    if #display_fx == 0 then
+        -- Empty chain - show drop zone / placeholder
+        local is_dragging = ctx:get_drag_drop_payload("PLUGIN_ADD") or ctx:get_drag_drop_payload("FX_GUID")
+        if is_dragging then
+            draw_drop_zone(ctx, 0, true, avail_height)
+        else
+            ctx:text_disabled("No FX on track")
+            ctx:text_disabled("Drag plugins from browser →")
+        end
+        return
+    end
+    
+    -- Note: No drop zone before first device - drop ON the first device to insert before it
+    -- This prevents layout shifts that cause scroll jumping
+    
+    -- Draw each FX as a device panel, horizontally
+    local display_idx = 0
+    for _, item in ipairs(display_fx) do
+        local fx = item.fx
+        local utility = item.utility
+        local original_idx = item.original_idx
+        display_idx = display_idx + 1
+        ctx:push_id("device_" .. display_idx)
+        
+        local guid = fx:get_guid()
+        local is_container = fx:is_container()
+        
+        if display_idx > 1 then
+            -- Arrow connector between devices
+            ctx:same_line()
+            ctx:push_style_color(r.ImGui_Col_Text(), 0x555555FF)
+            ctx:text("→")
+            ctx:pop_style_color()
+            ctx:same_line()
+            -- Note: Drop-on-device panels handles insertion (no between-device zones to prevent scroll jumping)
+        end
+        
+        if item.is_rack then
+            -- Draw rack using helper function
+            local rack_data = draw_rack_panel(ctx, fx, avail_height)
+            
+            -- If a chain is selected, show chain column
+            if rack_data.is_expanded and state.expanded_path[2] then
+                local selected_chain_guid = state.expanded_path[2]
+                local selected_chain = nil
+                for _, chain in ipairs(rack_data.chains) do
+                    if chain:get_guid() == selected_chain_guid then
+                        selected_chain = chain
+                        break
+                    end
+                end
+                
+                if selected_chain then
+                    ctx:same_line()
+                    draw_chain_column(ctx, selected_chain, rack_data.rack_h)
+                end
+            end
+        elseif is_container then
+            -- Unknown container type - show basic view
+            ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
+            if ctx:begin_child("container_" .. guid, 180, 100, imgui.ChildFlags.Border()) then
+                ctx:text(get_fx_display_name(fx):sub(1, 15))
+                if ctx:small_button("Open") then
+                    fx:show(3)
+                end
+                ctx:end_child()
+            end
+            ctx:pop_style_color()
+        else
+            -- Regular FX - draw as device panel
+            if device_panel then
+                -- Determine what to use for drag/delete operations
+                local container = item.container  -- D-container if exists
+                local drag_target = container or fx
+                
+                device_panel.draw(ctx, fx, {
+                    avail_height = avail_height - 10,
+                    utility = utility,  -- Paired SideFX_Utility for gain/pan
+                    container = container,  -- Pass container reference
+                    container_name = container and container:get_name() or nil,
+                    on_delete = function(fx_to_delete)
+                        if container then
+                            -- Delete the whole D-container
+                            container:delete()
+                        else
+                            -- Legacy: delete FX and paired utility
+                            if utility then
+                                utility:delete()
+                            end
+                            fx_to_delete:delete()
+                        end
+                        refresh_fx_list()
+                    end,
+                    on_drop = function(dragged_guid, target_guid)
+                        -- Handle FX/container reordering
+                        local dragged = state.track:find_fx_by_guid(dragged_guid)
+                        local target = state.track:find_fx_by_guid(target_guid)
+                        if dragged and target then
+                            r.TrackFX_CopyToTrack(
+                                state.track.pointer, dragged.pointer,
+                                state.track.pointer, target.pointer,
+                                true  -- move
+                            )
+                            refresh_fx_list()
+                        end
+                    end,
+                    on_plugin_drop = function(plugin_name, insert_before_idx)
+                        -- Add plugin before this FX/container
+                        local insert_pos = container and container.pointer or insert_before_idx
+                        add_plugin_by_name(plugin_name, insert_pos)
+                    end,
+                })
+            else
+                -- Fallback if device_panel not loaded
+                local name = get_fx_display_name(fx)
+                local enabled = fx:get_enabled()
+                local total_params = fx:get_num_params()
+                local panel_h = avail_height - 10
+                local param_row_h = 38
+                local sidebar_w = 36
+                local col_w = 180
+                local params_per_col = math.floor((panel_h - 40) / param_row_h)
+                params_per_col = math.max(1, params_per_col)
+                local num_cols = math.ceil(total_params / params_per_col)
+                num_cols = math.max(1, num_cols)
+                local panel_w = col_w * num_cols + sidebar_w + 16
+                
+                ctx:push_style_color(r.ImGui_Col_ChildBg(), enabled and 0x2A2A2AFF or 0x1A1A1AFF)
+                if ctx:begin_child("fx_" .. guid, panel_w, panel_h, imgui.ChildFlags.Border()) then
+                    ctx:text(name:sub(1, 35))
+                    ctx:separator()
+                    
+                    -- Params area (left)
+                    local params_w = col_w * num_cols
+                    if ctx:begin_child("params_" .. guid, params_w, panel_h - 40, 0) then
+                        if total_params > 0 and r.ImGui_BeginTable(ctx.ctx, "params_fb_" .. guid, num_cols, r.ImGui_TableFlags_SizingStretchSame()) then
+                            for row = 0, params_per_col - 1 do
+                                r.ImGui_TableNextRow(ctx.ctx)
+                                for col = 0, num_cols - 1 do
+                                    local p = col * params_per_col + row
+                                    r.ImGui_TableSetColumnIndex(ctx.ctx, col)
+                                    if p < total_params then
+                                        local pname = fx:get_param_name(p)
+                                        local pval = fx:get_param_normalized(p) or 0
+                                        ctx:push_id(p)
+                                        ctx:text((pname or "P" .. p):sub(1, 14))
+                                        ctx:set_next_item_width(-8)
+                                        local changed, new_val = ctx:slider_double("##p", pval, 0, 1, "%.2f")
+                                        if changed then
+                                            fx:set_param_normalized(p, new_val)
+                                        end
+                                        ctx:pop_id()
+                                    end
+                                end
+                            end
+                            r.ImGui_EndTable(ctx.ctx)
+                        end
+                        ctx:end_child()
+                    end
+                    
+                    -- Sidebar (right)
+                    ctx:same_line()
+                    local sb_w = 60
+                    if ctx:begin_child("sidebar_" .. guid, sb_w, panel_h - 40, 0) then
+                        if ctx:button("UI", sb_w - 4, 24) then fx:show(3) end
+                        ctx:push_style_color(r.ImGui_Col_Button(), enabled and 0x44AA44FF or 0xAA4444FF)
+                        if ctx:button(enabled and "ON" or "OFF", sb_w - 4, 24) then
+                            fx:set_enabled(not enabled)
+                        end
+                        ctx:pop_style_color()
+                        
+                        -- Wet/Dry
+                        local wet_idx = fx:get_param_from_ident(":wet")
+                        if wet_idx >= 0 then
+                            ctx:text("Wet")
+                            local wet_val = fx:get_param(wet_idx)
+                            ctx:set_next_item_width(sb_w - 4)
+                            local wet_changed, new_wet = r.ImGui_VSliderDouble(ctx.ctx, "##wet", sb_w - 4, 60, wet_val, 0, 1, "")
+                            if wet_changed then fx:set_param(wet_idx, new_wet) end
+                        end
+                        
+                        -- Utility controls
+                        if utility then
+                            ctx:text("Gain")
+                            local gain_val = utility:get_param_normalized(0) or 0.5
+                            ctx:set_next_item_width(sb_w - 4)
+                            local gain_changed, new_gain = r.ImGui_VSliderDouble(ctx.ctx, "##gain", sb_w - 4, 60, gain_val, 0, 1, "")
+                            if gain_changed then utility:set_param_normalized(0, new_gain) end
+                        end
+                        
+                        ctx:end_child()
+                    end
+                    
+                    ctx:end_child()
+                end
+                ctx:pop_style_color()
+            end
+        end
+        
+        ctx:pop_id()
+    end
+    
+    -- Always show add button at end of chain (plus drop zone when dragging)
+    ctx:same_line()
+    ctx:push_style_color(r.ImGui_Col_Text(), 0x555555FF)
+    ctx:text("→")
+    ctx:pop_style_color()
+    ctx:same_line()
+    
+    if is_dragging then
+        -- Show drop zone when dragging
+        draw_drop_zone(ctx, -1, false, avail_height)
+    else
+        -- Show permanent "+" button to add FX
+        local add_btn_h = math.min(avail_height - 20, 80)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x3A4A5A88)
+        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x4A6A8AAA)
+        ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x5A8ABACC)
+        if ctx:button("+##add_end", 40, add_btn_h) then
+            -- Open FX browser or add last used - for now just indicate where to drag from
+            -- Could open a popup menu with recent FX here
+        end
+        ctx:pop_style_color(3)
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip("Drag plugin here to add\nor click to add FX")
+        end
+        
+        -- Also make the + button a drop target
+        if ctx:begin_drag_drop_target() then
+            local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+            if accepted and plugin_name then
+                add_plugin_by_name(plugin_name, nil)  -- nil = add at end
+            end
+            ctx:end_drag_drop_target()
+        end
+    end
+    
+    -- Extra padding at end to ensure scrolling doesn't cut off the + button
+    ctx:same_line()
+    r.ImGui_Dummy(ctx.ctx, 20, 1)
 end
 
 --------------------------------------------------------------------------------
@@ -980,8 +3102,8 @@ local function main()
 
     Window.run({
         title = "SideFX",
-        width = 1000,
-        height = 500,
+        width = 1400,
+        height = 800,
         dockable = true,
 
         on_draw = function(self, ctx)
@@ -1042,57 +3164,48 @@ local function main()
             draw_toolbar(ctx)
             ctx:separator()
 
-            -- Column widths
-            local col_w = 280
+            -- Layout dimensions
             local browser_w = 260
-
-            -- Detail column width depends on param count
-            local detail_w = 220
-            if state.selected_fx and state.track then
-                local fx = state.track:find_fx_by_guid(state.selected_fx)
-                if fx then
-                    local param_count = fx:get_num_params()
-                    if param_count > 8 then
-                        detail_w = 400
-                    end
-                end
-            end
+            local modulator_w = 240
+            local avail_w, avail_h = r.ImGui_GetContentRegionAvail(ctx.ctx)
+            local chain_w = avail_w - browser_w - modulator_w - 20
 
             -- Plugin Browser (fixed left)
+            ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x1E1E22FF)
             if ctx:begin_child("Browser", browser_w, 0, imgui.ChildFlags.Border()) then
                 ctx:text("Plugins")
                 ctx:separator()
                 draw_plugin_browser(ctx)
                 ctx:end_child()
             end
+            ctx:pop_style_color()
 
             ctx:same_line()
 
-            -- Scrollable columns area for FX chain + containers
-            local flags = r.ImGui_WindowFlags_AlwaysHorizontalScrollbar()
-            if ctx:begin_child("ColumnsArea", 0, 0, imgui.ChildFlags.None(), flags) then
-
-                -- Column 1: Top-level FX chain (no parent container)
-                draw_fx_list_column(ctx, state.top_level_fx, "FX Chain", 1, col_w, nil)
-
-                -- Additional columns for each expanded container
-                for depth, container_guid in ipairs(state.expanded_path) do
-                    ctx:same_line()
-                    local children = get_container_children(container_guid)
-                    local container = state.track:find_fx_by_guid(container_guid)
-                    local title = container and get_fx_display_name(container) or "Container"
-                    -- Pass the container guid so drops can target this container
-                    draw_fx_list_column(ctx, children, title, depth + 1, col_w, container_guid)
+            -- Device Chain (horizontal scroll, center area)
+            ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x1A1A1EFF)
+            local chain_flags = r.ImGui_WindowFlags_HorizontalScrollbar()
+            if ctx:begin_child("DeviceChain", chain_w, 0, imgui.ChildFlags.Border(), chain_flags) then
+                
+                -- Filter out modulators from top_level_fx
+                local filtered_fx = {}
+                for _, fx in ipairs(state.top_level_fx) do
+                    if not is_modulator_fx(fx) then
+                        table.insert(filtered_fx, fx)
+                    end
                 end
 
-                -- Detail column (if FX selected)
-                if state.selected_fx then
-                    ctx:same_line()
-                    draw_fx_detail_column(ctx, detail_w)
-                end
+                -- Draw the horizontal device chain
+                draw_device_chain(ctx, filtered_fx, chain_w, avail_h)
 
                 ctx:end_child()
             end
+            ctx:pop_style_color()
+            
+            ctx:same_line()
+            
+            -- Modulator column (fixed right)
+            draw_modulator_column(ctx, modulator_w)
 
             reaper_theme:unapply(ctx)
             
