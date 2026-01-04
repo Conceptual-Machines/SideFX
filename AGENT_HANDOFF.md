@@ -134,7 +134,7 @@ btn_h = 22                     -- Button height
 - [ ] Finalize device panel styling/colors
 - [x] Implement proper drag & drop reordering between devices
 - [x] Drag & drop plugins from browser to device chain
-- [ ] Add "+" button to add FX at end of chain
+- [x] Add "+" button to add FX at end of chain
 - [x] Arrow connectors between devices (→)
 
 ### Phase 3: Rack Management

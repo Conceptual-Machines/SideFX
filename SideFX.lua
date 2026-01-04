@@ -1688,17 +1688,44 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
         ctx:pop_id()
     end
     
-    -- Drop zone at end of chain (only when dragging)
+    -- Always show add button at end of chain (plus drop zone when dragging)
+    ctx:same_line()
+    ctx:push_style_color(r.ImGui_Col_Text(), 0x555555FF)
+    ctx:text("→")
+    ctx:pop_style_color()
+    ctx:same_line()
+    
     if is_dragging then
-        ctx:same_line()
-        ctx:push_style_color(r.ImGui_Col_Text(), 0x555555FF)
-        ctx:text("→")
-        ctx:pop_style_color()
-        ctx:same_line()
-        
-        -- Position after the last FX (use -1 for "at end")
+        -- Show drop zone when dragging
         draw_drop_zone(ctx, -1, false, avail_height)
+    else
+        -- Show permanent "+" button to add FX
+        local add_btn_h = math.min(avail_height - 20, 80)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x3A4A5A88)
+        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x4A6A8AAA)
+        ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x5A8ABACC)
+        if ctx:button("+##add_end", 40, add_btn_h) then
+            -- Open FX browser or add last used - for now just indicate where to drag from
+            -- Could open a popup menu with recent FX here
+        end
+        ctx:pop_style_color(3)
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip("Drag plugin here to add\nor click to add FX")
+        end
+        
+        -- Also make the + button a drop target
+        if ctx:begin_drag_drop_target() then
+            local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+            if accepted and plugin_name then
+                add_plugin_by_name(plugin_name, nil)  -- nil = add at end
+            end
+            ctx:end_drag_drop_target()
+        end
     end
+    
+    -- Extra padding at end to ensure scrolling doesn't cut off the + button
+    ctx:same_line()
+    ctx:dummy(20, 1)
 end
 
 --------------------------------------------------------------------------------
