@@ -664,14 +664,14 @@ local function add_rack_to_track(position)
             local mixer_inside = nil
             for child in rack:iter_container_children() do
                 local ok, name = pcall(function() return child:get_name() end)
-                if ok and name and (name:find("SideFX_Mixer") or name:find("SideFX Mixer")) then
+                if ok and name and (name:find("SideFX_Mixer") or name:find("SideFX Mixer") or name:match("^_R%d+_M$")) then
                     mixer_inside = child
                     break
                 end
             end
             if mixer_inside then
-                -- Prefix with _ to indicate internal/hidden
-                mixer_inside:set_named_config_param("renamed_name", string.format("_R%d_Mixer", rack_idx))
+                -- Use consistent naming: _R1_M (underscore = internal/hidden)
+                mixer_inside:set_named_config_param("renamed_name", string.format("_R%d_M", rack_idx))
             end
         else
             r.ShowConsoleMsg("SideFX: Could not add mixer JSFX. Make sure SideFX_Mixer.jsfx is installed in REAPER's Effects/SideFX folder.\n")
