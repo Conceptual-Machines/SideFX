@@ -22,6 +22,12 @@ M.state = {
 
     -- Column navigation: list of expanded container GUIDs (breadcrumb trail)
     expanded_path = {},  -- e.g. {container1_guid, container2_guid, ...}
+    
+    -- Expanded racks: set of rack GUIDs that are expanded (for nested racks)
+    expanded_racks = {},  -- {[rack_guid] = true}
+    
+    -- Expanded chain in nested rack (separate from expanded_path to avoid conflicts)
+    expanded_nested_chain = nil,  -- chain GUID
 
     -- Selected FX for detail panel
     selected_fx = nil,

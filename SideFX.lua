@@ -133,6 +133,7 @@ local reaper_theme = theme.from_reaper_theme("REAPER Dynamic")
 local renumber_device_chain
 local get_device_utility
 local renumber_chains_in_rack
+local draw_rack_panel  -- Forward declaration for draw_chain_column
 
 -- Use state module functions
 local get_selected_track = state_module.get_selected_track
@@ -468,6 +469,12 @@ local function add_device_to_chain(chain, plugin)
     local device = rack_module.add_device_to_chain(chain, plugin)
     if device then refresh_fx_list() end
     return device
+end
+
+local function add_rack_to_chain(chain)
+    local rack = rack_module.add_rack_to_chain(chain)
+    if rack then refresh_fx_list() end
+    return rack
 end
 
 local function reorder_chain_in_rack(rack, chain_guid, target_chain_guid)
@@ -1334,7 +1341,9 @@ end
 --------------------------------------------------------------------------------
 
 -- Draw a single chain row in the chains table
-local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected)
+local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_nested_rack)
+    -- Explicitly check if is_nested_rack is true (not just truthy)
+    is_nested_rack = (is_nested_rack == true)
     local ok_name, chain_raw_name = pcall(function() return chain:get_name() end)
     local chain_name = ok_name and get_fx_display_name(chain) or "Unknown"
     local ok_en, chain_enabled = pcall(function() return chain:get_enabled() end)
@@ -1359,10 +1368,20 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected)
 
     ctx:push_style_color(imgui.Col.Button(), row_color)
     if ctx:button(chain_name .. "##chain_btn", -1, 20) then
-        if is_selected then
-            state.expanded_path[2] = nil
+        if is_nested_rack then
+            -- Nested rack chain: use expanded_nested_chain instead of expanded_path[2]
+            if is_selected then
+                state.expanded_nested_chain = nil
+            else
+                state.expanded_nested_chain = chain_guid
+            end
         else
-            state.expanded_path[2] = chain_guid
+            -- Top-level rack chain: use expanded_path[2] as before
+            if is_selected then
+                state.expanded_path[2] = nil
+            else
+                state.expanded_path[2] = chain_guid
+            end
         end
     end
     ctx:pop_style_color()
@@ -1419,7 +1438,11 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected)
     if ctx:small_button("×") then
         chain:delete()
         if is_selected then
-            state.expanded_path[2] = nil
+            if is_nested_rack then
+                state.expanded_nested_chain = nil
+            else
+                state.expanded_path[2] = nil
+            end
         end
         refresh_fx_list()
     end
@@ -1484,6 +1507,7 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
 
     local chain_content_h = rack_h - 30  -- Leave room for header
     local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
+    local has_rack_payload = ctx:get_drag_drop_payload("RACK_ADD")
 
     -- Auto-resize wrapper to fit content (Border=1, AutoResizeX=16)
     local wrapper_flags = 17  -- Border + AutoResizeX
@@ -1517,12 +1541,12 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
 
             if #devices == 0 then
                 -- Empty chain - show drop zone
-                if has_plugin_payload then
+                if has_plugin_payload or has_rack_payload then
                     ctx:push_style_color(imgui.Col.Button(), 0x4488FF66)
                 else
                     ctx:push_style_color(imgui.Col.Button(), 0x33333344)
                 end
-                ctx:button("+ Drop plugin to add first device", 250, chain_content_h - 20)
+                ctx:button("+ Drop plugin or rack to add first device", 250, chain_content_h - 20)
                 ctx:pop_style_color()
 
                 if ctx:begin_drag_drop_target() then
@@ -1531,17 +1555,22 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                         local plugin = { full_name = plugin_name, name = plugin_name }
                         add_device_to_chain(selected_chain, plugin)
                     end
+                    -- Accept rack drops -> create nested rack
+                    local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+                    if rack_accepted then
+                        add_rack_to_chain(selected_chain)
+                    end
                     ctx:end_drag_drop_target()
                 end
             else
-                -- Draw each device HORIZONTALLY with arrows
+                -- Draw each device or rack HORIZONTALLY with arrows
                 ctx:begin_group()
 
                 for k, dev in ipairs(devices) do
                     local dev_name = get_fx_display_name(dev)
                     local dev_enabled = dev:get_enabled()
 
-                    -- Arrow connector between devices
+                    -- Arrow connector between items
                     if k > 1 then
                         ctx:same_line()
                         ctx:push_style_color(imgui.Col.Text(), 0x555555FF)
@@ -1550,39 +1579,62 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                         ctx:same_line()
                     end
 
-                    -- Find the actual FX inside the device container
-                    local dev_main_fx = get_device_main_fx(dev)
-                    local dev_utility = get_device_utility(dev)
-
-                    if dev_main_fx and device_panel then
-                        device_panel.draw(ctx, dev_main_fx, {
-                            avail_height = chain_content_h - 20,
-                            utility = dev_utility,
-                            container = dev,
-                            on_delete = function()
-                                dev:delete()
-                                refresh_fx_list()
-                            end,
-                            on_plugin_drop = function(plugin_name, insert_before_idx)
-                                local plugin = { full_name = plugin_name, name = plugin_name }
-                                add_device_to_chain(selected_chain, plugin)
-                            end,
-                        })
-                    else
-                        -- Fallback: simple button
-                        local btn_color = dev_enabled and 0x3A5A4AFF or 0x2A2A35FF
-                        ctx:push_style_color(imgui.Col.Button(), btn_color)
-                        if ctx:button(dev_name:sub(1, 20) .. "##dev_" .. k, 120, chain_content_h - 20) then
-                            dev:show(3)
+                    -- Check if it's a rack or a device
+                    if is_rack_container(dev) then
+                        -- It's a rack - draw using rack panel (mark as nested)
+                        local rack_data = draw_rack_panel(ctx, dev, chain_content_h - 20, true)
+                        
+                        -- If a chain in the nested rack is selected, show its chain column
+                        if rack_data.is_expanded and state.expanded_nested_chain then
+                            local nested_chain_guid = state.expanded_nested_chain
+                            local nested_chain = nil
+                            for _, chain in ipairs(rack_data.chains) do
+                                if chain:get_guid() == nested_chain_guid then
+                                    nested_chain = chain
+                                    break
+                                end
+                            end
+                            
+                            if nested_chain then
+                                ctx:same_line()
+                                draw_chain_column(ctx, nested_chain, rack_data.rack_h)
+                            end
                         end
-                        ctx:pop_style_color()
+                    else
+                        -- It's a device - find the actual FX inside the device container
+                        local dev_main_fx = get_device_main_fx(dev)
+                        local dev_utility = get_device_utility(dev)
+
+                        if dev_main_fx and device_panel then
+                            device_panel.draw(ctx, dev_main_fx, {
+                                avail_height = chain_content_h - 20,
+                                utility = dev_utility,
+                                container = dev,
+                                on_delete = function()
+                                    dev:delete()
+                                    refresh_fx_list()
+                                end,
+                                on_plugin_drop = function(plugin_name, insert_before_idx)
+                                    local plugin = { full_name = plugin_name, name = plugin_name }
+                                    add_device_to_chain(selected_chain, plugin)
+                                end,
+                            })
+                        else
+                            -- Fallback: simple button
+                            local btn_color = dev_enabled and 0x3A5A4AFF or 0x2A2A35FF
+                            ctx:push_style_color(imgui.Col.Button(), btn_color)
+                            if ctx:button(dev_name:sub(1, 20) .. "##dev_" .. k, 120, chain_content_h - 20) then
+                                dev:show(3)
+                            end
+                            ctx:pop_style_color()
+                        end
                     end
                 end
 
                 -- Drop zone / add button at end of chain
                 ctx:same_line(0, 4)
                 local add_btn_h = chain_content_h - 20
-                if has_plugin_payload then
+                if has_plugin_payload or has_rack_payload then
                     ctx:push_style_color(imgui.Col.Button(), 0x4488FF66)
                     ctx:push_style_color(imgui.Col.ButtonHovered(), 0x66AAFF88)
                     ctx:button("+##chain_drop", 40, add_btn_h)
@@ -1600,11 +1652,16 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                         local plugin = { full_name = plugin_name, name = plugin_name }
                         add_device_to_chain(selected_chain, plugin)
                     end
+                    -- Accept rack drops -> create nested rack
+                    local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+                    if rack_accepted then
+                        add_rack_to_chain(selected_chain)
+                    end
                     ctx:end_drag_drop_target()
                 end
 
                 if ctx:is_item_hovered() then
-                    ctx:set_tooltip("Drag plugin here to add device")
+                    ctx:set_tooltip("Drag plugin or rack here to add")
                 end
 
                 ctx:end_group()
@@ -1624,10 +1681,22 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
 end
 
 -- Draw the rack panel (main rack UI without chain column)
-local function draw_rack_panel(ctx, rack, avail_height)
+draw_rack_panel = function(ctx, rack, avail_height, is_nested)
+    -- Explicitly check if is_nested is true (not just truthy)
+    is_nested = (is_nested == true)
     local rack_guid = rack:get_guid()
     local rack_name = get_fx_display_name(rack)
-    local is_expanded = state.expanded_path[1] == rack_guid
+    
+    -- STRICT separation: nested racks use expanded_racks, top-level use expanded_path
+    -- NEVER mix them to avoid conflicts
+    local is_expanded
+    if is_nested then
+        -- Nested rack: ONLY check expanded_racks
+        is_expanded = (state.expanded_racks[rack_guid] == true)
+    else
+        -- Top-level rack: ONLY check expanded_path[1]
+        is_expanded = (state.expanded_path[1] == rack_guid)
+    end
 
     -- Get chains from rack (filter out internal mixer)
     local chains = {}
@@ -1642,15 +1711,34 @@ local function draw_rack_panel(ctx, rack, avail_height)
     local rack_h = avail_height - 10
 
     ctx:push_style_color(imgui.Col.ChildBg(), 0x252535FF)
-    if ctx:begin_child("rack_" .. rack_guid, rack_w, rack_h, imgui.ChildFlags.Border()) then
+    -- Use unique child ID that includes nested flag to ensure no state conflicts
+    local child_id = is_nested and ("rack_nested_" .. rack_guid) or ("rack_" .. rack_guid)
+    if ctx:begin_child(child_id, rack_w, rack_h, imgui.ChildFlags.Border()) then
 
         -- Rack header
         local expand_icon = is_expanded and "▼" or "▶"
-        if ctx:button(expand_icon .. " " .. rack_name:sub(1, 20) .. "##rack_toggle", -60, 24) then
-            if is_expanded then
-                state.expanded_path = {}
+        -- Use unique button ID that includes nested flag AND guid to avoid conflicts
+        local button_id = is_nested and ("rack_toggle_nested_" .. rack_guid) or ("rack_toggle_top_" .. rack_guid)
+        if ctx:button(expand_icon .. " " .. rack_name:sub(1, 20) .. "##" .. button_id, -60, 24) then
+            -- STRICT separation: NEVER mix state between nested and top-level
+            if is_nested then
+                -- Nested rack: ONLY modify expanded_racks, NEVER touch expanded_path
+                if is_expanded then
+                    state.expanded_racks[rack_guid] = nil
+                else
+                    state.expanded_racks[rack_guid] = true
+                end
+                -- Ensure we don't accidentally clear top-level rack state
+                -- (expanded_path stays untouched)
             else
-                state.expanded_path = { rack_guid }
+                -- Top-level rack: ONLY modify expanded_path, NEVER touch expanded_racks
+                if is_expanded then
+                    state.expanded_path = {}
+                else
+                    state.expanded_path = { rack_guid }
+                end
+                -- Ensure we don't accidentally clear nested rack state
+                -- (expanded_racks stays untouched)
             end
         end
 
@@ -1949,8 +2037,15 @@ local function draw_rack_panel(ctx, rack, avail_height)
                     for j, chain in ipairs(chains) do
                         ctx:table_next_row()
                         ctx:push_id("chain_" .. j)
-                        local is_selected = state.expanded_path[2] == chain:get_guid()
-                        draw_chain_row(ctx, chain, j, rack, mixer, is_selected)
+                        local chain_guid = chain:get_guid()
+                        -- Check selection based on whether this is a nested rack
+                        local is_selected
+                        if is_nested then
+                            is_selected = (state.expanded_nested_chain == chain_guid)
+                        else
+                            is_selected = (state.expanded_path[2] == chain_guid)
+                        end
+                        draw_chain_row(ctx, chain, j, rack, mixer, is_selected, is_nested)
                         ctx:pop_id()
                     end
 
@@ -2115,8 +2210,8 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
         end
 
         if item.is_rack then
-            -- Draw rack using helper function
-            local rack_data = draw_rack_panel(ctx, fx, avail_height)
+            -- Draw rack using helper function (top-level rack, explicitly not nested)
+            local rack_data = draw_rack_panel(ctx, fx, avail_height, false)
 
             -- If a chain is selected, show chain column
             if rack_data.is_expanded and state.expanded_path[2] then
