@@ -350,6 +350,98 @@ local function draw_pan_slider(ctx, label, pan_val, width)
     return changed, new_val
 end
 
+-- Draw a vertical fader with fill and dB display
+-- Similar style to draw_pan_slider but vertical orientation
+local function draw_fader(ctx, label, db_val, width, height, min_db, max_db)
+    width = width or 30
+    height = height or 120
+    min_db = min_db or -24
+    max_db = max_db or 12
+    
+    local changed = false
+    local new_val = db_val
+    
+    local screen_x, screen_y = ctx:get_cursor_screen_pos()
+    local draw_list = ctx:get_window_draw_list()
+    
+    -- Background track
+    ctx:draw_list_add_rect_filled(draw_list, screen_x, screen_y, screen_x + width, screen_y + height, 0x1A1A1AFF, 3)
+    
+    -- Calculate fill height based on dB value
+    local normalized = (db_val - min_db) / (max_db - min_db)
+    normalized = math.max(0, math.min(1, normalized))
+    local fill_height = height * normalized
+    
+    -- Draw fill from bottom
+    if fill_height > 2 then
+        local fill_top = screen_y + height - fill_height
+        -- Color gradient based on level
+        local fill_color
+        if db_val > 0 then
+            fill_color = 0xDD8844CC  -- Orange for above 0dB
+        elseif db_val > -6 then
+            fill_color = 0x66AA88CC  -- Green-ish for normal
+        else
+            fill_color = 0x5588AACC  -- Blue for lower levels
+        end
+        ctx:draw_list_add_rect_filled(draw_list, screen_x + 2, fill_top, screen_x + width - 2, screen_y + height - 2, fill_color, 2)
+    end
+    
+    -- Border
+    ctx:draw_list_add_rect(draw_list, screen_x, screen_y, screen_x + width, screen_y + height, 0x555555FF, 3)
+    
+    -- Draw dB tick marks on the right side
+    local tick_dbs = {12, 6, 0, -6, -12, -18, -24}
+    for _, tick_db in ipairs(tick_dbs) do
+        if tick_db >= min_db and tick_db <= max_db then
+            local tick_norm = (tick_db - min_db) / (max_db - min_db)
+            local tick_y = screen_y + height - (tick_norm * height)
+            local tick_len = (tick_db == 0) and 6 or 3
+            local tick_color = (tick_db == 0) and 0x888888FF or 0x444444FF
+            ctx:draw_list_add_line(draw_list, screen_x + width - tick_len, tick_y, screen_x + width, tick_y, tick_color, 1)
+        end
+    end
+    
+    -- Zero line indicator (horizontal across the full width at 0dB)
+    local zero_norm = (0 - min_db) / (max_db - min_db)
+    local zero_y = screen_y + height - (zero_norm * height)
+    ctx:draw_list_add_line(draw_list, screen_x, zero_y, screen_x + width, zero_y, 0x666666AA, 1)
+    
+    -- Invisible button for dragging
+    ctx:set_cursor_screen_pos(screen_x, screen_y)
+    ctx:invisible_button(label .. "_fader_btn", width, height)
+    
+    -- Handle dragging (inverted because Y increases downward)
+    if ctx:is_item_active() then
+        local _, mouse_y = ctx:get_mouse_pos()
+        local new_norm = 1 - ((mouse_y - screen_y) / height)
+        new_norm = math.max(0, math.min(1, new_norm))
+        new_val = min_db + new_norm * (max_db - min_db)
+        changed = true
+    end
+    
+    -- Double-click to reset to 0dB
+    if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
+        new_val = 0
+        changed = true
+    end
+    
+    -- Draw dB value label below fader
+    local label_h = 16
+    local label_y = screen_y + height + 2
+    ctx:draw_list_add_rect_filled(draw_list, screen_x, label_y, screen_x + width, label_y + label_h, 0x222222FF, 2)
+    
+    local db_label = db_val >= 0 and string.format("+%.0f", db_val) or string.format("%.0f", db_val)
+    local text_w, _ = ctx:calc_text_size(db_label)
+    ctx:draw_list_add_text(draw_list, screen_x + (width - text_w) / 2, label_y + 1, 0xCCCCCCFF, db_label)
+    
+    -- Advance cursor
+    ctx:set_cursor_screen_pos(screen_x, label_y + label_h)
+    ctx:dummy(width, 0)
+    
+    return changed, new_val
+end
+
 -- Rack operations (uses state singleton via rack_module)
 local function add_rack_to_track(position)
     local rack = rack_module.add_rack_to_track(position)
@@ -1566,12 +1658,215 @@ local function draw_rack_panel(ctx, rack, avail_height)
         end
         ctx:pop_style_color()
         
+        -- Get mixer for controls
+        local mixer = get_rack_mixer(rack)
+        
+        if not is_expanded then
+            -- Collapsed view - full height fader with meter and scale
+            ctx:text_disabled(string.format("%d chains", #chains))
+            
+            if mixer then
+                local avail_w, _ = ctx:get_content_region_avail()
+                local fader_w = 24
+                local meter_w = 12  -- Stereo meter (2x6px)
+                local scale_w = 20
+                local total_w = scale_w + fader_w + meter_w + 4  -- scale + fader + meter + gaps
+                
+                -- Helper to center items
+                local function center_offset(item_w)
+                    return math.max(0, (avail_w - item_w) / 2)
+                end
+                
+                -- Pan slider at top (centered)
+                local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(1) end)
+                if ok_pan and pan_norm then
+                    local pan_val = -100 + pan_norm * 200
+                    local pan_w = math.min(avail_w - 4, 80)
+                    local pan_offset = math.max(0, (avail_w - pan_w) / 2)
+                    ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + pan_offset)
+                    local pan_changed, new_pan = draw_pan_slider(ctx, "##master_pan_c", pan_val, pan_w)
+                    if pan_changed then
+                        pcall(function() mixer:set_param_normalized(1, (new_pan + 100) / 200) end)
+                    end
+                end
+                
+                ctx:spacing()
+                ctx:spacing()
+                ctx:spacing()
+                
+                -- Calculate remaining height for fader (leave room for text label)
+                local text_label_h = 18
+                local _, remaining_h = ctx:get_content_region_avail()
+                local fader_h = remaining_h - text_label_h - 4
+                fader_h = math.max(50, fader_h)
+                
+                -- Gain fader with meter and scale
+                local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
+                if ok_gain and gain_norm then
+                    local gain_db = -24 + gain_norm * 36
+                    local gain_format = gain_db >= 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db)
+                    
+                    -- Position for the whole control group
+                    local cursor_x_start = ctx:get_cursor_pos_x()
+                    local group_x = cursor_x_start + center_offset(total_w)
+                    ctx:set_cursor_pos_x(group_x)
+                    
+                    local screen_x, screen_y = ctx:get_cursor_screen_pos()
+                    local draw_list = ctx:get_window_draw_list()
+                    
+                    -- Positions
+                    local scale_x = screen_x
+                    local fader_x = screen_x + scale_w + 2
+                    local meter_x = fader_x + fader_w + 2
+                    
+                    -- dB scale markings on left
+                    local db_marks = {12, 6, 0, -6, -12, -18, -24}
+                    for _, db in ipairs(db_marks) do
+                        local mark_norm = (db + 24) / 36
+                        local mark_y = screen_y + fader_h - (fader_h * mark_norm)
+                        -- Tick line
+                        ctx:draw_list_add_line(draw_list, scale_x + scale_w - 6, mark_y, scale_x + scale_w, mark_y, 0x666666FF, 1)
+                        -- dB label (only for key values)
+                        if db == 0 or db == -12 or db == 12 then
+                            local label = db == 0 and "0" or tostring(db)
+                            ctx:draw_list_add_text(draw_list, scale_x, mark_y - 5, 0x888888FF, label)
+                        end
+                    end
+                    
+                    -- Fader background
+                    ctx:draw_list_add_rect_filled(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x1A1A1AFF, 3)
+                    
+                    -- Fader fill from bottom (gain setting)
+                    local fill_h = fader_h * gain_norm
+                    if fill_h > 2 then
+                        local fill_top = screen_y + fader_h - fill_h
+                        ctx:draw_list_add_rect_filled(draw_list, fader_x + 2, fill_top, fader_x + fader_w - 2, screen_y + fader_h - 2, 0x5588AACC, 2)
+                    end
+                    
+                    -- Fader border
+                    ctx:draw_list_add_rect(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x555555FF, 3)
+                    
+                    -- 0dB line on fader
+                    local zero_db_norm = 24 / 36  -- 0dB position
+                    local zero_y = screen_y + fader_h - (fader_h * zero_db_norm)
+                    ctx:draw_list_add_line(draw_list, fader_x, zero_y, fader_x + fader_w, zero_y, 0xFFFFFF44, 1)
+                    
+                    -- Stereo level meters on right
+                    local meter_l_x = meter_x
+                    local meter_r_x = meter_x + meter_w / 2 + 1
+                    local half_meter_w = meter_w / 2 - 1
+                    
+                    -- Meter backgrounds
+                    ctx:draw_list_add_rect_filled(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
+                    ctx:draw_list_add_rect_filled(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
+                    
+                    -- Get track peak levels (stereo)
+                    if state.track and state.track.pointer then
+                        local peak_l = r.Track_GetPeakInfo(state.track.pointer, 0)
+                        local peak_r = r.Track_GetPeakInfo(state.track.pointer, 1)
+                        
+                        -- Helper to draw a meter bar
+                        local function draw_meter_bar(x, w, peak)
+                            if peak > 0 then
+                                local peak_db = 20 * math.log(peak, 10)
+                                peak_db = math.max(-60, math.min(12, peak_db))
+                                local peak_norm = (peak_db + 60) / 72
+                                
+                                local meter_fill_h = fader_h * peak_norm
+                                if meter_fill_h > 1 then
+                                    local meter_top = screen_y + fader_h - meter_fill_h
+                                    -- Color based on level
+                                    local meter_color
+                                    if peak_db > 0 then
+                                        meter_color = 0xFF4444FF  -- Red
+                                    elseif peak_db > -6 then
+                                        meter_color = 0xFFAA44FF  -- Orange
+                                    elseif peak_db > -18 then
+                                        meter_color = 0x44FF44FF  -- Green
+                                    else
+                                        meter_color = 0x44AA44FF  -- Dark green
+                                    end
+                                    ctx:draw_list_add_rect_filled(draw_list, x, meter_top, x + w, screen_y + fader_h - 1, meter_color, 0)
+                                end
+                            end
+                        end
+                        
+                        draw_meter_bar(meter_l_x + 1, half_meter_w - 1, peak_l)
+                        draw_meter_bar(meter_r_x + 1, half_meter_w - 1, peak_r)
+                    end
+                    
+                    -- Meter borders
+                    ctx:draw_list_add_rect(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
+                    ctx:draw_list_add_rect(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
+                    
+                    -- Invisible slider for fader interaction
+                    ctx:set_cursor_screen_pos(fader_x, screen_y)
+                    ctx:push_style_color(imgui.Col.FrameBg(), 0x00000000)
+                    ctx:push_style_color(imgui.Col.FrameBgHovered(), 0x00000000)
+                    ctx:push_style_color(imgui.Col.FrameBgActive(), 0x00000000)
+                    ctx:push_style_color(imgui.Col.SliderGrab(), 0xAAAAAAFF)
+                    ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
+                    
+                    local gain_changed, new_gain_db = ctx:v_slider_double("##master_gain_v", fader_w, fader_h, gain_db, -24, 12, "")
+                    if gain_changed then
+                        pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
+                    end
+                    -- Double-click to reset to 0 dB
+                    if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
+                        pcall(function() mixer:set_param_normalized(0, (0 + 24) / 36) end)
+                    end
+                    
+                    ctx:pop_style_color(5)
+                    
+                    -- dB value label at bottom with background (centered under fader+meter)
+                    local label_w = fader_w + meter_w + 2
+                    local label_x = fader_x
+                    local label_y = screen_y + fader_h + 2
+                    
+                    -- Background
+                    ctx:draw_list_add_rect_filled(draw_list, label_x, label_y, label_x + label_w, label_y + text_label_h - 2, 0x222222FF, 2)
+                    
+                    -- Text centered
+                    local db_text_w, _ = ctx:calc_text_size(gain_format)
+                    ctx:draw_list_add_text(draw_list, label_x + (label_w - db_text_w) / 2, label_y + 2, 0xCCCCCCFF, gain_format)
+                    
+                    -- Invisible button for click to edit
+                    ctx:set_cursor_screen_pos(label_x, label_y)
+                    ctx:invisible_button("##gain_label_btn", label_w, text_label_h - 2)
+                    
+                    -- Double-click to type value
+                    if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
+                        ctx:open_popup("##gain_edit_popup")
+                    end
+                    
+                    -- Edit popup
+                    if ctx:begin_popup("##gain_edit_popup") then
+                        ctx:set_next_item_width(60)
+                        ctx:set_keyboard_focus_here()
+                        local input_changed, input_val = ctx:input_double("##gain_input", gain_db, 0, 0, "%.1f")
+                        if input_changed then
+                            local new_db = math.max(-24, math.min(12, input_val))
+                            pcall(function() mixer:set_param_normalized(0, (new_db + 24) / 36) end)
+                        end
+                        if ctx:is_key_pressed(imgui.Key.Enter()) or ctx:is_key_pressed(imgui.Key.Escape()) then
+                            ctx:close_current_popup()
+                        end
+                        ctx:end_popup()
+                    end
+                    
+                    -- Advance cursor past the whole control
+                    ctx:set_cursor_screen_pos(screen_x, label_y + text_label_h)
+                    ctx:dummy(total_w, 0)
+                end
+            else
+                ctx:text_disabled("No mixer")
+            end
+        end
+        
         if is_expanded then
             ctx:separator()
             
-            local mixer = get_rack_mixer(rack)
-            
-            -- Master output controls
+            -- Master output controls (mixer already fetched above)
             if mixer then
                 if ctx:begin_table("master_controls", 3, imgui.TableFlags.SizingStretchProp()) then
                     ctx:table_setup_column("label", imgui.TableColumnFlags.WidthFixed(), 50)
