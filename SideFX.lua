@@ -677,10 +677,13 @@ end
 -- Returns: changed (bool), new_value (-100 to +100)
 local function draw_pan_slider(ctx, label, pan_val, width)
     width = width or 50
-    local slider_h = 6
+    local slider_h = 12
     local text_h = 16
     local gap = 2
     local total_h = slider_h + gap + text_h
+    
+    local changed = false
+    local new_val = pan_val
     
     -- Format label
     local pan_format
@@ -720,35 +723,35 @@ local function draw_pan_slider(ctx, label, pan_val, width)
     local text_y = screen_y + slider_h + gap
     r.ImGui_DrawList_AddRectFilled(draw_list, screen_x, text_y, screen_x + width, text_y + text_h, 0x222222FF, 2)
     
-    -- Invisible slider for dragging interaction (covers slider area)
-    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_FrameBg(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_FrameBgHovered(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_FrameBgActive(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_SliderGrab(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_SliderGrabActive(), 0x00000000)
-    
+    -- Invisible button for slider dragging (only covers slider area)
     r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, screen_y)
-    ctx:set_next_item_width(width)
-    local changed, new_val = ctx:slider_double(label, pan_val, -100, 100, "")
+    r.ImGui_InvisibleButton(ctx.ctx, label .. "_slider_btn", width, slider_h)
     
-    -- Double-click to reset to center
+    -- Handle dragging
+    if r.ImGui_IsItemActive(ctx.ctx) then
+        local mouse_x = r.ImGui_GetMousePos(ctx.ctx)
+        local new_norm = (mouse_x - screen_x) / width
+        new_norm = math.max(0, math.min(1, new_norm))
+        new_val = -100 + new_norm * 200
+        changed = true
+    end
+    
+    -- Double-click on slider to reset to center
     if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
         new_val = 0
         changed = true
     end
     
-    r.ImGui_PopStyleColor(ctx.ctx, 5)
-    
-    -- Draw formatted text centered (clickable to edit)
+    -- Draw formatted text centered
     local text_w = r.ImGui_CalcTextSize(ctx.ctx, pan_format)
     r.ImGui_DrawList_AddText(draw_list, screen_x + (width - text_w) / 2, text_y + 2, 0xCCCCCCFF, pan_format)
     
-    -- Invisible button for click detection
+    -- Invisible button for text label (separate from slider)
     r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, text_y)
     r.ImGui_InvisibleButton(ctx.ctx, label .. "_text_btn", width, text_h)
     
-    -- Ctrl+click to type value
-    if r.ImGui_IsItemClicked(ctx.ctx) and r.ImGui_GetKeyMods(ctx.ctx) == r.ImGui_Mod_Ctrl() then
+    -- Double-click on text to edit value
+    if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
         r.ImGui_OpenPopup(ctx.ctx, label .. "_edit_popup")
     end
     
@@ -766,6 +769,10 @@ local function draw_pan_slider(ctx, label, pan_val, width)
         end
         r.ImGui_EndPopup(ctx.ctx)
     end
+    
+    -- Advance cursor
+    r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, screen_y + total_h)
+    r.ImGui_Dummy(ctx.ctx, width, 0)
     
     return changed, new_val
 end
@@ -2231,10 +2238,6 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                                 if pan_changed then
                                     pcall(function() mixer:set_param_normalized(1, (new_pan + 100) / 200) end)
                                 end
-                                -- Double-click to reset to center
-                                if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
-                                    pcall(function() mixer:set_param_normalized(1, 0.5) end)
-                                end
                             else
                                 ctx:text_disabled("C")
                             end
@@ -2382,10 +2385,6 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                                         if pan_changed then
                                             pcall(function() mixer:set_param_normalized(pan_param_idx, (new_pan + 100) / 200) end)
                                         end
-                                        -- Double-click to reset to center
-                                        if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
-                                            pcall(function() mixer:set_param_normalized(pan_param_idx, 0.5) end)
-                                        end
                                     else
                                         ctx:text_disabled("C")
                                     end
@@ -2452,17 +2451,16 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                             if pan_changed then
                                 pcall(function() mixer:set_param_normalized(1, (new_pan + 100) / 200) end)
                             end
-                            -- Double-click to reset to center
-                            if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
-                                pcall(function() mixer:set_param_normalized(1, 0.5) end)
-                            end
                         end
                         
                         ctx:spacing()
+                        ctx:spacing()
+                        ctx:spacing()
                         
-                        -- Calculate remaining height for fader
+                        -- Calculate remaining height for fader (leave room for text label)
+                        local text_label_h = 18
                         local _, remaining_h = r.ImGui_GetContentRegionAvail(ctx.ctx)
-                        local fader_h = remaining_h - 20
+                        local fader_h = remaining_h - text_label_h - 4
                         fader_h = math.max(50, fader_h)
                         
                         -- Gain fader with meter and scale
@@ -2583,10 +2581,45 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                             
                             r.ImGui_PopStyleColor(ctx.ctx, 5)
                             
-                            -- dB value at bottom (centered under fader)
-                            local db_w = r.ImGui_CalcTextSize(ctx.ctx, gain_format)
-                            ctx:set_cursor_pos_x(group_x + scale_w + (fader_w - db_w) / 2)
-                            ctx:text_colored(0xAAAAAAFF, gain_format)
+                            -- dB value label at bottom with background (centered under fader+meter)
+                            local label_w = fader_w + meter_w + 2
+                            local label_x = fader_x
+                            local label_y = screen_y + fader_h + 2
+                            
+                            -- Background
+                            r.ImGui_DrawList_AddRectFilled(draw_list, label_x, label_y, label_x + label_w, label_y + text_label_h - 2, 0x222222FF, 2)
+                            
+                            -- Text centered
+                            local db_text_w = r.ImGui_CalcTextSize(ctx.ctx, gain_format)
+                            r.ImGui_DrawList_AddText(draw_list, label_x + (label_w - db_text_w) / 2, label_y + 2, 0xCCCCCCFF, gain_format)
+                            
+                            -- Invisible button for click to edit
+                            r.ImGui_SetCursorScreenPos(ctx.ctx, label_x, label_y)
+                            r.ImGui_InvisibleButton(ctx.ctx, "##gain_label_btn", label_w, text_label_h - 2)
+                            
+                            -- Double-click to type value
+                            if r.ImGui_IsItemHovered(ctx.ctx) and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                                r.ImGui_OpenPopup(ctx.ctx, "##gain_edit_popup")
+                            end
+                            
+                            -- Edit popup
+                            if r.ImGui_BeginPopup(ctx.ctx, "##gain_edit_popup") then
+                                ctx:set_next_item_width(60)
+                                r.ImGui_SetKeyboardFocusHere(ctx.ctx)
+                                local input_changed, input_val = r.ImGui_InputDouble(ctx.ctx, "##gain_input", gain_db, 0, 0, "%.1f")
+                                if input_changed then
+                                    local new_db = math.max(-24, math.min(12, input_val))
+                                    pcall(function() mixer:set_param_normalized(0, (new_db + 24) / 36) end)
+                                end
+                                if r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Enter()) or r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Escape()) then
+                                    r.ImGui_CloseCurrentPopup(ctx.ctx)
+                                end
+                                r.ImGui_EndPopup(ctx.ctx)
+                            end
+                            
+                            -- Advance cursor past the whole control
+                            r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, label_y + text_label_h)
+                            r.ImGui_Dummy(ctx.ctx, total_w, 0)
                         end
                     end
                 end
