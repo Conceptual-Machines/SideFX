@@ -90,10 +90,6 @@ local device_module = require('lib.device')
 local container_module = require('lib.container')
 local modulator_module = require('lib.modulator')
 local browser_module = require('lib.browser')
-local presets_module = require('lib.presets')
-
--- Initialize presets module with script path
-presets_module.init(script_path)
 
 --------------------------------------------------------------------------------
 -- Icons (using OpenMoji font)
@@ -142,7 +138,6 @@ local renumber_chains_in_rack
 local get_selected_track = state_module.get_selected_track
 local clear_multi_select = state_module.clear_multi_select
 local check_fx_changes = state_module.check_fx_changes
-local get_container_children = state_module.get_container_children
 local get_multi_selected_fx = state_module.get_multi_selected_fx
 local get_multi_select_count = state_module.get_multi_select_count
 
@@ -251,12 +246,8 @@ end
 -- R-Container (Rack) Functions (from lib/rack.lua)
 --------------------------------------------------------------------------------
 
-local MIXER_JSFX = rack_module.MIXER_JSFX
-
 -- Use rack module functions
 local get_rack_mixer = fx_utils.get_rack_mixer
-local get_mixer_chain_volume_param = rack_module.get_mixer_chain_volume_param
-local get_mixer_chain_pan_param = rack_module.get_mixer_chain_pan_param
 
 -- Custom pan slider with center line indicator
 -- Returns: changed (bool), new_value (-100 to +100)
@@ -941,8 +932,6 @@ end
 --------------------------------------------------------------------------------
 
 -- Modulator operations (uses modulator_module)
-local MODULATOR_JSFX = modulator_module.MODULATOR_JSFX
-
 -- Pure forwards
 local find_modulators_on_track = modulator_module.find_modulators_on_track
 local get_linkable_fx = modulator_module.get_linkable_fx
@@ -961,13 +950,6 @@ local function delete_modulator(fx_idx)
     modulator_module.delete_modulator(fx_idx)
     refresh_fx_list()
 end
-
---------------------------------------------------------------------------------
--- Presets (moved to lib/presets.lua)
---------------------------------------------------------------------------------
-
-local save_chain_preset = presets_module.save_chain
-local load_chain_preset = presets_module.load_chain
 
 -- Use fx_utils module for is_modulator_fx
 local is_modulator_fx = fx_utils.is_modulator_fx
