@@ -2427,12 +2427,13 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
     local chain_content_h = rack_h - 30  -- Leave room for header
     local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
     
-    -- Auto-resize chain column to fit content
-    -- ChildFlags: Border (1) + AutoResizeX (16) + AlwaysAutoResize (64) = 81
-    local chain_wrapper_flags = 81
+    -- Set minimum width for outer wrapper (wider than content)
+    local min_wrapper_width = 600
+    local device_width = 450
+    local wrapper_width = math.max(min_wrapper_width, #devices * device_width + 150)
     
     ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
-    if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, 0, rack_h, chain_wrapper_flags) then
+    if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, wrapper_width, rack_h, imgui.ChildFlags.Border()) then
         -- Header
         ctx:text_colored(0xAAAAAAFF, "Chain:")
         ctx:same_line()
