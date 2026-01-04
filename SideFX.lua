@@ -1725,7 +1725,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
     
     -- Extra padding at end to ensure scrolling doesn't cut off the + button
     ctx:same_line()
-    ctx:dummy(20, 1)
+    r.ImGui_Dummy(ctx.ctx, 20, 1)
 end
 
 --------------------------------------------------------------------------------
