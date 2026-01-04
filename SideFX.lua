@@ -952,10 +952,14 @@ end
 -- Modulator operations (uses modulator_module)
 local MODULATOR_JSFX = modulator_module.MODULATOR_JSFX
 
-local function find_modulators_on_track()
-    return modulator_module.find_modulators_on_track()
-end
+-- Pure forwards
+local find_modulators_on_track = modulator_module.find_modulators_on_track
+local get_linkable_fx = modulator_module.get_linkable_fx
+local create_param_link = modulator_module.create_param_link
+local remove_param_link = modulator_module.remove_param_link
+local get_modulator_links = modulator_module.get_modulator_links
 
+-- Wrappers that refresh UI
 local function add_modulator()
     local fx = modulator_module.add_modulator()
     if fx then refresh_fx_list() end
@@ -965,22 +969,6 @@ end
 local function delete_modulator(fx_idx)
     modulator_module.delete_modulator(fx_idx)
     refresh_fx_list()
-end
-
-local function get_linkable_fx()
-    return modulator_module.get_linkable_fx()
-end
-
-local function create_param_link(mod_fx_idx, target_fx_idx, target_param_idx)
-    return modulator_module.create_param_link(mod_fx_idx, target_fx_idx, target_param_idx)
-end
-
-local function remove_param_link(target_fx_idx, target_param_idx)
-    modulator_module.remove_param_link(target_fx_idx, target_param_idx)
-end
-
-local function get_modulator_links(mod_fx_idx)
-    return modulator_module.get_modulator_links(mod_fx_idx)
 end
 
 --------------------------------------------------------------------------------
