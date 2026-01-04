@@ -8,8 +8,12 @@ local r = reaper
 
 local naming = require('lib.naming')
 local fx_utils = require('lib.fx_utils')
+local state_module = require('lib.state')
 
 local M = {}
+
+-- Local reference to state singleton
+local state = state_module.state
 
 --------------------------------------------------------------------------------
 -- Constants
@@ -44,26 +48,24 @@ end
 -- Rack Creation
 --------------------------------------------------------------------------------
 
---- Add a new rack (R-container) to a track.
--- @param track Track ReaWrap Track object
+--- Add a new rack (R-container) to the current track.
 -- @param position number|nil Insert position (nil = end of chain)
--- @param on_complete function|nil Callback after creation (e.g., refresh_fx_list)
 -- @return TrackFX|nil Rack container or nil on failure
-function M.add_rack_to_track(track, position, on_complete)
-    if not track then return nil end
+function M.add_rack_to_track(position)
+    if not state.track then return nil end
     
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
     
     -- Get next index
-    local rack_idx = fx_utils.get_next_rack_index(track)
+    local rack_idx = fx_utils.get_next_rack_index(state.track)
     local rack_name = naming.build_rack_name(rack_idx)
     
     -- Position for the container
     local container_position = position and (-1000 - position) or -1
     
     -- Create the rack container
-    local rack = track:add_fx_by_name("Container", false, container_position)
+    local rack = state.track:add_fx_by_name("Container", false, container_position)
     
     if rack and rack.pointer >= 0 then
         -- Rename the rack
@@ -73,7 +75,7 @@ function M.add_rack_to_track(track, position, on_complete)
         rack:set_container_channels(64)
         
         -- Add the mixer JSFX at track level, then move into rack
-        local mixer_fx = track:add_fx_by_name(M.MIXER_JSFX, false, -1)
+        local mixer_fx = state.track:add_fx_by_name(M.MIXER_JSFX, false, -1)
         
         if mixer_fx and mixer_fx.pointer >= 0 then
             -- Move mixer into rack
@@ -107,8 +109,6 @@ function M.add_rack_to_track(track, position, on_complete)
         else
             r.ShowConsoleMsg("SideFX: Could not add mixer JSFX. Make sure SideFX_Mixer.jsfx is installed.\n")
         end
-        
-        if on_complete then on_complete() end
     end
     
     r.PreventUIRefresh(-1)
@@ -122,13 +122,11 @@ end
 --------------------------------------------------------------------------------
 
 --- Add a chain (C-container) to an existing rack.
--- @param track Track ReaWrap Track object
 -- @param rack TrackFX Rack container
 -- @param plugin table Plugin info {full_name, name}
--- @param on_complete function|nil Callback after creation
 -- @return TrackFX|nil Chain container or nil on failure
-function M.add_chain_to_rack(track, rack, plugin, on_complete)
-    if not track or not rack or not plugin then return nil end
+function M.add_chain_to_rack(rack, plugin)
+    if not state.track or not rack or not plugin then return nil end
     if not fx_utils.is_rack_container(rack) then return nil end
     
     r.Undo_BeginBlock()
@@ -159,7 +157,7 @@ function M.add_chain_to_rack(track, rack, plugin, on_complete)
     local util_name = naming.build_chain_device_util_name(rack_idx, chain_idx, 1)
     
     -- Step 1: Create device container at track level
-    local device = track:add_fx_by_name("Container", false, -1)
+    local device = state.track:add_fx_by_name("Container", false, -1)
     if not device or device.pointer < 0 then
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Chain (failed)", -1)
@@ -168,7 +166,7 @@ function M.add_chain_to_rack(track, rack, plugin, on_complete)
     device:set_named_config_param("renamed_name", device_name)
     
     -- Step 2: Add FX to device container
-    local main_fx = track:add_fx_by_name(plugin.full_name, false, -1)
+    local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
     if main_fx and main_fx.pointer >= 0 then
         device:add_fx_to_container(main_fx, 0)
         
@@ -183,7 +181,7 @@ function M.add_chain_to_rack(track, rack, plugin, on_complete)
     end
     
     -- Step 3: Add utility to device container
-    local util_fx = track:add_fx_by_name(M.UTILITY_JSFX, false, -1)
+    local util_fx = state.track:add_fx_by_name(M.UTILITY_JSFX, false, -1)
     if util_fx and util_fx.pointer >= 0 then
         device:add_fx_to_container(util_fx, 1)
         
@@ -194,7 +192,7 @@ function M.add_chain_to_rack(track, rack, plugin, on_complete)
     end
     
     -- Step 4: Create chain container
-    local chain = track:add_fx_by_name("Container", false, -1)
+    local chain = state.track:add_fx_by_name("Container", false, -1)
     if chain and chain.pointer >= 0 then
         chain:set_named_config_param("renamed_name", chain_name)
         chain:add_fx_to_container(device, 0)
@@ -234,8 +232,6 @@ function M.add_chain_to_rack(track, rack, plugin, on_complete)
             chain_inside:set_pin_mappings(1, 0, left_bits, 0)
             chain_inside:set_pin_mappings(1, 1, right_bits, 0)
         end
-        
-        if on_complete then on_complete() end
     end
     
     r.PreventUIRefresh(-1)
@@ -245,13 +241,11 @@ function M.add_chain_to_rack(track, rack, plugin, on_complete)
 end
 
 --- Add a device to an existing chain.
--- @param track Track ReaWrap Track object
 -- @param chain TrackFX Chain container
 -- @param plugin table Plugin info {full_name, name}
--- @param on_complete function|nil Callback after creation
 -- @return TrackFX|nil Device container or nil on failure
-function M.add_device_to_chain(track, chain, plugin, on_complete)
-    if not track or not chain or not plugin then return nil end
+function M.add_device_to_chain(chain, plugin)
+    if not state.track or not chain or not plugin then return nil end
     if not fx_utils.is_chain_container(chain) then return nil end
     
     local chain_guid = chain:get_guid()
@@ -278,7 +272,7 @@ function M.add_device_to_chain(track, chain, plugin, on_complete)
     local util_name = naming.build_chain_device_util_name(rack_idx, chain_idx, device_idx)
     
     -- Create device container at track level
-    local device = track:add_fx_by_name("Container", false, -1)
+    local device = state.track:add_fx_by_name("Container", false, -1)
     if not device or device.pointer < 0 then
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Device to Chain (failed)", -1)
@@ -287,7 +281,7 @@ function M.add_device_to_chain(track, chain, plugin, on_complete)
     device:set_named_config_param("renamed_name", device_name)
     
     -- Add FX to device
-    local main_fx = track:add_fx_by_name(plugin.full_name, false, -1)
+    local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
     if main_fx and main_fx.pointer >= 0 then
         device:add_fx_to_container(main_fx, 0)
         
@@ -302,7 +296,7 @@ function M.add_device_to_chain(track, chain, plugin, on_complete)
     end
     
     -- Add utility to device
-    local util_fx = track:add_fx_by_name(M.UTILITY_JSFX, false, -1)
+    local util_fx = state.track:add_fx_by_name(M.UTILITY_JSFX, false, -1)
     if util_fx and util_fx.pointer >= 0 then
         device:add_fx_to_container(util_fx, 1)
         
@@ -314,7 +308,7 @@ function M.add_device_to_chain(track, chain, plugin, on_complete)
     
     -- Move device into chain
     local device_guid = device:get_guid()
-    local fresh_chain = track:find_fx_by_guid(chain_guid)
+    local fresh_chain = state.track:find_fx_by_guid(chain_guid)
     
     if not fresh_chain then
         r.PreventUIRefresh(-1)
@@ -334,15 +328,15 @@ function M.add_device_to_chain(track, chain, plugin, on_complete)
         end
         
         fresh_chain:move_out_of_container()
-        fresh_chain = track:find_fx_by_guid(chain_guid)
-        device = track:find_fx_by_guid(device_guid)
+        fresh_chain = state.track:find_fx_by_guid(chain_guid)
+        device = state.track:find_fx_by_guid(device_guid)
         
         if fresh_chain and device then
             local insert_pos = fresh_chain:get_container_child_count()
             fresh_chain:add_fx_to_container(device, insert_pos)
             
-            fresh_chain = track:find_fx_by_guid(chain_guid)
-            local fresh_rack = track:find_fx_by_guid(rack_guid)
+            fresh_chain = state.track:find_fx_by_guid(chain_guid)
+            local fresh_rack = state.track:find_fx_by_guid(rack_guid)
             
             if fresh_chain and fresh_rack then
                 fresh_rack:add_fx_to_container(fresh_chain, chain_pos_in_rack)
@@ -353,8 +347,6 @@ function M.add_device_to_chain(track, chain, plugin, on_complete)
         local insert_pos = fresh_chain:get_container_child_count()
         fresh_chain:add_fx_to_container(device, insert_pos)
     end
-    
-    if on_complete then on_complete() end
     
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Add Device to Chain", -1)
@@ -367,17 +359,15 @@ end
 --------------------------------------------------------------------------------
 
 --- Reorder a chain within a rack.
--- @param track Track ReaWrap Track object
 -- @param rack TrackFX Rack container
 -- @param chain_guid string GUID of chain to move
 -- @param target_chain_guid string|nil GUID to move before (nil = end)
--- @param on_complete function|nil Callback after reorder
 -- @return boolean Success
-function M.reorder_chain_in_rack(track, rack, chain_guid, target_chain_guid, on_complete)
-    if not track or not rack or not chain_guid then return false end
+function M.reorder_chain_in_rack(rack, chain_guid, target_chain_guid)
+    if not state.track or not rack or not chain_guid then return false end
     if not fx_utils.is_rack_container(rack) then return false end
     
-    local chain = track:find_fx_by_guid(chain_guid)
+    local chain = state.track:find_fx_by_guid(chain_guid)
     if not chain then return false end
     
     local parent = chain:get_parent_container()
@@ -435,15 +425,13 @@ function M.reorder_chain_in_rack(track, rack, chain_guid, target_chain_guid, on_
     -- Perform the move
     chain:move_out_of_container()
     
-    chain = track:find_fx_by_guid(chain_guid)
-    rack = track:find_fx_by_guid(rack:get_guid())
+    chain = state.track:find_fx_by_guid(chain_guid)
+    rack = state.track:find_fx_by_guid(rack:get_guid())
     
     if chain and rack then
         rack:add_fx_to_container(chain, dest_pos)
         M.renumber_chains_in_rack(rack)
     end
-    
-    if on_complete then on_complete() end
     
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Reorder Chain", -1)

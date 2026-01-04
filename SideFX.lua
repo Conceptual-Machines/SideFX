@@ -492,44 +492,35 @@ local function draw_pan_slider(ctx, label, pan_val, width)
     return changed, new_val
 end
 
--- Add a new rack (R-container) to the track (wrapper for rack module)
+-- Rack operations (uses state singleton via rack_module)
 local function add_rack_to_track(position)
-    if not state.track then return nil end
-    
-    local rack = rack_module.add_rack_to_track(state.track, position, function()
-        -- Callback: expand rack and refresh
-    end)
-    
+    local rack = rack_module.add_rack_to_track(position)
     if rack then
         state.expanded_path = { rack:get_guid() }
         refresh_fx_list()
     end
-    
     return rack
 end
 
--- Add a chain (C-container) to an existing rack (wrapper for rack module)
 local function add_chain_to_rack(rack, plugin)
-    if not state.track then return nil end
-    local chain = rack_module.add_chain_to_rack(state.track, rack, plugin, refresh_fx_list)
+    local chain = rack_module.add_chain_to_rack(rack, plugin)
+    if chain then refresh_fx_list() end
     return chain
 end
 
--- Add a device (D-container with FX + Utility) to an existing chain (wrapper for rack module)
 local function add_device_to_chain(chain, plugin)
-    if not state.track then return nil end
-    local device = rack_module.add_device_to_chain(state.track, chain, plugin, refresh_fx_list)
+    local device = rack_module.add_device_to_chain(chain, plugin)
+    if device then refresh_fx_list() end
     return device
 end
 
--- Reorder a chain within a rack (wrapper for rack module)
 local function reorder_chain_in_rack(rack, chain_guid, target_chain_guid)
-    if not state.track then return false end
-    return rack_module.reorder_chain_in_rack(state.track, rack, chain_guid, target_chain_guid, refresh_fx_list)
+    local result = rack_module.reorder_chain_in_rack(rack, chain_guid, target_chain_guid)
+    if result then refresh_fx_list() end
+    return result
 end
 
--- Renumber chains within a rack (uses rack module)
-renumber_chains_in_rack = rack_module.renumber_chains_in_rack
+local renumber_chains_in_rack = rack_module.renumber_chains_in_rack
 
 --------------------------------------------------------------------------------
 -- Container Operations
