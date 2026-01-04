@@ -722,7 +722,10 @@ local function add_chain_to_rack(rack, plugin)
         return nil
     end
     
-    -- Hierarchical naming: R1_C1: <plugin name>
+    -- Hierarchical naming:
+    -- Chain container: R1_C1: <name>
+    -- Device inside:   R1_C1_D1: <name>
+    -- Utility inside:  R1_C1_Util
     local short_name = get_short_plugin_name(plugin.full_name)
     local chain_prefix = string.format("%s_C%d", rack_prefix, chain_idx)
     local chain_name = string.format("%s: %s", chain_prefix, short_name)
@@ -747,8 +750,8 @@ local function add_chain_to_rack(rack, plugin)
                 if wet_idx and wet_idx >= 0 then
                     fx_inside:set_param_normalized(wet_idx, 1.0)
                 end
-                -- Rename FX with parent prefix
-                fx_inside:set_named_config_param("renamed_name", string.format("%s: %s", chain_prefix, short_name))
+                -- Rename FX with D1 (Device 1) - allows for multiple devices in chain later
+                fx_inside:set_named_config_param("renamed_name", string.format("%s_D1: %s", chain_prefix, short_name))
             end
             
             -- Add utility
