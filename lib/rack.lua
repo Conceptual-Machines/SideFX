@@ -45,6 +45,25 @@ function M.get_mixer_chain_pan_param(chain_index)
 end
 
 --------------------------------------------------------------------------------
+-- Helper Functions
+--------------------------------------------------------------------------------
+
+--- Find an FX by name pattern (searches recursively through all containers).
+-- @param name_pattern string Lua pattern to match against FX name
+-- @return TrackFX|nil FX object or nil if not found
+local function find_fx_by_name_pattern(name_pattern)
+    if not state.track then return nil end
+    for entry in state.track:iter_all_fx_flat() do
+        local fx = entry.fx
+        local ok, name = pcall(function() return fx:get_name() end)
+        if ok and name and name:match(name_pattern) then
+            return fx
+        end
+    end
+    return nil
+end
+
+--------------------------------------------------------------------------------
 -- Rack Creation
 --------------------------------------------------------------------------------
 
@@ -66,45 +85,45 @@ local function create_rack_container(rack_idx, position)
         return nil
     end
 
-    -- Rename the rack
-    rack:set_named_config_param("renamed_name", rack_name)
+        -- Rename the rack
+        rack:set_named_config_param("renamed_name", rack_name)
 
-    -- Set up for parallel routing (64 channels for up to 32 stereo chains)
-    rack:set_container_channels(64)
+        -- Set up for parallel routing (64 channels for up to 32 stereo chains)
+        rack:set_container_channels(64)
 
-    -- Add the mixer JSFX at track level, then move into rack
-    local mixer_fx = state.track:add_fx_by_name(M.MIXER_JSFX, false, -1)
-    if mixer_fx and mixer_fx.pointer >= 0 then
-        -- Move mixer into rack
-        rack:add_fx_to_container(mixer_fx, 0)
+        -- Add the mixer JSFX at track level, then move into rack
+        local mixer_fx = state.track:add_fx_by_name(M.MIXER_JSFX, false, -1)
+        if mixer_fx and mixer_fx.pointer >= 0 then
+            -- Move mixer into rack
+            rack:add_fx_to_container(mixer_fx, 0)
 
-        -- Rename mixer
-        local mixer_inside = nil
-        for child in rack:iter_container_children() do
-            local ok, name = pcall(function() return child:get_name() end)
-            if ok and name and ((name:find("SideFX") and name:find("Mixer")) or name:match("^_R%d+_M$")) then
-                mixer_inside = child
-                break
+            -- Rename mixer
+            local mixer_inside = nil
+            for child in rack:iter_container_children() do
+                local ok, name = pcall(function() return child:get_name() end)
+                if ok and name and ((name:find("SideFX") and name:find("Mixer")) or name:match("^_R%d+_M$")) then
+                    mixer_inside = child
+                    break
+                end
             end
-        end
-        if mixer_inside then
-            mixer_inside:set_named_config_param("renamed_name", naming.build_mixer_name(rack_idx))
+            if mixer_inside then
+                mixer_inside:set_named_config_param("renamed_name", naming.build_mixer_name(rack_idx))
 
-            -- Initialize master and chain params
-            local master_0db_norm = (0 + 24) / 36  -- 0.667
-            local pan_center_norm = 0.5
-            local vol_0db_norm = (0 + 60) / 72  -- 0.833
+                -- Initialize master and chain params
+                local master_0db_norm = (0 + 24) / 36  -- 0.667
+                local pan_center_norm = 0.5
+                local vol_0db_norm = (0 + 60) / 72  -- 0.833
 
-            pcall(function() mixer_inside:set_param_normalized(0, master_0db_norm) end)
-            pcall(function() mixer_inside:set_param_normalized(1, pan_center_norm) end)
+                pcall(function() mixer_inside:set_param_normalized(0, master_0db_norm) end)
+                pcall(function() mixer_inside:set_param_normalized(1, pan_center_norm) end)
 
-            for i = 1, 16 do
-                pcall(function() mixer_inside:set_param_normalized(1 + i, vol_0db_norm) end)
-                pcall(function() mixer_inside:set_param_normalized(17 + i, pan_center_norm) end)
+                for i = 1, 16 do
+                    pcall(function() mixer_inside:set_param_normalized(1 + i, vol_0db_norm) end)
+                    pcall(function() mixer_inside:set_param_normalized(17 + i, pan_center_norm) end)
+                end
             end
-        end
-    else
-        r.ShowConsoleMsg("SideFX: Could not add mixer JSFX. Make sure SideFX_Mixer.jsfx is installed.\n")
+        else
+            r.ShowConsoleMsg("SideFX: Could not add mixer JSFX. Make sure SideFX_Mixer.jsfx is installed.\n")
         return nil
     end
 
@@ -210,7 +229,10 @@ function M.add_rack(parent_rack, position)
 
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Rack", -1)
-        return rack
+
+        -- Re-find the rack after it's been moved (reference is stale)
+        local rack_name_pattern = "^R" .. rack_idx .. ":"
+        return find_fx_by_name_pattern(rack_name_pattern)
     else
         -- Add to track at specified position
         local rack = create_rack_container(rack_idx, position)
@@ -218,11 +240,14 @@ function M.add_rack(parent_rack, position)
             r.PreventUIRefresh(-1)
             r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
             return nil
-        end
+    end
 
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Rack", -1)
-        return rack
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Add Rack", -1)
+
+        -- Re-find the rack to ensure we have a fresh reference
+        local rack_name_pattern = "^R" .. rack_idx .. ":"
+        return find_fx_by_name_pattern(rack_name_pattern)
     end
 end
 
@@ -375,7 +400,15 @@ function M.add_chain_to_rack(rack, plugin)
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Add Chain to Rack", -1)
 
-    return chain
+    -- Re-find the chain after it's been moved (reference is stale)
+    -- Use the chain_inside if we found it, otherwise search by name pattern
+    if chain_inside then
+        return chain_inside
+    else
+        -- Fallback: search by name pattern (works for nested racks too)
+        local chain_name_pattern = "^" .. chain_name .. "$"
+        return find_fx_by_name_pattern(chain_name_pattern)
+    end
 end
 
 --- Add a nested rack as a new chain inside an existing rack.
@@ -625,6 +658,10 @@ function M.add_device_to_chain(chain, plugin)
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Add Device to Chain", -1)
 
+    -- Re-find the device after it's been moved (reference is stale)
+    if device_guid then
+        return state.track:find_fx_by_guid(device_guid)
+    end
     return device
 end
 
