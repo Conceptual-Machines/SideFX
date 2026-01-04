@@ -2427,24 +2427,35 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
     local chain_content_h = rack_h - 30  -- Leave room for header
     local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
     
-    -- Set minimum width for outer wrapper
-    local min_wrapper_width = 800
-    local device_width = 500
-    local wrapper_width = math.max(min_wrapper_width, #devices * device_width + 100)
+    -- Auto-resize wrapper to fit content (Border=1, AutoResizeX=16)
+    local wrapper_flags = 17  -- Border + AutoResizeX
+    
+    -- Add padding around content, especially on the right
+    r.ImGui_PushStyleVar(ctx.ctx, r.ImGui_StyleVar_WindowPadding(), 12, 8)
     
     ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
-    if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, wrapper_width, rack_h, imgui.ChildFlags.Border()) then
-        -- Header
-        ctx:text_colored(0xAAAAAAFF, "Chain:")
-        ctx:same_line()
-        ctx:text(chain_display_name)
-        ctx:separator()
-        
-        -- Chain contents - auto-resize to fit devices
-        ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x2A2A35FF)
-        -- ChildFlags: Border (1) + AutoResizeX (16) + AlwaysAutoResize (64) = 81
-        local chain_content_flags = 81
-        if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, chain_content_flags) then
+    if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, 0, rack_h, wrapper_flags) then
+        -- Use table layout so header width matches content width
+        local table_flags = r.ImGui_TableFlags_SizingStretchSame()
+        if r.ImGui_BeginTable(ctx.ctx, "chain_table_" .. selected_chain_guid, 1, table_flags) then
+            -- Row 1: Header
+            r.ImGui_TableNextRow(ctx.ctx)
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+            ctx:text_colored(0xAAAAAAFF, "Chain:")
+            ctx:same_line()
+            ctx:text(chain_display_name)
+            ctx:separator()
+            
+            -- Row 2: Content
+            r.ImGui_TableNextRow(ctx.ctx)
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+            
+            -- Chain contents - auto-resize to fit devices
+            -- Use same background as wrapper for seamless appearance
+            ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
+            -- ChildFlags: Border (1) + AutoResizeX (16) + AlwaysAutoResize (64) = 81
+            local chain_content_flags = 81
+            if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, chain_content_flags) then
             
             if #devices == 0 then
                 -- Empty chain - show drop zone
@@ -2541,13 +2552,17 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                 r.ImGui_EndGroup(ctx.ctx)
             end
             
-            ctx:end_child()
+                ctx:end_child()
+            end
+            ctx:pop_style_color()
+            
+            r.ImGui_EndTable(ctx.ctx)
         end
-        ctx:pop_style_color()
         
         ctx:end_child()
     end
     ctx:pop_style_color()
+    r.ImGui_PopStyleVar(ctx.ctx)
 end
 
 -- Draw the rack panel (main rack UI without chain column)
