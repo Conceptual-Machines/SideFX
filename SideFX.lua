@@ -1379,21 +1379,22 @@ local device_panel = nil  -- Lazy loaded
 local rack_panel = nil    -- Lazy loaded
 
 -- Helper to draw a drop zone for adding plugins
+-- Always reserves space to prevent scroll jumping, but only shows visual when dragging
 local function draw_drop_zone(ctx, position, is_empty, avail_height)
     local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
     local has_fx_payload = ctx:get_drag_drop_payload("FX_GUID")
+    local is_dragging = has_plugin_payload or has_fx_payload
     
-    if has_plugin_payload or has_fx_payload then
+    local zone_w = 24
+    local zone_h = math.min(avail_height - 20, 80)
+    local label = is_empty and "+ Drop here" or "+"
+    local btn_w = is_empty and 100 or zone_w
+    
+    if is_dragging then
         -- Show visible drop indicator when dragging
-        local zone_w = 24
-        local zone_h = math.min(avail_height - 20, 80)
-        
         ctx:push_style_color(r.ImGui_Col_Button(), 0x4488FF44)
         ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x66AAFF88)
         ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x88CCFFAA)
-        
-        local label = is_empty and "+ Drop here" or "+"
-        local btn_w = is_empty and 100 or zone_w
         
         ctx:button(label .. "##drop_" .. position, btn_w, zone_h)
         ctx:pop_style_color(3)
@@ -1422,9 +1423,15 @@ local function draw_drop_zone(ctx, position, is_empty, avail_height)
             
             ctx:end_drag_drop_target()
         end
-        return true  -- Drop zone was shown
+    else
+        -- Reserve space with invisible element to prevent scroll jumping
+        -- Don't show between items when not dragging (only at end)
+        if not is_empty then
+            return false  -- Don't reserve space between items when not dragging
+        end
+        r.ImGui_Dummy(ctx.ctx, btn_w, zone_h)
     end
-    return false
+    return true
 end
 
 local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
@@ -1451,11 +1458,9 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
         end
     end
     
-    -- Check if we're in a drag operation
-    local is_dragging = ctx:get_drag_drop_payload("PLUGIN_ADD") or ctx:get_drag_drop_payload("FX_GUID")
-    
     if #display_fx == 0 then
-        -- Empty chain - show prominent drop zone
+        -- Empty chain - show drop zone / placeholder
+        local is_dragging = ctx:get_drag_drop_payload("PLUGIN_ADD") or ctx:get_drag_drop_payload("FX_GUID")
         if is_dragging then
             draw_drop_zone(ctx, 0, true, avail_height)
         else
@@ -1465,12 +1470,8 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
         return
     end
     
-    -- Drop zone before first device
-    if is_dragging then
-        if draw_drop_zone(ctx, 0, false, avail_height) then
-            ctx:same_line()
-        end
-    end
+    -- Note: No drop zone before first device - drop ON the first device to insert before it
+    -- This prevents layout shifts that cause scroll jumping
     
     -- Draw each FX as a device panel, horizontally
     local display_idx = 0
@@ -1491,18 +1492,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
             ctx:text("→")
             ctx:pop_style_color()
             ctx:same_line()
-            
-            -- Drop zone between devices (only when dragging)
-            if is_dragging then
-                if draw_drop_zone(ctx, original_idx, false, avail_height) then
-                    ctx:same_line()
-                    -- Arrow after drop zone
-                    ctx:push_style_color(r.ImGui_Col_Text(), 0x555555FF)
-                    ctx:text("→")
-                    ctx:pop_style_color()
-                    ctx:same_line()
-                end
-            end
+            -- Note: Drop-on-device panels handles insertion (no between-device zones to prevent scroll jumping)
         end
         
         if is_container then
