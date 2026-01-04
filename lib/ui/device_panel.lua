@@ -201,15 +201,27 @@ end
 local function get_display_name(fx)
     if not fx then return "Unknown" end
     local ok, renamed = pcall(function() return fx:get_named_config_param("renamed_name") end)
+    local name
     if ok and renamed and renamed ~= "" then
-        return renamed
+        name = renamed
+    else
+        name = fx:get_name()
     end
-    local name = fx:get_name()
-    -- Strip common prefixes for cleaner display
+    
+    -- Strip SideFX internal prefixes for clean UI display
+    -- R1_C1: Name -> Name
+    -- D1: Name -> Name
+    -- R1: Rack -> Rack
+    name = name:gsub("^R%d+_C%d+:%s*", "")  -- R1_C1: prefix
+    name = name:gsub("^D%d+:%s*", "")        -- D1: prefix
+    name = name:gsub("^R%d+:%s*", "")        -- R1: prefix
+    
+    -- Strip common plugin format prefixes
     name = name:gsub("^VST3?: ", "")
     name = name:gsub("^AU: ", "")
     name = name:gsub("^JS: ", "")
     name = name:gsub("^CLAP: ", "")
+    
     return name
 end
 

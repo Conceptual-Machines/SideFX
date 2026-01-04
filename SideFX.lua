@@ -246,13 +246,26 @@ local function get_multi_select_count()
 end
 
 -- Get display name for FX (uses renamed_name if set, otherwise default name)
+-- Strips internal prefixes (R1_C1:, D1:, etc.) for clean UI display
 local function get_fx_display_name(fx)
     if not fx then return "Unknown" end
     local ok, renamed = pcall(function() return fx:get_named_config_param("renamed_name") end)
+    local name
     if ok and renamed and renamed ~= "" then
-        return renamed
+        name = renamed
+    else
+        name = fx:get_name()
     end
-    return fx:get_name()
+    
+    -- Strip SideFX internal prefixes for clean UI display
+    -- R1_C1: Name -> Name
+    -- D1: Name -> Name
+    -- R1: Rack -> Rack
+    name = name:gsub("^R%d+_C%d+:%s*", "")  -- R1_C1: prefix
+    name = name:gsub("^D%d+:%s*", "")        -- D1: prefix
+    name = name:gsub("^R%d+:%s*", "")        -- R1: prefix
+    
+    return name
 end
 
 -- Collapse all columns from a certain depth onwards
