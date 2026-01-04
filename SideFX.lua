@@ -458,6 +458,12 @@ local function add_chain_to_rack(rack, plugin)
     return chain
 end
 
+local function add_nested_rack_to_rack(parent_rack)
+    local nested_rack = rack_module.add_nested_rack_to_rack(parent_rack)
+    if nested_rack then refresh_fx_list() end
+    return nested_rack
+end
+
 local function add_device_to_chain(chain, plugin)
     local device = rack_module.add_device_to_chain(chain, plugin)
     if device then refresh_fx_list() end
@@ -1978,11 +1984,7 @@ local function draw_rack_panel(ctx, rack, avail_height)
                 -- Accept rack drops -> create nested rack as new chain
                 local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
                 if rack_accepted then
-                    -- For nested racks: create a chain, then add a rack inside it
-                    -- For now, we create a chain with Container as the FX
-                    local plugin = { full_name = "Container", name = "Nested Rack" }
-                    local chain = add_chain_to_rack(rack, plugin)
-                    -- TODO: Convert the chain's device into a proper rack structure
+                    add_nested_rack_to_rack(rack)
                 end
                 ctx:end_drag_drop_target()
             end
