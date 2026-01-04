@@ -54,6 +54,9 @@ local expanded_state = {}
 -- Track sidebar collapsed state per FX (by GUID)
 local sidebar_collapsed = {}
 
+-- Track panel collapsed state per FX (by GUID) - collapses the whole panel to just header
+local panel_collapsed = {}
+
 --------------------------------------------------------------------------------
 -- Custom Widgets
 --------------------------------------------------------------------------------
@@ -339,25 +342,42 @@ function M.draw(ctx, fx, opts)
     
     -- Use available height passed in opts, or default
     local avail_height = opts.avail_height or 600
-    local panel_height = avail_height
     
-    -- Calculate how many params fit per column based on available height
-    local usable_height = panel_height - cfg.header_height - cfg.padding * 2
-    local params_per_column = math.floor(usable_height / cfg.param_height)
-    params_per_column = math.max(1, params_per_column)
-    
-    -- Calculate columns needed to show visible params only
-    local num_columns = math.ceil(visible_count / params_per_column)
-    num_columns = math.max(1, num_columns)
+    -- Check if panel is collapsed (just header bar)
+    local is_panel_collapsed = panel_collapsed[guid] or false
     
     -- Check if sidebar is collapsed
     local is_sidebar_collapsed = sidebar_collapsed[guid] or false
     local collapsed_sidebar_w = 8  -- Minimal width when collapsed (button is in header)
     
-    -- Calculate panel width: columns + sidebar (if visible) + padding
-    local content_width = cfg.column_width * num_columns
-    local sidebar_w = is_sidebar_collapsed and collapsed_sidebar_w or (cfg.sidebar_width + cfg.sidebar_padding)
-    local panel_width = content_width + sidebar_w + cfg.padding * 2
+    -- Calculate dimensions based on collapsed state
+    local panel_height, panel_width, content_width, num_columns, params_per_column
+    
+    if is_panel_collapsed then
+        -- Collapsed: just header bar
+        panel_height = cfg.header_height + 4
+        panel_width = 140  -- Minimal width for collapsed panel
+        content_width = 0
+        num_columns = 0
+        params_per_column = 0
+    else
+        -- Expanded: full panel
+        panel_height = avail_height
+        
+        -- Calculate how many params fit per column based on available height
+        local usable_height = panel_height - cfg.header_height - cfg.padding * 2
+        params_per_column = math.floor(usable_height / cfg.param_height)
+        params_per_column = math.max(1, params_per_column)
+        
+        -- Calculate columns needed to show visible params only
+        num_columns = math.ceil(visible_count / params_per_column)
+        num_columns = math.max(1, num_columns)
+        
+        -- Calculate panel width: columns + sidebar (if visible) + padding
+        content_width = cfg.column_width * num_columns
+        local sidebar_w = is_sidebar_collapsed and collapsed_sidebar_w or (cfg.sidebar_width + cfg.sidebar_padding)
+        panel_width = content_width + sidebar_w + cfg.padding * 2
+    end
     
     local interacted = false
     
@@ -389,13 +409,22 @@ function M.draw(ctx, fx, opts)
             
             r.ImGui_TableNextRow(ctx.ctx)
             
-            -- Drag handle
+            -- Drag handle / collapse toggle
             r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+            local is_panel_collapsed = panel_collapsed[guid] or false
             ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
             ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
             ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
-            ctx:button("≡##drag", 20, 20)
+            local collapse_icon = is_panel_collapsed and "▶" or "≡"
+            if ctx:button(collapse_icon .. "##drag", 20, 20) then
+                -- Toggle panel collapse on click
+                panel_collapsed[guid] = not is_panel_collapsed
+                interacted = true
+            end
             ctx:pop_style_color(3)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip(is_panel_collapsed and "Expand panel" or "Collapse panel (drag to reorder)")
+            end
             
             if ctx:begin_drag_drop_source() then
                 ctx:set_drag_drop_payload("FX_GUID", guid)
@@ -451,28 +480,37 @@ function M.draw(ctx, fx, opts)
             end
             ctx:pop_style_color(2)
             
-            -- Sidebar collapse/expand button (rightmost)
+            -- Sidebar collapse/expand button (rightmost) - only show when panel is expanded
             r.ImGui_TableSetColumnIndex(ctx.ctx, 3)
-            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
-            if is_sidebar_collapsed then
-                if ctx:small_button("▶") then
-                    sidebar_collapsed[guid] = false
+            if not is_panel_collapsed then
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+                if is_sidebar_collapsed then
+                    if ctx:small_button("▶") then
+                        sidebar_collapsed[guid] = false
+                    end
+                    if r.ImGui_IsItemHovered(ctx.ctx) then
+                        ctx:set_tooltip("Expand sidebar")
+                    end
+                else
+                    if ctx:small_button("◀") then
+                        sidebar_collapsed[guid] = true
+                    end
+                    if r.ImGui_IsItemHovered(ctx.ctx) then
+                        ctx:set_tooltip("Collapse sidebar")
+                    end
                 end
-                if r.ImGui_IsItemHovered(ctx.ctx) then
-                    ctx:set_tooltip("Expand sidebar")
-                end
-            else
-                if ctx:small_button("◀") then
-                    sidebar_collapsed[guid] = true
-                end
-                if r.ImGui_IsItemHovered(ctx.ctx) then
-                    ctx:set_tooltip("Collapse sidebar")
-                end
+                ctx:pop_style_color(2)
             end
-            ctx:pop_style_color(2)
             
             r.ImGui_EndTable(ctx.ctx)
+        end
+        
+        -- Skip content when panel is collapsed
+        if is_panel_collapsed then
+            ctx:end_child()  -- end panel
+            ctx:pop_id()
+            return interacted
         end
         
         ctx:separator()
@@ -974,6 +1012,37 @@ end
 --- Expand all sidebars
 function M.expand_all_sidebars()
     sidebar_collapsed = {}
+end
+
+--- Reset all panel collapsed states.
+function M.reset_panel_collapsed()
+    panel_collapsed = {}
+end
+
+--- Set panel collapsed state for a specific FX.
+-- @param guid string FX GUID
+-- @param collapsed boolean
+function M.set_panel_collapsed(guid, collapsed)
+    panel_collapsed[guid] = collapsed
+end
+
+--- Get panel collapsed state for a specific FX.
+-- @param guid string FX GUID
+-- @return boolean
+function M.is_panel_collapsed(guid)
+    return panel_collapsed[guid] or false
+end
+
+--- Collapse all panels
+function M.collapse_all_panels()
+    for guid, _ in pairs(expanded_state) do
+        panel_collapsed[guid] = true
+    end
+end
+
+--- Expand all panels
+function M.expand_all_panels()
+    panel_collapsed = {}
 end
 
 return M
