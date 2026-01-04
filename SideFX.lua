@@ -1,9 +1,8 @@
 -- @description SideFX - Smart FX Container Manager
 -- @author Nomad Monad
--- @version 0.5.0
+-- @version 0.4.1
 -- @provides
 --   [nomain] lib/*.lua
---   [nomain] jsfx/SideFX_Modulator.jsfx
 -- @link https://github.com/Conceptual-Machines/SideFX
 -- @about
 --   # SideFX
@@ -12,11 +11,6 @@
 --   Ableton/Bitwig-inspired UI for FX chains.
 --
 -- @changelog
---   v0.5.0 - JSFX Modulator Integration
---     + Added SideFX_Modulator JSFX with custom curve editor
---     + Modulator panel in sidebar to add/manage JSFX modulators
---     + Serum/ShaperBox-style multi-point Bezier curve editor
---     + Use REAPER's parameter modulation to link modulator output
 --   v0.4.1 - UI fixes
 --     + Horizontal scrolling for nested columns
 --     + Fixed container toggle behavior
@@ -134,6 +128,11 @@ local state = {
         filtered = {},
         scanned = false,
     },
+    
+    -- Modulator state
+    modulators = {},  -- List of {fx_idx, links = {{target_fx_idx, param_idx}, ...}}
+    mod_link_selecting = nil,  -- {mod_idx, selecting = true} when choosing target
+    
 }
 
 -- Create dynamic REAPER theme (reads actual theme colors)
@@ -916,93 +915,275 @@ local function draw_fx_detail_column(ctx, width)
 end
 
 --------------------------------------------------------------------------------
--- UI: Modulator Panel
+-- Modulators
 --------------------------------------------------------------------------------
 
-local JSFX_NAME = "SideFX_Modulator"
+local MODULATOR_JSFX = "SideFX_Modulator"
 
-local function find_modulators_on_track(track)
-    if not track then return {} end
+local function find_modulators_on_track()
+    if not state.track then return {} end
     local modulators = {}
-    local fx_count = track:get_fx_count()
-    for i = 0, fx_count - 1 do
-        local name = r.TrackFX_GetFXName(track.pointer, i, "")
-        if name and (name:find(JSFX_NAME) or name:find("SideFX Modulator")) then
+    for fx in state.track:iter_track_fx_chain() do
+        local name = fx:get_name()
+        if name and (name:find(MODULATOR_JSFX) or name:find("SideFX Modulator")) then
             table.insert(modulators, {
-                index = i,
-                name = name,
+                fx = fx,
+                fx_idx = fx.pointer,
+                name = "LFO " .. (#modulators + 1),
             })
         end
     end
     return modulators
 end
 
-local function add_modulator_to_track(track)
-    if not track then return end
+local function add_modulator()
+    if not state.track then return end
     r.Undo_BeginBlock()
-    local fx_idx = r.TrackFX_AddByName(track.pointer, JSFX_NAME, false, -1)
-    if fx_idx >= 0 then
-        r.TrackFX_Show(track.pointer, fx_idx, 3)  -- Show floating window
-    end
+    -- Add at position 0 (before instruments)
+    local fx = state.track:add_fx_by_name(MODULATOR_JSFX, false, -1000)  -- -1000 = position 0
     r.Undo_EndBlock("Add SideFX Modulator", -1)
+    refresh_fx_list()
 end
 
-local function delete_modulator(track, fx_idx)
-    if not track then return end
+local function delete_modulator(fx_idx)
+    if not state.track then return end
     r.Undo_BeginBlock()
-    r.TrackFX_Delete(track.pointer, fx_idx)
+    r.TrackFX_Delete(state.track.pointer, fx_idx)
     r.Undo_EndBlock("Delete SideFX Modulator", -1)
+    refresh_fx_list()
 end
 
-local function show_modulator_ui(track, fx_idx)
-    if not track then return end
-    r.TrackFX_Show(track.pointer, fx_idx, 3)  -- Show floating window
+local function get_linkable_fx()
+    -- Get list of FX that can be modulated (exclude modulators)
+    if not state.track then return {} end
+    local linkable = {}
+    for fx in state.track:iter_track_fx_chain() do
+        local name = fx:get_name()
+        if name and not name:find(MODULATOR_JSFX) and not name:find("SideFX Modulator") then
+            local params = {}
+            local param_count = fx:get_num_params()
+            for p = 0, param_count - 1 do
+                local pname = fx:get_param_name(p)
+                table.insert(params, {idx = p, name = pname})
+            end
+            table.insert(linkable, {fx = fx, fx_idx = fx.pointer, name = name, params = params})
+        end
+    end
+    return linkable
 end
 
-local function draw_modulator_panel(ctx)
+local function create_param_link(mod_fx_idx, target_fx_idx, target_param_idx)
+    -- Create parameter modulation link using REAPER API
+    -- The modulator output is slider4 (param index 3, 0-indexed)
+    if not state.track then return false end
+    
+    local MOD_OUTPUT_PARAM = 3  -- slider4 in JSFX
+    
+    -- Use TrackFX_SetNamedConfigParm to set up parameter modulation
+    -- Format: "param.X.plink.active", "param.X.plink.effect", "param.X.plink.param"
+    local plink_prefix = string.format("param.%d.plink.", target_param_idx)
+    
+    -- Enable parameter link
+    r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "active", "1")
+    -- Set source effect (modulator)
+    r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "effect", tostring(mod_fx_idx))
+    -- Set source parameter (modulator output)
+    r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "param", tostring(MOD_OUTPUT_PARAM))
+    
+    return true
+end
+
+local function remove_param_link(target_fx_idx, target_param_idx)
+    if not state.track then return end
+    local plink_prefix = string.format("param.%d.plink.", target_param_idx)
+    r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "active", "0")
+end
+
+local function get_modulator_links(mod_fx_idx)
+    -- Find all parameters linked to this modulator
+    if not state.track then return {} end
+    local links = {}
+    local MOD_OUTPUT_PARAM = 3
+    
+    for fx in state.track:iter_track_fx_chain() do
+        local fx_name = fx:get_name()
+        local fx_idx = fx.pointer
+        -- Skip modulators themselves
+        if fx_name and not (fx_name:find(MODULATOR_JSFX) or fx_name:find("SideFX Modulator")) then
+            local param_count = fx:get_num_params()
+            for param_idx = 0, param_count - 1 do
+                local plink_prefix = string.format("param.%d.plink.", param_idx)
+                local rv, active = r.TrackFX_GetNamedConfigParm(state.track.pointer, fx_idx, plink_prefix .. "active")
+                if rv and active == "1" then
+                    local _, effect = r.TrackFX_GetNamedConfigParm(state.track.pointer, fx_idx, plink_prefix .. "effect")
+                    local _, param = r.TrackFX_GetNamedConfigParm(state.track.pointer, fx_idx, plink_prefix .. "param")
+                    if tonumber(effect) == mod_fx_idx and tonumber(param) == MOD_OUTPUT_PARAM then
+                        local param_name = fx:get_param_name(param_idx)
+                        table.insert(links, {
+                            target_fx_idx = fx_idx,
+                            target_fx_name = fx_name,
+                            target_param_idx = param_idx,
+                            target_param_name = param_name,
+                        })
+                    end
+                end
+            end
+        end
+    end
+    return links
+end
+
+--------------------------------------------------------------------------------
+-- Presets
+--------------------------------------------------------------------------------
+
+local presets_folder = script_path .. "presets/"
+
+local function ensure_presets_folder()
+    r.RecursiveCreateDirectory(presets_folder, 0)
+    r.RecursiveCreateDirectory(presets_folder .. "chains/", 0)
+end
+
+local function save_chain_preset(preset_name)
+    -- Save the full FX chain with modulator links
+    if not state.track or not preset_name or preset_name == "" then return false end
+    
+    ensure_presets_folder()
+    
+    -- Use REAPER's native FX chain preset system
+    local path = presets_folder .. "chains/" .. preset_name .. ".RfxChain"
+    r.TrackFX_SavePresetBank(state.track.pointer, path)
+    return true
+end
+
+local function load_chain_preset(preset_name)
+    if not state.track or not preset_name then return false end
+    
+    local path = presets_folder .. "chains/" .. preset_name .. ".RfxChain"
+    r.Undo_BeginBlock()
+    -- Clear existing FX using ReaWrap
+    while state.track:get_track_fx_count() > 0 do
+        local fx = state.track:get_track_fx(0)
+        fx:delete()
+    end
+    -- Load chain
+    state.track:add_by_name(path, false, -1)
+    r.Undo_EndBlock("Load FX Chain Preset", -1)
+    refresh_fx_list()
+    return true
+end
+
+local function is_modulator_fx(fx)
+    if not fx then return false end
+    local name = fx:get_name()
+    return name and (name:find(MODULATOR_JSFX) or name:find("SideFX Modulator"))
+end
+
+local function draw_modulator_column(ctx, width)
+    if ctx:begin_child("Modulators", width, 0, imgui.ChildFlags.Border()) then
     ctx:text("Modulators")
     ctx:same_line()
     if ctx:small_button("+ Add") then
-        add_modulator_to_track(state.track)
+            add_modulator()
     end
     ctx:separator()
     
     if not state.track then
         ctx:text_colored(0x888888FF, "Select a track")
+            ctx:end_child()
         return
     end
     
-    local modulators = find_modulators_on_track(state.track)
+        local modulators = find_modulators_on_track()
     
     if #modulators == 0 then
         ctx:text_colored(0x888888FF, "No modulators")
-        ctx:text_colored(0x888888FF, "Click '+ Add'")
+            ctx:text_colored(0x666666FF, "Click '+ Add'")
     else
+            local linkable_fx = get_linkable_fx()
+            
         for i, mod in ipairs(modulators) do
-            ctx:push_id("mod_" .. mod.index)
-            
-            -- Modulator label
-            ctx:text("LFO " .. i)
-            ctx:same_line()
-            
-            -- UI button
-            if ctx:small_button("UI") then
-                show_modulator_ui(state.track, mod.index)
-            end
-            ctx:same_line()
-            
-            -- Delete button
-            ctx:push_style_color(r.ImGui_Col_Button(), 0xAA3333FF)
-            if ctx:small_button("X") then
-                delete_modulator(state.track, mod.index)
+                ctx:push_id("mod_" .. mod.fx_idx)
+                
+                -- Header row: buttons first, then name
+                -- Show UI button
+                if ctx:small_button("UI##ui_" .. mod.fx_idx) then
+                    mod.fx:show(3)
+                end
+                ctx:same_line()
+                
+                -- Delete button
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x993333FF)
+                if ctx:small_button("X##del_" .. mod.fx_idx) then
+                    ctx:pop_style_color()
+                    ctx:pop_id()
+                    delete_modulator(mod.fx_idx)
+                    ctx:end_child()
+                    return
+                end
                 ctx:pop_style_color()
-                ctx:pop_id()
-                return  -- Exit since list changed
+                ctx:same_line()
+                
+                -- Modulator name as collapsing header
+                ctx:push_style_color(r.ImGui_Col_Header(), 0x445566FF)
+                ctx:push_style_color(r.ImGui_Col_HeaderHovered(), 0x556677FF)
+                local header_open = ctx:collapsing_header(mod.name, r.ImGui_TreeNodeFlags_DefaultOpen())
+                ctx:pop_style_color(2)
+                
+                if header_open then
+                    -- Show existing links
+                    local links = get_modulator_links(mod.fx_idx)
+                    if #links > 0 then
+                        ctx:text_colored(0xAAAAAAFF, "Links:")
+                        for _, link in ipairs(links) do
+                            ctx:push_id("link_" .. link.target_fx_idx .. "_" .. link.target_param_idx)
+                            
+                            -- Truncate names to fit
+                            local fx_short = link.target_fx_name:sub(1, 15)
+                            local param_short = link.target_param_name:sub(1, 12)
+                            
+                            ctx:text_colored(0x88CC88FF, "→")
+                            ctx:same_line()
+                            ctx:text_wrapped(fx_short .. " : " .. param_short)
+                            ctx:same_line(width - 30)
+                            
+                            -- Remove link button
+                            ctx:push_style_color(r.ImGui_Col_Button(), 0x664444FF)
+                            if ctx:small_button("×") then
+                                remove_param_link(link.target_fx_idx, link.target_param_idx)
             end
             ctx:pop_style_color()
             
             ctx:pop_id()
         end
+                        ctx:spacing()
+                    end
+                    
+                    -- Dropdown to add new link
+                    ctx:text_colored(0xAAAAAAFF, "+ Add link:")
+                    ctx:set_next_item_width(width - 20)
+                    if r.ImGui_BeginCombo(ctx.ctx, "##target_" .. i, "Select...") then
+                        for _, fx in ipairs(linkable_fx) do
+                            if ctx:tree_node(fx.name .. "##fx_" .. fx.fx_idx) then
+                                for _, param in ipairs(fx.params) do
+                                    if r.ImGui_Selectable(ctx.ctx, param.name .. "##p_" .. param.idx) then
+                                        create_param_link(mod.fx_idx, fx.fx_idx, param.idx)
+                                    end
+                                end
+                                ctx:tree_pop()
+                            end
+                        end
+                        r.ImGui_EndCombo(ctx.ctx)
+                    end
+                end
+                
+                ctx:spacing()
+                ctx:separator()
+                ctx:pop_id()
+            end
+        end
+        
+        ctx:end_child()
     end
 end
 
@@ -1142,6 +1323,7 @@ local function main()
             -- Column widths
             local col_w = 280
             local browser_w = 260
+            local modulator_w = 220
 
             -- Detail column width depends on param count
             local detail_w = 220
@@ -1155,40 +1337,31 @@ local function main()
                 end
             end
 
-            -- Left panel: Browser + Modulators
-            if ctx:begin_child("LeftPanel", browser_w, 0, imgui.ChildFlags.None()) then
-                
-                -- Plugin Browser (top portion)
-                local avail_h = ctx:get_content_region_avail_y()
-                local modulator_h = 150  -- Fixed height for modulator panel
-                local browser_h = avail_h - modulator_h - 10  -- Leave some padding
-                
-                if ctx:begin_child("Browser", 0, browser_h, imgui.ChildFlags.Border()) then
+            -- Plugin Browser (fixed left)
+            if ctx:begin_child("Browser", browser_w, 0, imgui.ChildFlags.Border()) then
                     ctx:text("Plugins")
                     ctx:separator()
                     draw_plugin_browser(ctx)
-                    ctx:end_child()
-                end
-                
-                ctx:spacing()
-                
-                -- Modulator Panel (bottom portion)
-                if ctx:begin_child("Modulators", 0, modulator_h, imgui.ChildFlags.Border()) then
-                    draw_modulator_panel(ctx)
-                    ctx:end_child()
-                end
-                
                 ctx:end_child()
             end
 
             ctx:same_line()
 
             -- Scrollable columns area for FX chain + containers
+            local _, avail_h = r.ImGui_GetContentRegionAvail(ctx.ctx)
             local flags = r.ImGui_WindowFlags_AlwaysHorizontalScrollbar()
-            if ctx:begin_child("ColumnsArea", 0, 0, imgui.ChildFlags.None(), flags) then
+            if ctx:begin_child("ColumnsArea", -modulator_w - 10, 0, imgui.ChildFlags.None(), flags) then
+
+                -- Filter out modulators from top_level_fx
+                local filtered_fx = {}
+                for _, fx in ipairs(state.top_level_fx) do
+                    if not is_modulator_fx(fx) then
+                        table.insert(filtered_fx, fx)
+                    end
+                end
 
                 -- Column 1: Top-level FX chain (no parent container)
-                draw_fx_list_column(ctx, state.top_level_fx, "FX Chain", 1, col_w, nil)
+                draw_fx_list_column(ctx, filtered_fx, "FX Chain", 1, col_w, nil)
 
                 -- Additional columns for each expanded container
                 for depth, container_guid in ipairs(state.expanded_path) do
@@ -1200,14 +1373,22 @@ local function main()
                     draw_fx_list_column(ctx, children, title, depth + 1, col_w, container_guid)
                 end
 
-                -- Detail column (if FX selected)
+                -- Detail column (if FX selected and not a modulator)
                 if state.selected_fx then
+                    local sel_fx = state.track and state.track:find_fx_by_guid(state.selected_fx)
+                    if sel_fx and not is_modulator_fx(sel_fx) then
                     ctx:same_line()
                     draw_fx_detail_column(ctx, detail_w)
+                    end
                 end
 
                 ctx:end_child()
             end
+            
+            ctx:same_line()
+            
+            -- Modulator column (fixed right)
+            draw_modulator_column(ctx, modulator_w)
 
             reaper_theme:unapply(ctx)
             

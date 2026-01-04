@@ -316,10 +316,17 @@ while (midirecv(offset, msg1, msg2, msg3)) (
     status = msg1 & 0xF0;
     note = msg2;
     velocity = msg3;
+    // Note on
     status == 0x90 && velocity > 0 ? (
       (midi_note == 0 || note == midi_note) ? (
         triggered = 1;
         lfo_phase = 0;
+      );
+    );
+    // Note off (0x80 or 0x90 with velocity 0)
+    (status == 0x80 || (status == 0x90 && velocity == 0)) ? (
+      (midi_note == 0 || note == midi_note) ? (
+        triggered = 0;
       );
     );
   );
@@ -331,7 +338,7 @@ trigger_mode = slider20;
 
 trigger_mode == 0 ? ( env_value = 1; );
 trigger_mode == 1 ? ( triggered ? env_value = 1 : env_value = env_value * release_coeff; );
-trigger_mode == 2 ? ( triggered ? env_value = 1; );
+trigger_mode == 2 ? ( triggered ? env_value = 1 : env_value = env_value * release_coeff; );
 trigger_mode == 3 ? (
   input_level = max(abs(spl0), abs(spl1));
   input_level > slider23 ? (
@@ -357,8 +364,11 @@ slider1 == 1 ? (
   rate = current_tempo / 60 / beats;
 ) : ( rate = slider2; );
 
-lfo_phase += rate / srate;
-lfo_phase >= 1 ? lfo_phase -= 1;
+// Only advance LFO in Free mode OR when triggered in other modes
+trigger_mode == 0 || triggered ? (
+  lfo_phase += rate / srate;
+  lfo_phase >= 1 ? lfo_phase -= 1;
+);
 
 phase = lfo_phase + slider5;
 phase >= 1 ? phase -= 1;
@@ -463,9 +473,9 @@ left_click ? (
     new_x = max(0.001, min(0.999, norm_mx));
     new_y = max(0, min(1, norm_my));
     
-    // Shift = Y-only, Ctrl = X-only
-    shift_held ? new_x = drag_start_x;
-    ctrl_held ? new_y = drag_start_y;
+    // Shift = Y-only (lock X), Ctrl = X-only (lock Y)
+    shift_held ? ( new_x = drag_start_x; );
+    ctrl_held ? ( new_y = drag_start_y; );
     
     // Snap to grid (slider27=On, unless Alt held)
     slider27 == 1 && !alt_held && grid_div > 0 ? (
@@ -474,8 +484,8 @@ left_click ? (
     );
     
     // Lock endpoints
-    drag_start_x < 0.01 ? new_x = 0;
-    drag_start_x > 0.99 ? new_x = 1;
+    drag_start_x < 0.01 ? ( new_x = 0; );
+    drag_start_x > 0.99 ? ( new_x = 1; );
     
     set_x(drag_node, new_x);
     set_y(drag_node, new_y);
@@ -538,4 +548,4 @@ gfx_drawstr(sprintf(#, "%s | Pts: %d", #tm, slider30));
 
 gfx_x = curve_x; gfx_y += 18;
 gfx_set(0.45, 0.45, 0.45, 1);
-gfx_drawstr("LMB: add/drag | RMB: delete | Shift: Y-only | Ctrl: X-only | Alt: no snap");
+gfx_drawstr("LMB: add/drag | RMB: delete | Shift: Y-only | Cmd/Ctrl: X-only | Alt: no snap");
