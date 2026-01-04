@@ -11,29 +11,48 @@ This is **SideFX v1.0** - a product NOT YET RELEASED. We are building an Ableton
 ### 1. Core UI Framework
 - **Horizontal device chain layout** with device panels displaying FX
 - **Device panel component** (`lib/ui/device_panel.lua`) with:
-  - Header with drag handle, name, close button
-  - Parameters displayed in columns (configurable)
-  - Expand/collapse functionality for parameters
-  - **Sidebar** with utility controls
+  - Header using **4-column table** layout (drag | name | close | collapse)
+  - Parameters displayed in columns (auto-calculated based on visible params)
+  - **Sidebar** with utility controls, separated by vertical line
+  - Collapse/expand button in header (rightmost position)
 
-### 2. Sidebar Controls (Right Panel)
+### 2. Header Layout (Table-Based)
+The header uses a proper ImGui table for alignment:
+
+| Column | Content | Width |
+|--------|---------|-------|
+| 0 | Drag handle (≡) | Fixed 24px |
+| 1 | Device name | **Stretch** (fills space) |
+| 2 | Close button (×) | Fixed 20px |
+| 3 | Collapse button (◀/▶) | Fixed 20px |
+
+- `▶` when collapsed (click to expand)
+- `◀` when expanded (click to collapse)
+
+### 3. Sidebar Controls (Right Panel)
 The sidebar provides per-FX controls:
 
-| Control | Type | Description |
-|---------|------|-------------|
-| UI | Button | Opens native FX UI |
-| ON/OFF | Button | Bypasses FX |
-| Wet | Knob (0-100%) | Wet/dry mix, default 100% |
-| Delta | Button (∆/—) | REAPER's delta solo |
-| Gain | Vertical Fader (-24 to +24 dB) | Volume from utility JSFX |
-| Pan | Slider (-1 to +1) | Pan from utility JSFX |
-| Phase L/R | Two buttons (ØL, ØR) | Phase invert per channel |
+| Control | Type | Width | Description |
+|---------|------|-------|-------------|
+| UI | Button | 70px | Opens native FX UI |
+| ON/OFF | Button | 70px | Bypasses FX |
+| Wet | Knob (48px) | centered | Wet/dry mix, 0-100% |
+| Delta | Button (36px) | centered | REAPER's delta solo (∆/—) |
+| Gain | Vertical Fader | 28×70px | Volume from utility JSFX |
+| Pan | Slider | 70px | Pan from utility JSFX |
+| Phase L/R | Two buttons | 28px each | Phase invert per channel |
 
-- Sidebar is **collapsible** (◀/▶ button in fixed header)
-- All controls are **centered** in the sidebar
+- Sidebar separated from params by **vertical line** (`BordersInnerV`)
+- All controls are **centered** using `center_item()` helper
+- Sidebar width: 120px expanded, 8px collapsed
 - Uses `pcall` for robust error handling when FX is deleted
 
-### 3. SideFX Utility JSFX
+### 4. Parameter Filtering
+- **Wet, Delta, Bypass** params are hidden from main display (shown in sidebar)
+- Pre-filtered `visible_params` array built at start
+- Layout calculated from `visible_count` (no empty gaps)
+
+### 5. SideFX Utility JSFX
 Created `jsfx/SideFX_Utility.jsfx`:
 - Gain (dB), Pan, Phase L, Phase R controls
 - Level metering
@@ -45,7 +64,7 @@ ln -sf ".../SideFX/jsfx/SideFX_Utility.jsfx" ".../reaper-portable/Effects/SideFX
 ln -sf ".../SideFX/jsfx/SideFX_Modulator.jsfx" ".../reaper-portable/Effects/SideFX/"
 ```
 
-### 4. Parameter Detection
+### 6. Parameter Detection
 Smart detection for switch vs continuous parameters:
 1. Uses `TrackFX_GetParameterStepSizes` API (`istoggle` flag)
 2. Checks if `(max - min) / step ≈ 1` (2-state)
@@ -57,22 +76,21 @@ Smart detection for switch vs continuous parameters:
 
 ```lua
 M.config = {
-    column_width = 180,
+    column_width = 180,        -- Width per parameter column
     header_height = 32,
-    param_height = 38,
-    sidebar_width = 120,
-    sidebar_padding = 12,
-    fader_width = 28,
-    fader_height = 100,
-    knob_size = 48,
-    btn_h = 22,
-    delta_btn_w = 36,
-    phase_btn_w = 24,
-    collapse_btn_w = 14,
-    collapse_btn_h = 14,
-    padding = 8,
+    param_height = 38,         -- Height per param row
+    sidebar_width = 120,       -- Width for sidebar (expanded)
+    sidebar_padding = 12,      -- Extra padding
+    padding = 8,               -- General padding
     border_radius = 6,
+    fader_width = 28,          -- Gain fader width
+    fader_height = 70,         -- Gain fader height
+    knob_size = 48,            -- Wet knob diameter
 }
+
+-- Button widths in sidebar
+btn_w = 70                     -- UI, ON/OFF, Pan slider width
+btn_h = 22                     -- Button height
 ```
 
 ---
@@ -91,9 +109,11 @@ M.config = {
 
 ## Important Technical Notes
 
-### ImGui/ReaImGui Specifics
-- `ctx:begin_child(id, w, h, child_flags, window_flags)` - flags must be **numbers**, not booleans!
-  - Use `0` for no flags, `imgui.ChildFlags.Border()` for border
+### ImGui/ReaImGui Layout Patterns
+- **Right-align elements**: Use a table with stretch column, NOT `same_line()` hacks
+- **Vertical separator**: Use `ImGui_TableFlags_BordersInnerV()` on table
+- **Centering**: Calculate offset with `(container_w - item_w) / 2`, use `SetCursorPosX`
+- `ctx:begin_child(id, w, h, child_flags, window_flags)` - flags must be **numbers**, not booleans
 - Wrap FX parameter access in `pcall` - FX can be deleted mid-frame
 - Custom widgets: `draw_knob()` and `draw_fader()` in device_panel.lua
 
@@ -143,6 +163,8 @@ M.config = {
 | JSFX not loading | Use `JS:Folder/Name` format |
 | Wet/Gain stuck at 0 | Use `get_param_normalized` not `get_param` |
 | All params detected as switch | Check `istoggle` flag, then step calc |
+| Right-align not working | Use table with stretch column, not `same_line()` |
+| Empty gaps in param grid | Pre-filter visible_params, use visible_count for layout |
 
 ---
 
@@ -152,6 +174,10 @@ M.config = {
 - Sidebar controls should be **centered**
 - Delta is a **button** not slider
 - Phase needs **separate L/R buttons**
+- Collapse button in **header, rightmost** position
+- **Vertical separator** between params and sidebar
+- UI/ON/Pan controls should be **narrower** (70px)
+- Gain fader should be **shorter** (70px height)
 - No donation/paywall features for now
 - This is v1.0, NOT v2.0
 
@@ -162,11 +188,23 @@ M.config = {
 2. Run SideFX.lua script
 3. Add FX to track - utility should auto-insert
 4. Sidebar controls should appear for each FX
-5. Test collapse/expand, knob/fader interactions
+5. Test collapse/expand button in header
+6. Verify Wet/Delta/Bypass NOT shown in param area (only in sidebar)
+7. Resize window - no empty gaps should appear
+
+---
+
+## Recent Changes (This Session)
+1. Simplified layout from nested child windows to **table-based**
+2. Header now uses 4-column table for proper right-alignment
+3. Collapse button moved to header (rightmost)
+4. Added vertical separator between params and sidebar
+5. Narrowed UI/ON buttons and Pan slider (70px)
+6. Shortened Gain fader (70px)
+7. Pre-filter visible params to eliminate layout gaps
 
 ---
 
 ## Reference Documentation
 - See `IMPLEMENTATION_PLAN.md` for full architecture
 - ReaWrap library at `../ReaWrap/lua/`
-
