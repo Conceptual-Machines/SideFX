@@ -335,7 +335,7 @@ function M.draw(ctx, fx, opts)
     
     -- Check if sidebar is collapsed
     local is_sidebar_collapsed = sidebar_collapsed[guid] or false
-    local collapsed_sidebar_w = 36  -- Width when collapsed (button + padding from scrollbar)
+    local collapsed_sidebar_w = 8  -- Minimal width when collapsed (button is in header)
     
     -- Calculate panel width: columns + sidebar (if visible) + padding
     local content_width = cfg.column_width * num_columns
@@ -363,64 +363,95 @@ function M.draw(ctx, fx, opts)
     -- Begin child for panel content
     if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0) then
         
-        -- Header row: drag handle, name, close button
-        -- Drag handle as a button (needed for drag/drop source)
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
-        ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
-        ctx:button("≡##drag", 20, 20)
-        ctx:pop_style_color(3)
-        
-        -- Make drag handle draggable
-        if ctx:begin_drag_drop_source() then
-            ctx:set_drag_drop_payload("FX_GUID", guid)
-            ctx:text("Moving: " .. truncate(name, 20))
-            ctx:end_drag_drop_source()
-        end
-        
-        -- Drop target on drag handle
-        if ctx:begin_drag_drop_target() then
-            local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
-            if accepted and payload and payload ~= guid then
-                if opts.on_drop then
-                    opts.on_drop(payload, guid)
+        -- Header row using table for proper alignment
+        if r.ImGui_BeginTable(ctx.ctx, "header_" .. guid, 4, 0) then
+            r.ImGui_TableSetupColumn(ctx.ctx, "drag", r.ImGui_TableColumnFlags_WidthFixed(), 24)
+            r.ImGui_TableSetupColumn(ctx.ctx, "name", r.ImGui_TableColumnFlags_WidthStretch())
+            r.ImGui_TableSetupColumn(ctx.ctx, "close", r.ImGui_TableColumnFlags_WidthFixed(), 20)
+            r.ImGui_TableSetupColumn(ctx.ctx, "collapse", r.ImGui_TableColumnFlags_WidthFixed(), 20)
+            
+            r.ImGui_TableNextRow(ctx.ctx)
+            
+            -- Drag handle
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+            ctx:button("≡##drag", 20, 20)
+            ctx:pop_style_color(3)
+            
+            if ctx:begin_drag_drop_source() then
+                ctx:set_drag_drop_payload("FX_GUID", guid)
+                ctx:text("Moving: " .. truncate(name, 20))
+                ctx:end_drag_drop_source()
+            end
+            
+            if ctx:begin_drag_drop_target() then
+                local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
+                if accepted and payload and payload ~= guid then
+                    if opts.on_drop then
+                        opts.on_drop(payload, guid)
+                    end
+                    interacted = true
+                end
+                ctx:end_drag_drop_target()
+            end
+            
+            -- Device name
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+            local max_name_len = math.floor(content_width / 7)
+            local display_name = truncate(name, max_name_len)
+            if not enabled then
+                ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
+            end
+            ctx:text(display_name)
+            if not enabled then
+                ctx:pop_style_color()
+            end
+            
+            -- Close button
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x663333FF)
+            if ctx:small_button("×") then
+                if opts.on_delete then
+                    opts.on_delete(fx)
+                else
+                    fx:delete()
                 end
                 interacted = true
             end
-            ctx:end_drag_drop_target()
-        end
-        
-        -- Device name
-        ctx:same_line()
-        local max_name_len = math.floor(content_width / 7)
-        local display_name = truncate(name, max_name_len)
-        if not enabled then
-            ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
-        end
-        ctx:text(display_name)
-        if not enabled then
-            ctx:pop_style_color()
-        end
-        
-        -- Close button (in header, before sidebar)
-        ctx:same_line(content_width - 8)
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x663333FF)
-        if ctx:small_button("×") then
-            if opts.on_delete then
-                opts.on_delete(fx)
+            ctx:pop_style_color(2)
+            
+            -- Sidebar collapse/expand button (rightmost)
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 3)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+            if is_sidebar_collapsed then
+                if ctx:small_button("▶") then
+                    sidebar_collapsed[guid] = false
+                end
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Expand sidebar")
+                end
             else
-                fx:delete()
+                if ctx:small_button("◀") then
+                    sidebar_collapsed[guid] = true
+                end
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Collapse sidebar")
+                end
             end
-            interacted = true
+            ctx:pop_style_color(2)
+            
+            r.ImGui_EndTable(ctx.ctx)
         end
-        ctx:pop_style_color(2)
         
         ctx:separator()
         
         -- Main content area: use a table for params (left) + sidebar (right)
         local content_h = panel_height - cfg.header_height - 10
-        local sidebar_actual_w = is_sidebar_collapsed and 36 or cfg.sidebar_width
+        local sidebar_actual_w = is_sidebar_collapsed and 8 or cfg.sidebar_width
         local btn_h = 22
         
         if r.ImGui_BeginTable(ctx.ctx, "device_layout_" .. guid, 2, 0) then
@@ -518,43 +549,12 @@ function M.draw(ctx, fx, opts)
                 end
             end
             
-            -- Helper to right-align an item
-            local function right_align(item_w)
-                local offset = sidebar_w - item_w - cfg.padding
-                if offset > 0 then
-                    r.ImGui_SetCursorPosX(ctx.ctx, col_start_x + offset)
-                end
-            end
-            
             if is_sidebar_collapsed then
-                -- Collapsed: expand button with padding from scrollbar
-                center_item(16)
-                ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
-                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x555555FF)
-                if ctx:button("▶##expand_" .. guid, 16, content_h) then
-                    sidebar_collapsed[guid] = false
-                end
-                ctx:pop_style_color(2)
-                if r.ImGui_IsItemHovered(ctx.ctx) then
-                    ctx:set_tooltip("Expand sidebar")
-                end
+                -- Collapsed: just empty space (expand button is in header)
+                -- Nothing to render
             else
                 -- Expanded sidebar
                 local ctrl_w = cfg.sidebar_width - cfg.padding * 2
-                
-                -- Collapse button at top RIGHT
-                right_align(16)
-                ctx:push_style_color(r.ImGui_Col_Button(), 0x333333FF)
-                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x444444FF)
-                if ctx:button("◀##collapse_" .. guid, 16, 20) then
-                    sidebar_collapsed[guid] = true
-                end
-                ctx:pop_style_color(2)
-                if r.ImGui_IsItemHovered(ctx.ctx) then
-                    ctx:set_tooltip("Collapse sidebar")
-                end
-                
-                ctx:spacing()
                 
                 -- UI button (centered)
                 center_item(ctrl_w)
