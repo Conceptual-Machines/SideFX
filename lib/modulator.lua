@@ -96,25 +96,29 @@ end
 --------------------------------------------------------------------------------
 
 --- Create a parameter modulation link.
--- @param mod_fx_idx number Modulator FX index (must be top-level)
--- @param target_fx_idx number Target FX index (may be container-encoded)
+-- @param mod_fx TrackFX|number Modulator FX object or index (must be top-level)
+-- @param target_fx TrackFX|number Target FX object or index
 -- @param target_param_idx number Target parameter index
 -- @return boolean Success
-function M.create_param_link(mod_fx_idx, target_fx_idx, target_param_idx)
+function M.create_param_link(mod_fx, target_fx, target_param_idx)
     if not state.track then return false end
+    
+    -- Support both TrackFX objects and raw indices for backwards compatibility
+    local mod_fx_idx = type(mod_fx) == "number" and mod_fx or mod_fx.pointer
+    local target_fx_obj = type(target_fx) == "number" and state.track:get_track_fx(target_fx) or target_fx
+    
+    if not target_fx_obj then return false end
     
     local plink_prefix = string.format("param.%d.plink.", target_param_idx)
     
-    -- Enable parameter link
-    local ok1 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "active", "1")
-    -- Set source effect (modulator)
-    local ok2 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "effect", tostring(mod_fx_idx))
-    -- Set source parameter (modulator output)
-    local ok3 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "param", tostring(M.MOD_OUTPUT_PARAM))
+    -- Use ReaWrap methods
+    local ok1 = target_fx_obj:set_named_config_param(plink_prefix .. "active", "1")
+    local ok2 = target_fx_obj:set_named_config_param(plink_prefix .. "effect", tostring(mod_fx_idx))
+    local ok3 = target_fx_obj:set_named_config_param(plink_prefix .. "param", tostring(M.MOD_OUTPUT_PARAM))
     
     if not (ok1 and ok2 and ok3) then
-        r.ShowConsoleMsg(string.format("Plink failed: mod=%d target=%d param=%d (ok: %s %s %s)\n", 
-            mod_fx_idx, target_fx_idx, target_param_idx, 
+        r.ShowConsoleMsg(string.format("Plink failed: mod=%d param=%d (ok: %s %s %s)\n", 
+            mod_fx_idx, target_param_idx, 
             tostring(ok1), tostring(ok2), tostring(ok3)))
     end
     
@@ -122,38 +126,44 @@ function M.create_param_link(mod_fx_idx, target_fx_idx, target_param_idx)
 end
 
 --- Remove a parameter modulation link.
--- @param target_fx_idx number Target FX index
+-- @param target_fx TrackFX|number Target FX object or index
 -- @param target_param_idx number Target parameter index
-function M.remove_param_link(target_fx_idx, target_param_idx)
+function M.remove_param_link(target_fx, target_param_idx)
     if not state.track then return end
+    
+    local target_fx_obj = type(target_fx) == "number" and state.track:get_track_fx(target_fx) or target_fx
+    if not target_fx_obj then return end
+    
     local plink_prefix = string.format("param.%d.plink.", target_param_idx)
-    r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "active", "0")
+    target_fx_obj:set_named_config_param(plink_prefix .. "active", "0")
 end
 
 --- Get all parameters linked to a modulator.
--- @param mod_fx_idx number Modulator FX index
+-- @param mod_fx TrackFX|number Modulator FX object or index
 -- @return table Array of link info
-function M.get_modulator_links(mod_fx_idx)
+function M.get_modulator_links(mod_fx)
     if not state.track then return {} end
     local links = {}
+    local mod_fx_idx = type(mod_fx) == "number" and mod_fx or mod_fx.pointer
     
     for fx_info in state.track:iter_all_fx_flat() do
         local fx = fx_info.fx
         local fx_name = fx:get_name()
-        local fx_idx = fx.pointer
         -- Skip modulators and containers
         if fx_name and not (fx_name:find(M.MODULATOR_JSFX) or fx_name:find("SideFX Modulator") or fx_name:find("Container")) then
             local param_count = fx:get_num_params()
             for param_idx = 0, param_count - 1 do
                 local plink_prefix = string.format("param.%d.plink.", param_idx)
-                local rv, active = r.TrackFX_GetNamedConfigParm(state.track.pointer, fx_idx, plink_prefix .. "active")
-                if rv and active == "1" then
-                    local _, effect = r.TrackFX_GetNamedConfigParm(state.track.pointer, fx_idx, plink_prefix .. "effect")
-                    local _, param = r.TrackFX_GetNamedConfigParm(state.track.pointer, fx_idx, plink_prefix .. "param")
+                -- Use ReaWrap method
+                local active = fx:get_named_config_param(plink_prefix .. "active")
+                if active == "1" then
+                    local effect = fx:get_named_config_param(plink_prefix .. "effect")
+                    local param = fx:get_named_config_param(plink_prefix .. "param")
                     if tonumber(effect) == mod_fx_idx and tonumber(param) == M.MOD_OUTPUT_PARAM then
                         local param_name = fx:get_param_name(param_idx)
                         table.insert(links, {
-                            target_fx_idx = fx_idx,
+                            target_fx = fx,
+                            target_fx_idx = fx.pointer,  -- Keep for UI compatibility
                             target_fx_name = fx_name,
                             target_param_idx = param_idx,
                             target_param_name = param_name,

@@ -247,20 +247,20 @@ renumber_device_chain = function()
                 device_idx = device_idx + 1
                 local new_name = string.format("D%d: %s", device_idx, fx_name)
                 if new_name ~= name then
-                    r.TrackFX_SetNamedConfigParm(state.track.pointer, fx.pointer, "renamed_name", new_name)
+                    fx:set_named_config_param("renamed_name", new_name)
                     
                     -- Also rename FX inside (has _FX suffix)
                     local main_fx = get_device_main_fx(fx)
                     if main_fx then
                         local main_fx_name = string.format("D%d_FX: %s", device_idx, fx_name)
-                        r.TrackFX_SetNamedConfigParm(state.track.pointer, main_fx.pointer, "renamed_name", main_fx_name)
+                        main_fx:set_named_config_param("renamed_name", main_fx_name)
                     end
                     
                     -- Also rename utility inside
                     local utility = get_device_utility(fx)
                     if utility then
                         local util_name = string.format("D%d_Util", device_idx)
-                        r.TrackFX_SetNamedConfigParm(state.track.pointer, utility.pointer, "renamed_name", util_name)
+                        utility:set_named_config_param("renamed_name", util_name)
                     end
                 end
             end
