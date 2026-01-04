@@ -15,9 +15,10 @@ local info = debug.getinfo(1, "S")
 local script_path = info.source:match("@?(.*[\\/])")
 local root_path = script_path:match("^(.+/)tests/") or script_path .. "../../"
 
--- Add SideFX lib to path
-package.path = root_path .. "lib/?.lua;" .. package.path
-package.path = root_path .. "tests/?.lua;" .. package.path
+-- Add SideFX paths - need both for direct requires and lib.* requires
+package.path = root_path .. "?.lua;" .. package.path           -- for require('lib.naming')
+package.path = root_path .. "lib/?.lua;" .. package.path       -- for require('naming')
+package.path = root_path .. "tests/?.lua;" .. package.path     -- for require('assertions')
 
 -- Find ReaWrap
 local reawrap_path = root_path .. "../ReaWrap/"
