@@ -211,12 +211,12 @@ Rack R1 (64 internal channels):
 ## What Still Needs To Be Done
 
 ### Phase 3 Remaining (Racks)
-- [ ] Add FX to existing chain (currently only creates new chain)
-- [ ] Reorder chains within rack
+- [x] Add FX to existing chain ✅
+- [x] Reorder chains within rack ✅
 - [x] "+Chain" button inside rack panel ✅
 - [x] Per-chain volume/pan controls ✅
 - [x] Master output (gain/pan) for rack ✅
-- [ ] Visual feedback during drag over chains
+- [x] Visual feedback during drag over chains ✅
 
 ### Phase 4: Recursive Containers
 - [ ] Allow racks inside chains (nested racks)
@@ -371,6 +371,9 @@ state = {
 14. ✅ Double-click to reset controls to default
 15. ✅ Double-click on labels to edit values via popup
 16. ✅ Chain containers set to 64 channels for sideband routing
+17. ✅ Add FX to existing chain (add_device_to_chain function)
+18. ✅ Chain reordering via drag & drop (with auto-renumbering)
+19. ✅ Visual feedback during drag operations (highlight drop targets)
 
 ### Current State:
 - Basic device chain works (add, remove, reorder)
@@ -380,11 +383,14 @@ state = {
 - Collapsed view shows fader + stereo meters
 - All mixer controls hidden from native REAPER UI
 - All naming is consistent and auto-numbered
+- **Add FX to existing chains** (drag plugin onto chain name)
+- **Reorder chains** (drag chain rows to reorder, auto-renumbering)
+- **Visual feedback** during drag operations
 
 ### Next Priority:
-- Add FX to existing chain (vs always creating new)
 - Recursive racks (racks inside chains)
 - Modulator integration
+- Presets system
 
 ---
 

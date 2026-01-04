@@ -160,6 +160,7 @@ local project = Project:new()
 -- Forward declarations for functions defined later
 local renumber_device_chain
 local get_device_utility
+local renumber_chains_in_rack
 
 local function get_selected_track()
     if not project:has_selected_tracks() then
@@ -998,6 +999,240 @@ local function add_chain_to_rack(rack, plugin)
     r.Undo_EndBlock("SideFX: Add Chain to Rack", -1)
     
     return chain
+end
+
+-- Add a device (D-container with FX + Utility) to an existing chain
+local function add_device_to_chain(chain, plugin)
+    if not chain or not plugin then return nil end
+    if not is_chain_container(chain) then return nil end
+    
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+    
+    -- Get chain name to extract prefix (e.g., "R1_C1" from "R1_C1" or "R1_C1: Something")
+    local chain_name = chain:get_name()
+    local chain_prefix = chain_name:match("^(R%d+_C%d+)") or chain_name
+    
+    -- Count existing devices in this chain (non-hidden, non-utility children)
+    local device_count = 0
+    for child in chain:iter_container_children() do
+        local ok, child_name = pcall(function() return child:get_name() end)
+        if ok and child_name then
+            -- Count device containers (D-prefix) or FX that aren't utilities/mixers
+            if child_name:match("_D%d+") or (not child_name:match("^_") and not child_name:find("Util") and not child_name:find("Mixer")) then
+                device_count = device_count + 1
+            end
+        end
+    end
+    
+    -- Device index (1-based)
+    local device_idx = device_count + 1
+    
+    -- Hierarchical naming:
+    -- Device container: R1_C1_D2: <name>
+    -- FX inside device: R1_C1_D2_FX: <name>
+    -- Utility:          R1_C1_D2_Util
+    local short_name = get_short_plugin_name(plugin.full_name)
+    local device_prefix = string.format("%s_D%d", chain_prefix, device_idx)
+    local device_name = string.format("%s: %s", device_prefix, short_name)
+    
+    -- Build device container completely at track level first, then move into chain
+    -- This avoids issues with nested container addressing
+    
+    -- Step 1: Create device container at track level
+    local device = state.track:add_fx_by_name("Container", false, -1)
+    if not device or device.pointer < 0 then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Device to Chain (failed)", -1)
+        return nil
+    end
+    device:set_named_config_param("renamed_name", device_name)
+    
+    -- Step 2: Add FX to device container (while still at track level)
+    local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
+    if main_fx and main_fx.pointer >= 0 then
+        device:add_fx_to_container(main_fx, 0)
+        
+        -- Re-find and configure FX
+        local fx_inside = get_device_main_fx(device)
+        if fx_inside then
+            local wet_idx = fx_inside:get_param_from_ident(":wet")
+            if wet_idx and wet_idx >= 0 then
+                fx_inside:set_param_normalized(wet_idx, 1.0)
+            end
+            fx_inside:set_named_config_param("renamed_name", string.format("%s_FX: %s", device_prefix, short_name))
+        end
+    end
+    
+    -- Step 3: Add utility to device container (while still at track level)
+    local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, -1)
+    if util_fx and util_fx.pointer >= 0 then
+        device:add_fx_to_container(util_fx, 1)
+        
+        local util_inside = get_device_utility(device)
+        if util_inside then
+            util_inside:set_named_config_param("renamed_name", string.format("%s_Util", device_prefix))
+        end
+    end
+    
+    -- Step 4: Move device into chain at the end
+    -- Count children to find insertion position
+    local insert_pos = 0
+    for _ in chain:iter_container_children() do
+        insert_pos = insert_pos + 1
+    end
+    
+    chain:add_fx_to_container(device, insert_pos)
+    
+    refresh_fx_list()
+    
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Add Device to Chain", -1)
+    
+    return device
+end
+
+-- Reorder a chain within a rack (move chain_guid to position before target_chain_guid)
+-- If target_chain_guid is nil, move to end
+local function reorder_chain_in_rack(rack, chain_guid, target_chain_guid)
+    if not rack or not chain_guid then return false end
+    if not is_rack_container(rack) then return false end
+    
+    local chain = state.track:find_fx_by_guid(chain_guid)
+    if not chain then return false end
+    
+    -- Check chain is actually in this rack
+    local parent = chain:get_parent_container()
+    if not parent or parent:get_guid() ~= rack:get_guid() then return false end
+    
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+    
+    -- Get list of children in rack (including mixer)
+    local children = {}
+    local chain_pos = nil
+    local target_pos = nil
+    local mixer_pos = nil
+    
+    local pos = 0
+    for child in rack:iter_container_children() do
+        local guid = child:get_guid()
+        local ok, name = pcall(function() return child:get_name() end)
+        
+        children[#children + 1] = { guid = guid, fx = child }
+        
+        if guid == chain_guid then
+            chain_pos = pos
+        end
+        if guid == target_chain_guid then
+            target_pos = pos
+        end
+        -- Mixer is at the end (prefixed with _)
+        if ok and name and (name:match("^_") or name:find("Mixer")) then
+            mixer_pos = pos
+        end
+        
+        pos = pos + 1
+    end
+    
+    if chain_pos == nil then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Reorder Chain (failed)", -1)
+        return false
+    end
+    
+    -- Calculate destination position
+    local dest_pos
+    if target_chain_guid == nil then
+        -- Move to end (before mixer if present)
+        dest_pos = mixer_pos or #children
+    else
+        dest_pos = target_pos or mixer_pos or #children
+    end
+    
+    -- Adjust destination if moving forward (position shifts after removal)
+    if dest_pos > chain_pos then
+        dest_pos = dest_pos - 1
+    end
+    
+    -- No move needed if already in position
+    if dest_pos == chain_pos then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Reorder Chain", -1)
+        return true
+    end
+    
+    -- Perform the move using ReaWrap container operations
+    -- Move out first, then back in at new position
+    chain:move_out_of_container()
+    
+    -- Re-find chain and rack (pointers may have changed)
+    chain = state.track:find_fx_by_guid(chain_guid)
+    rack = state.track:find_fx_by_guid(rack:get_guid())
+    
+    if chain and rack then
+        rack:add_fx_to_container(chain, dest_pos)
+        
+        -- Renumber chain names to maintain sequential ordering
+        renumber_chains_in_rack(rack)
+    end
+    
+    refresh_fx_list()
+    
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Reorder Chain", -1)
+    
+    return true
+end
+
+-- Renumber chains within a rack after reordering (R1_C1, R1_C2, etc.)
+renumber_chains_in_rack = function(rack)
+    if not rack then return end
+    
+    local rack_name = rack:get_name()
+    local rack_prefix = rack_name:match("^(R%d+)") or "R1"
+    
+    local chain_idx = 0
+    for child in rack:iter_container_children() do
+        local ok, name = pcall(function() return child:get_name() end)
+        if ok and name then
+            -- Skip internal elements (mixer, prefixed with _)
+            if not name:match("^_") and not name:find("Mixer") then
+                chain_idx = chain_idx + 1
+                local old_prefix = name:match("^(R%d+_C%d+)")
+                if old_prefix then
+                    local new_prefix = string.format("%s_C%d", rack_prefix, chain_idx)
+                    if old_prefix ~= new_prefix then
+                        -- Rename chain
+                        local new_name = name:gsub("^R%d+_C%d+", new_prefix)
+                        child:set_named_config_param("renamed_name", new_name)
+                        
+                        -- Also rename devices inside chain
+                        for device in child:iter_container_children() do
+                            local ok_d, device_name = pcall(function() return device:get_name() end)
+                            if ok_d and device_name then
+                                local new_device_name = device_name:gsub("^R%d+_C%d+", new_prefix)
+                                if new_device_name ~= device_name then
+                                    device:set_named_config_param("renamed_name", new_device_name)
+                                    
+                                    -- Rename FX and utility inside device
+                                    for inner in device:iter_container_children() do
+                                        local ok_i, inner_name = pcall(function() return inner:get_name() end)
+                                        if ok_i and inner_name then
+                                            local new_inner_name = inner_name:gsub("^R%d+_C%d+", new_prefix)
+                                            if new_inner_name ~= inner_name then
+                                                inner:set_named_config_param("renamed_name", new_inner_name)
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -2283,11 +2518,24 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                                 
                                 -- Column 1: Chain name button
                                 r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+                                
+                                -- Check if dragging for visual feedback
+                                local has_plugin_drag = ctx:get_drag_drop_payload("PLUGIN_ADD")
+                                local has_chain_drag = ctx:get_drag_drop_payload("CHAIN_REORDER")
+                                local is_dragging = has_plugin_drag or has_chain_drag
+                                
                                 local row_color = chain_enabled and 0x3A4A5AFF or 0x2A2A35FF
                                 if is_chain_selected then
                                     row_color = 0x5588AAFF
                                 end
+                                -- Highlight chain rows when dragging
+                                if has_plugin_drag then
+                                    row_color = 0x4488AA88  -- Blue tint when dragging plugin
+                                elseif has_chain_drag then
+                                    row_color = 0x88AA4488  -- Green tint when reordering chains
+                                end
                                 ctx:push_style_color(r.ImGui_Col_Button(), row_color)
+                                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), is_dragging and 0x66AACCFF or 0x4A6A8AFF)
                                 if ctx:button(chain_name:sub(1, 10) .. "##chain", -1, 22) then
                                     if is_chain_selected then
                                         state.expanded_path[2] = nil
@@ -2295,14 +2543,41 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                                         state.expanded_path[2] = chain_guid
                                     end
                                 end
-                                ctx:pop_style_color()
+                                ctx:pop_style_color(2)
                                 
-                                -- Drop target on chain name
-                                if ctx:begin_drag_drop_target() then
-                                    local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
-                                    if accepted and plugin_name then
-                                        -- TODO: Add FX to this chain
+                                -- Drag source for chain reordering
+                                if ctx:begin_drag_drop_source() then
+                                    ctx:set_drag_drop_payload("CHAIN_REORDER", chain_guid)
+                                    ctx:text("Reorder: " .. chain_name:sub(1, 20))
+                                    ctx:end_drag_drop_source()
+                                end
+                                
+                                -- Tooltip when hovering during drag
+                                if ctx:is_item_hovered() then
+                                    if has_plugin_drag then
+                                        ctx:set_tooltip("Drop to add FX to " .. chain_name)
+                                    elseif has_chain_drag then
+                                        ctx:set_tooltip("Drop to move chain here")
+                                    else
+                                        ctx:set_tooltip("Click to expand chain\nDrag to reorder\nDrag plugin here to add FX")
                                     end
+                                end
+                                
+                                -- Drop targets for chain row
+                                if ctx:begin_drag_drop_target() then
+                                    -- Accept plugin drops
+                                    local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                                    if accepted_plugin and plugin_name then
+                                        local plugin = { full_name = plugin_name, name = plugin_name }
+                                        add_device_to_chain(chain, plugin)
+                                    end
+                                    
+                                    -- Accept chain reorder drops
+                                    local accepted_chain, dragged_chain_guid = ctx:accept_drag_drop_payload("CHAIN_REORDER")
+                                    if accepted_chain and dragged_chain_guid and dragged_chain_guid ~= chain_guid then
+                                        reorder_chain_in_rack(rack, dragged_chain_guid, chain_guid)
+                                    end
+                                    
                                     ctx:end_drag_drop_target()
                                 end
                                 
@@ -2652,50 +2927,115 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                         end
                     end
                     
-                    -- Draw chain contents column
-                    local chain_col_w = 500
+                    -- Draw chain contents - HORIZONTAL layout like main chain
+                    local chain_content_h = rack_h - 10
+                    local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
+                    
+                    -- Use auto-resize for width (0 = fit content)
+                    -- ChildFlags: Border (1) + AutoResizeX (16) + AlwaysAutoResize (64) = 81
+                    local chain_flags = 81
+                    
                     ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x2A2A35FF)
-                    -- Add scroll flags for both horizontal and vertical scrolling
-                    local chain_scroll_flags = r.ImGui_WindowFlags_HorizontalScrollbar()
-                    if ctx:begin_child("chain_contents_" .. selected_chain_guid, chain_col_w, rack_h, imgui.ChildFlags.Border(), chain_scroll_flags) then
-                        -- Chain header
-                        local selected_chain_name = get_fx_display_name(selected_chain)
-                        ctx:text_colored(0xAADDFFFF, "Chain: " .. selected_chain_name)
-                        ctx:separator()
+                    local chain_scroll_flags = r.ImGui_WindowFlags_None()  -- No scroll needed with auto-resize
+                    if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, chain_flags, chain_scroll_flags) then
                         
                         if #devices == 0 then
-                            ctx:text_disabled("No devices")
+                            -- Empty chain - show drop zone
+                            if has_plugin_payload then
+                                ctx:push_style_color(r.ImGui_Col_Button(), 0x4488FF66)
+                            else
+                                ctx:push_style_color(r.ImGui_Col_Button(), 0x33333344)
+                            end
+                            ctx:button("+ Drop plugin to add first device", 200, chain_content_h - 20)
+                            ctx:pop_style_color()
+                            
+                            if ctx:begin_drag_drop_target() then
+                                local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                                if accepted and plugin_name then
+                                    local plugin = { full_name = plugin_name, name = plugin_name }
+                                    add_device_to_chain(selected_chain, plugin)
+                                end
+                                ctx:end_drag_drop_target()
+                            end
                         else
-                            -- Draw each device as a panel
+                            -- Draw each device HORIZONTALLY with arrows
+                            -- Use BeginGroup to ensure proper horizontal layout
+                            r.ImGui_BeginGroup(ctx.ctx)
+                            
                             for k, dev in ipairs(devices) do
                                 local dev_name = get_fx_display_name(dev)
                                 local dev_enabled = dev:get_enabled()
+                                
+                                -- Arrow connector between devices
+                                if k > 1 then
+                                    ctx:same_line()
+                                    ctx:push_style_color(r.ImGui_Col_Text(), 0x555555FF)
+                                    ctx:text("→")
+                                    ctx:pop_style_color()
+                                    ctx:same_line()
+                                end
                                 
                                 -- Find the actual FX inside the device container
                                 local dev_main_fx = get_device_main_fx(dev)
                                 local dev_utility = get_device_utility(dev)
                                 
                                 if dev_main_fx and device_panel then
-                                    -- Use device_panel to render
+                                    -- Use device_panel to render horizontally
                                     device_panel.draw(ctx, dev_main_fx, {
-                                        avail_height = rack_h - 50,
+                                        avail_height = chain_content_h - 20,
                                         utility = dev_utility,
                                         container = dev,
                                         on_delete = function()
                                             dev:delete()
                                             refresh_fx_list()
                                         end,
+                                        on_plugin_drop = function(plugin_name, insert_before_idx)
+                                            -- Add device before this one
+                                            local plugin = { full_name = plugin_name, name = plugin_name }
+                                            add_device_to_chain(selected_chain, plugin)
+                                        end,
                                     })
                                 else
                                     -- Fallback: simple button
                                     local btn_color = dev_enabled and 0x3A5A4AFF or 0x2A2A35FF
                                     ctx:push_style_color(r.ImGui_Col_Button(), btn_color)
-                                    if ctx:button(dev_name:sub(1, 30) .. "##dev_" .. k, -1, 28) then
+                                    if ctx:button(dev_name:sub(1, 20) .. "##dev_" .. k, 120, chain_content_h - 20) then
                                         dev:show(3)
                                     end
                                     ctx:pop_style_color()
                                 end
                             end
+                            
+                            -- Drop zone / add button at end of chain (right after last device)
+                            ctx:same_line(0, 4)  -- Small gap after device
+                            local add_btn_h = chain_content_h - 20
+                            if has_plugin_payload then
+                                ctx:push_style_color(r.ImGui_Col_Button(), 0x4488FF66)
+                                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x66AAFF88)
+                                ctx:button("+##chain_drop", 40, add_btn_h)
+                                ctx:pop_style_color(2)
+                            else
+                                ctx:push_style_color(r.ImGui_Col_Button(), 0x3A4A5A88)
+                                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x4A6A8AAA)
+                                ctx:button("+##chain_add", 40, add_btn_h)
+                                ctx:pop_style_color(2)
+                            end
+                            
+                            -- Drop target for adding FX to chain
+                            if ctx:begin_drag_drop_target() then
+                                local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                                if accepted and plugin_name then
+                                    local plugin = { full_name = plugin_name, name = plugin_name }
+                                    add_device_to_chain(selected_chain, plugin)
+                                end
+                                ctx:end_drag_drop_target()
+                            end
+                            
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Drag plugin here to add device")
+                            end
+                            
+                            r.ImGui_EndGroup(ctx.ctx)
                         end
                         
                         ctx:end_child()
