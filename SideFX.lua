@@ -87,6 +87,7 @@ local fx_utils = require('lib.fx_utils')
 local state_module = require('lib.state')
 local rack_module = require('lib.rack')
 local device_module = require('lib.device')
+local container_module = require('lib.container')
 
 --------------------------------------------------------------------------------
 -- Icons (using OpenMoji font)
@@ -439,79 +440,20 @@ local renumber_chains_in_rack = rack_module.renumber_chains_in_rack
 -- Container Operations
 --------------------------------------------------------------------------------
 
+-- Container operations (uses container_module)
 local function add_to_new_container(fx_list)
-    if #fx_list == 0 then return end
-    if not state.track then return end
-
-    r.Undo_BeginBlock()
-    r.PreventUIRefresh(1)
-
-    local container = state.track:add_fx_to_new_container(fx_list)
-
-    r.PreventUIRefresh(-1)
-    r.Undo_EndBlock("SideFX: Add to Container", -1)
-
+    local container = container_module.add_to_new_container(fx_list)
     if container then
         state.expanded_path = { container:get_guid() }
         refresh_fx_list()
     end
-
     return container
 end
 
 local function dissolve_container(container)
-    if not container or not container:is_container() then return false end
-    if not state.track then return false end
-
-    -- Get all children before we start moving them
-    local children = {}
-    for child in container:iter_container_children() do
-        local ok, guid = pcall(function() return child:get_guid() end)
-        if ok and guid then
-            children[#children + 1] = guid
-        end
-    end
-
-    if #children == 0 then
-        -- Empty container, just delete it
-        container:delete()
-        return true
-    end
-
-    r.Undo_BeginBlock()
-    r.PreventUIRefresh(1)
-
-    -- Get the parent container (or nil if at track level)
-    local parent_container = container:get_parent_container()
-    
-    -- Move all children out of the container
-    -- We need to re-lookup by GUID after each move since pointers may change
-    for _, child_guid in ipairs(children) do
-        local child = state.track:find_fx_by_guid(child_guid)
-        if child then
-            -- Move out of container - this will move to parent or track level
-            while child:get_parent_container() and child:get_parent_container():get_guid() == container:get_guid() do
-                child:move_out_of_container()
-                -- Re-lookup after move (pointer may have changed)
-                child = state.track:find_fx_by_guid(child_guid)
-                if not child then break end
-            end
-        end
-    end
-
-    -- Re-lookup container (pointer may have changed after moves)
-    local container_guid = container:get_guid()
-    container = state.track:find_fx_by_guid(container_guid)
-    
-    -- Delete the now-empty container
-    if container then
-        container:delete()
-    end
-
-    r.PreventUIRefresh(-1)
-    r.Undo_EndBlock("SideFX: Dissolve Container", -1)
-
-    return true
+    local result = container_module.dissolve_container(container)
+    if result then refresh_fx_list() end
+    return result
 end
 
 --------------------------------------------------------------------------------
