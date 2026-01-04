@@ -2041,15 +2041,22 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                             local row_color = chain_enabled and 0x3A4A5AFF or 0x2A2A35FF
                             ctx:push_style_color(r.ImGui_Col_Button(), row_color)
                             
-                            -- Chain button (click to expand/show)
+                            -- Chain button (click to expand into column)
+                            local chain_guid = chain:get_guid()
+                            local is_chain_selected = state.expanded_path[2] == chain_guid
+                            if is_chain_selected then
+                                ctx:push_style_color(r.ImGui_Col_Button(), 0x5588AAFF)
+                            end
                             if ctx:button(chain_name:sub(1, 25) .. "##chain", -90, 28) then
-                                -- Get main FX inside the chain and show it
-                                local main_fx = get_device_main_fx(chain)
-                                if main_fx then
-                                    main_fx:show(3)
+                                -- Toggle chain expansion (adds to expanded_path)
+                                if is_chain_selected then
+                                    state.expanded_path[2] = nil
                                 else
-                                    chain:show(3)
+                                    state.expanded_path[2] = chain_guid
                                 end
+                            end
+                            if is_chain_selected then
+                                ctx:pop_style_color()
                             end
                             ctx:pop_style_color()
                             
@@ -2125,6 +2132,80 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                 ctx:end_child()
             end
             ctx:pop_style_color()
+            
+            -- If a chain is selected, render its devices in a new column
+            if is_expanded and state.expanded_path[2] then
+                local selected_chain_guid = state.expanded_path[2]
+                -- Find the selected chain
+                local selected_chain = nil
+                for _, chain in ipairs(chains) do
+                    if chain:get_guid() == selected_chain_guid then
+                        selected_chain = chain
+                        break
+                    end
+                end
+                
+                if selected_chain then
+                    ctx:same_line()
+                    
+                    -- Get devices from chain
+                    local devices = {}
+                    for child in selected_chain:iter_container_children() do
+                        local ok, child_name = pcall(function() return child:get_name() end)
+                        if ok and child_name then
+                            table.insert(devices, child)
+                        end
+                    end
+                    
+                    -- Draw chain contents column
+                    local chain_col_w = 300
+                    ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x2A2A35FF)
+                    if ctx:begin_child("chain_contents_" .. selected_chain_guid, chain_col_w, rack_h, imgui.ChildFlags.Border()) then
+                        -- Chain header
+                        local selected_chain_name = get_fx_display_name(selected_chain)
+                        ctx:text_colored(0xAADDFFFF, "Chain: " .. selected_chain_name)
+                        ctx:separator()
+                        
+                        if #devices == 0 then
+                            ctx:text_disabled("No devices")
+                        else
+                            -- Draw each device as a panel
+                            for k, dev in ipairs(devices) do
+                                local dev_name = get_fx_display_name(dev)
+                                local dev_enabled = dev:get_enabled()
+                                
+                                -- Find the actual FX inside the device container
+                                local dev_main_fx = get_device_main_fx(dev)
+                                local dev_utility = get_device_utility(dev)
+                                
+                                if dev_main_fx and device_panel then
+                                    -- Use device_panel to render
+                                    device_panel.draw(ctx, dev_main_fx, {
+                                        avail_height = rack_h - 50,
+                                        utility = dev_utility,
+                                        container = dev,
+                                        on_delete = function()
+                                            dev:delete()
+                                            refresh_fx_list()
+                                        end,
+                                    })
+                                else
+                                    -- Fallback: simple button
+                                    local btn_color = dev_enabled and 0x3A5A4AFF or 0x2A2A35FF
+                                    ctx:push_style_color(r.ImGui_Col_Button(), btn_color)
+                                    if ctx:button(dev_name:sub(1, 30) .. "##dev_" .. k, -1, 28) then
+                                        dev:show(3)
+                                    end
+                                    ctx:pop_style_color()
+                                end
+                            end
+                        end
+                        
+                        ctx:end_child()
+                    end
+                    ctx:pop_style_color()
+                end
+            end
             
         elseif is_container then
             -- Unknown container type - show basic view
