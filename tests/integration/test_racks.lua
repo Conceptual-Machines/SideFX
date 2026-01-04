@@ -304,10 +304,26 @@ local function test_deeply_nested_racks()
     local rack3 = rack_module.add_nested_rack_to_rack(rack2)
     assert.not_nil(rack3, "Level 3 rack should be created")
 
+    -- Give REAPER a moment to update internal state
+    r.PreventUIRefresh(-1)
+    r.PreventUIRefresh(1)
+
     -- Verify all racks exist with correct indices
     rack1 = find_fx_by_name_pattern("^R1:")
     rack2 = find_fx_by_name_pattern("^R2:")
     rack3 = find_fx_by_name_pattern("^R3:")
+
+    -- Debug: List all FX to see what we have
+    if not rack3 then
+        r.ShowConsoleMsg("DEBUG: Could not find R3. Searching all FX:\n")
+        for entry in test_track:iter_all_fx_flat() do
+            local fx = entry.fx
+            local ok, name = pcall(function() return fx:get_name() end)
+            if ok and name then
+                r.ShowConsoleMsg(string.format("  Depth %d: %s\n", entry.depth, name))
+            end
+        end
+    end
 
     assert.not_nil(rack1, "Should find R1")
     assert.not_nil(rack2, "Should find R2")
@@ -360,11 +376,17 @@ local function test_nested_rack_with_chains()
 
     -- Add chain to nested rack
     nested_rack = find_fx_by_name_pattern("^R2:")
+    assert.not_nil(nested_rack, "Should find nested rack before adding chain")
     local plugin3 = { full_name = "ReaDelay", name = "ReaDelay" }
     rack_module.add_chain_to_rack(nested_rack, plugin3)
 
-    -- Verify nested rack has 1 chain
+    -- Give REAPER a moment to update internal state
+    r.PreventUIRefresh(-1)
+    r.PreventUIRefresh(1)
+
+    -- Verify nested rack has 1 chain (re-find to get fresh reference)
     nested_rack = find_fx_by_name_pattern("^R2:")
+    assert.not_nil(nested_rack, "Should find nested rack after adding chain")
     local nested_chain_count = fx_utils.count_chains_in_rack(nested_rack)
     assert.equals(1, nested_chain_count, "Nested rack should have 1 chain")
 end
