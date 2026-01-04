@@ -257,8 +257,12 @@ local function test_nested_rack()
     assert.equals(1, naming.parse_rack_index(parent_name), "Parent should be R1")
 
     -- Create nested rack inside parent
-    local nested_rack = rack_module.add_nested_rack_to_rack(parent_rack)
-    assert.not_nil(nested_rack, "Nested rack should be created")
+    local nested_rack_result = rack_module.add_nested_rack_to_rack(parent_rack)
+    assert.not_nil(nested_rack_result, "Nested rack should be created")
+
+    -- Re-find the nested rack (returned reference may be stale after move)
+    local nested_rack = find_fx_by_name_pattern("^R2:")
+    assert.not_nil(nested_rack, "Should find nested rack R2")
 
     local nested_name = nested_rack:get_name()
     assert.truthy(naming.is_rack_name(nested_name), "Nested rack should have R prefix: " .. tostring(nested_name))
@@ -275,9 +279,6 @@ local function test_nested_rack()
     assert.equals(1, chain_count, "Parent rack should have 1 chain containing nested rack")
 
     -- Check nested rack has its own mixer
-    nested_rack = find_fx_by_name_pattern("^R2:")
-    assert.not_nil(nested_rack, "Should find nested rack")
-
     local nested_mixer = fx_utils.get_rack_mixer(nested_rack)
     assert.not_nil(nested_mixer, "Nested rack should have its own mixer")
 end
