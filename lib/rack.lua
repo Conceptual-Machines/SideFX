@@ -232,6 +232,20 @@ function M.add_chain_to_rack(rack, plugin)
             chain_inside:set_pin_mappings(1, 0, left_bits, 0)
             chain_inside:set_pin_mappings(1, 1, right_bits, 0)
         end
+
+        -- Set mixer volume for this chain to 0dB
+        -- Mixer slider range: -60 to +12 dB (72 dB range)
+        -- Normalized 0dB = (0 - (-60)) / (12 - (-60)) = 60/72 = 0.833...
+        local mixer = fx_utils.get_rack_mixer(rack)
+        if mixer then
+            local vol_param = M.get_mixer_chain_volume_param(chain_idx)
+            local normalized_0db = 60 / 72  -- 0.833...
+            mixer:set_param_normalized(vol_param, normalized_0db)
+
+            -- Also set pan to center (normalized 0.5)
+            local pan_param = M.get_mixer_chain_pan_param(chain_idx)
+            mixer:set_param_normalized(pan_param, 0.5)
+        end
     end
 
     r.PreventUIRefresh(-1)
@@ -356,6 +370,17 @@ function M.add_nested_rack_to_rack(parent_rack)
 
             chain_inside:set_pin_mappings(1, 0, left_bits, 0)
             chain_inside:set_pin_mappings(1, 1, right_bits, 0)
+        end
+
+        -- Set parent rack mixer volume for this chain to 0dB
+        local parent_mixer = fx_utils.get_rack_mixer(parent_rack)
+        if parent_mixer then
+            local vol_param = M.get_mixer_chain_volume_param(chain_idx)
+            local normalized_0db = 60 / 72  -- 0.833...
+            parent_mixer:set_param_normalized(vol_param, normalized_0db)
+
+            local pan_param = M.get_mixer_chain_pan_param(chain_idx)
+            parent_mixer:set_param_normalized(pan_param, 0.5)
         end
     end
 
