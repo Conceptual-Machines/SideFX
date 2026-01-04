@@ -86,6 +86,7 @@ local naming = require('lib.naming')
 local fx_utils = require('lib.fx_utils')
 local state_module = require('lib.state')
 local rack_module = require('lib.rack')
+local device_module = require('lib.device')
 
 --------------------------------------------------------------------------------
 -- Icons (using OpenMoji font)
@@ -202,10 +203,6 @@ local function filter_plugins()
     state.browser.filtered = results
 end
 
--- JSFX name - when installed via ReaPack, this will be in the SideFX folder
--- Use just the name and let REAPER find it, or use full path for dev
-local UTILITY_JSFX = "JS:SideFX/SideFX_Utility"
-
 -- Use fx_utils module for is_utility_fx
 local is_utility_fx = fx_utils.is_utility_fx
 
@@ -276,101 +273,17 @@ renumber_device_chain = function()
     end
 end
 
+-- Device operations (uses state singleton via device_module)
 local function add_plugin_to_track(plugin, position)
-    if not state.track then return end
-    
-    local name_lower = plugin.full_name:lower()
-    
-    -- Don't wrap modulators in containers
-    if name_lower:find("sidefx_modulator") then
-        r.Undo_BeginBlock()
-        local fx_position = position and (-1000 - position) or -1
-        local fx = state.track:add_fx_by_name(plugin.full_name, false, fx_position)
-        r.Undo_EndBlock("SideFX: Add Modulator", -1)
-        refresh_fx_list()
-        return fx
-    end
-    
-    -- Don't wrap utilities in containers (shouldn't be added directly anyway)
-    if name_lower:find("sidefx_utility") then
-        return nil
-    end
-
-    r.Undo_BeginBlock()
-    r.PreventUIRefresh(1)
-    
-    -- Get next device index
-    local device_idx = get_next_device_index()
-    local short_name = get_short_plugin_name(plugin.full_name)
-    local container_name = string.format("D%d: %s", device_idx, short_name)
-    
-    -- Position for the container
-    local container_position = position and (-1000 - position) or -1
-    
-    -- Create the container first
-    local container = state.track:add_fx_by_name("Container", false, container_position)
-    
-    if container and container.pointer >= 0 then
-        -- Rename the container using ReaWrap
-        container:set_named_config_param("renamed_name", container_name)
-        
-        -- Add the main FX at track level first
-        local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
-        
-        if main_fx and main_fx.pointer >= 0 then
-            -- Move the FX into the container using ReaWrap
-            container:add_fx_to_container(main_fx, 0)
-            
-            -- Re-find the FX inside the container (pointer changed after move)
-            local fx_inside = get_device_main_fx(container)
-            
-            if fx_inside then
-                -- Set wet/dry to 100% by default
-                local wet_idx = fx_inside:get_param_from_ident(":wet")
-                if wet_idx >= 0 then
-                    fx_inside:set_param_normalized(wet_idx, 1.0)
-                end
-                -- Rename FX with _FX suffix to distinguish from container
-                local fx_name = string.format("D%d_FX: %s", device_idx, short_name)
-                fx_inside:set_named_config_param("renamed_name", fx_name)
-            end
-            
-            -- Add utility at track level, then move into container
-            local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, -1)
-            
-            if not util_fx or util_fx.pointer < 0 then
-                r.ShowConsoleMsg("SideFX: Could not add utility JSFX. Make sure SideFX_Utility.jsfx is installed in REAPER's Effects/SideFX folder.\n")
-            else
-                -- Move utility into container at position 1
-                container:add_fx_to_container(util_fx, 1)
-                
-                -- Re-find utility inside container and rename it
-                local util_inside = get_device_utility(container)
-                if util_inside then
-                    local util_name = string.format("D%d_Util", device_idx)
-                    util_inside:set_named_config_param("renamed_name", util_name)
-            end
-        end
-        else
-            r.ShowConsoleMsg("SideFX: Could not add FX.\n")
-        end
-        
-        refresh_fx_list()
-    end
-    
-    r.PreventUIRefresh(-1)
-    r.Undo_EndBlock("SideFX: Add Device", -1)
-    
-    return container
+    local result = device_module.add_plugin_to_track(plugin, position)
+    if result then refresh_fx_list() end
+    return result
 end
 
--- Add plugin by name at a specific position
 local function add_plugin_by_name(plugin_name, position)
-    if not state.track or not plugin_name then return end
-    
-    -- Create a minimal plugin object for add_plugin_to_track
-    local plugin = { full_name = plugin_name, name = plugin_name }
-    return add_plugin_to_track(plugin, position)
+    local result = device_module.add_plugin_by_name(plugin_name, position)
+    if result then refresh_fx_list() end
+    return result
 end
 
 --------------------------------------------------------------------------------
