@@ -1,6 +1,6 @@
 # SideFX Agent Handoff - January 2026
 
-## Project Status: Phase 3 Rack System (In Progress)
+## Project Status: Phase 3 Rack System (Near Complete)
 
 This is **SideFX v1.0** - a product NOT YET RELEASED. We are building an Ableton Live-style device rack system for REAPER.
 
@@ -67,8 +67,16 @@ Track Chain:
 | JSFX | Purpose | UI Visibility |
 |------|---------|---------------|
 | `SideFX_Utility.jsfx` | Gain/Pan/Phase per device | Hidden (controlled via SideFX UI) |
-| `SideFX_Mixer.jsfx` | Sums parallel chains to 1/2 | Completely hidden |
+| `SideFX_Mixer.jsfx` | Sums parallel chains with per-chain vol/pan + master | Sliders hidden (- prefix) |
 | `SideFX_Modulator.jsfx` | LFO modulation | Visible (has @gfx UI) |
+
+**SideFX_Mixer.jsfx Parameters:**
+- slider1: Master Gain (-24 to +12 dB)
+- slider2: Master Pan (-100 to +100)
+- slider10-25: Chain 1-16 Volume (-60 to +12 dB)
+- slider30-45: Chain 1-16 Pan (-100 to +100)
+- All sliders use `-` prefix to hide from native JSFX UI
+- Explicit in_pin/out_pin declarations for 16 stereo inputs → 1 stereo output
 
 Installation: Symlinked to REAPER's Effects folder:
 ```bash
@@ -118,13 +126,26 @@ Smart detection for switch vs continuous parameters:
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Rack Panel (200px wide)
-- Expandable header with rack name
-- List of chains as buttons
-- Click chain → expands column (500px)
-- ON/OFF per chain
-- Delete button per chain
-- Drop zone for new chains
+### Rack Panel (350px wide expanded, 150px collapsed)
+**Expanded View:**
+- Master output section at top (Gain slider + Pan control)
+- List of chains with: Name | ON/OFF | Delete | Volume | Pan (all on same line)
+- Click chain → expands column showing devices
+- "+Chain" button to add new chains
+
+**Collapsed View:**
+- Chain count display
+- Custom pan slider with center indicator
+- Vertical gain fader with dB scale (-24 to +12)
+- Stereo level meters (L/R)
+- dB value label with background
+
+**Mixer Controls:**
+- Per-chain volume (-60 to +12 dB)
+- Per-chain pan (balance, -100L to +100R)
+- Master gain (-24 to +12 dB)
+- Master pan (balance)
+- All controls: double-click slider to reset, double-click label to edit value
 
 ### Chain Column (500px wide)
 - Shows devices inside selected chain
@@ -192,8 +213,9 @@ Rack R1 (64 internal channels):
 ### Phase 3 Remaining (Racks)
 - [ ] Add FX to existing chain (currently only creates new chain)
 - [ ] Reorder chains within rack
-- [ ] "+Chain" button inside rack panel
-- [ ] Rack Mix control (wet/dry for entire rack)
+- [x] "+Chain" button inside rack panel ✅
+- [x] Per-chain volume/pan controls ✅
+- [x] Master output (gain/pan) for rack ✅
 - [ ] Visual feedback during drag over chains
 
 ### Phase 4: Recursive Containers
@@ -250,6 +272,20 @@ This avoids pointer invalidation issues.
 - **Centering**: `(container_w - item_w) / 2` with `SetCursorPosX`
 - **Child flags**: Must be numbers, not booleans
 - **Wrap FX access in `pcall`**: FX can be deleted mid-frame
+
+### Custom UI Components (SideFX.lua)
+**`draw_pan_slider(ctx, label, pan_val, width)`**
+- Custom pan control with center line indicator
+- Visual: slider bar (12px) + text label below (16px)
+- Separate interaction zones: slider for dragging, label for editing
+- Double-click slider → reset to center
+- Double-click label → popup to type value
+- Returns: `changed, new_val`
+
+**Collapsed Rack Fader**
+- Vertical fader with dB scale markings (-24 to +12)
+- Stereo level meters (green/yellow/red coloring)
+- dB label with background, double-click to edit
 
 ### State Management
 ```lua
@@ -327,18 +363,28 @@ state = {
 6. ✅ Chain click → expands devices in new column
 7. ✅ Hierarchical naming convention
 8. ✅ Device panel collapse (full height, narrow)
-9. ✅ Hidden utility/mixer from native JSFX UI
+9. ✅ Hidden utility/mixer sliders from native JSFX UI (- prefix)
+10. ✅ Per-chain volume and pan controls in rack UI
+11. ✅ Master output section (gain/pan) for racks
+12. ✅ Collapsed rack view with vertical fader + stereo meters
+13. ✅ Custom pan slider component with center line indicator
+14. ✅ Double-click to reset controls to default
+15. ✅ Double-click on labels to edit values via popup
+16. ✅ Chain containers set to 64 channels for sideband routing
 
 ### Current State:
 - Basic device chain works (add, remove, reorder)
-- Racks can be created with parallel chains
-- Chains expand to show devices
+- Racks fully functional with parallel chains
+- Per-chain mixing (volume/pan) exposed in UI
+- Master output controls for rack summing
+- Collapsed view shows fader + stereo meters
+- All mixer controls hidden from native REAPER UI
 - All naming is consistent and auto-numbered
 
 ### Next Priority:
 - Add FX to existing chain (vs always creating new)
-- "+Chain" button inside expanded rack
 - Recursive racks (racks inside chains)
+- Modulator integration
 
 ---
 
