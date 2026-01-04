@@ -574,6 +574,178 @@ local function add_plugin_by_name(plugin_name, position)
 end
 
 --------------------------------------------------------------------------------
+-- R-Container (Rack) Functions
+--------------------------------------------------------------------------------
+
+local MIXER_JSFX = "JS:SideFX/SideFX_Mixer"
+
+-- Get next rack index for R-naming
+local function get_next_rack_index()
+    if not state.track then return 1 end
+    local max_idx = 0
+    for fx in state.track:iter_track_fx_chain() do
+        local parent = fx:get_parent_container()
+        if not parent then  -- Top level only
+            local name = fx:get_name()
+            -- Check for R-containers
+            local idx = name:match("^R(%d+)")
+            if idx then
+                max_idx = math.max(max_idx, tonumber(idx))
+            end
+            -- Also count D-containers for overall numbering
+            local d_idx = name:match("^D(%d+)")
+            if d_idx then
+                max_idx = math.max(max_idx, tonumber(d_idx))
+            end
+        end
+    end
+    return max_idx + 1
+end
+
+-- Add a new rack (R-container) to the track
+local function add_rack_to_track(position)
+    if not state.track then return nil end
+    
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+    
+    -- Get next index
+    local rack_idx = get_next_rack_index()
+    local rack_name = string.format("R%d: Rack", rack_idx)
+    
+    -- Position for the container
+    local container_position = position and (-1000 - position) or -1
+    
+    -- Create the rack container
+    local rack = state.track:add_fx_by_name("Container", false, container_position)
+    
+    if rack and rack.pointer >= 0 then
+        -- Rename the rack
+        rack:set_named_config_param("renamed_name", rack_name)
+        
+        -- Set up for parallel routing (8 channels for 4 stereo chains)
+        rack:set_container_channels(8)
+        
+        -- Add the mixer JSFX at track level, then move into rack
+        local mixer_fx = state.track:add_fx_by_name(MIXER_JSFX, false, -1)
+        
+        if mixer_fx and mixer_fx.pointer >= 0 then
+            -- Move mixer into rack
+            rack:add_fx_to_container(mixer_fx, 0)
+            
+            -- Rename mixer
+            local mixer_inside = nil
+            for child in rack:iter_container_children() do
+                local name = child:get_name()
+                if name:find("SideFX_Mixer") or name:find("SideFX Mixer") then
+                    mixer_inside = child
+                    break
+                end
+            end
+            if mixer_inside then
+                mixer_inside:set_named_config_param("renamed_name", string.format("R%d_Mixer", rack_idx))
+            end
+        else
+            r.ShowConsoleMsg("SideFX: Could not add mixer JSFX. Make sure SideFX_Mixer.jsfx is installed in REAPER's Effects/SideFX folder.\n")
+        end
+        
+        -- Expand the rack to show it
+        state.expanded_path = { rack:get_guid() }
+        
+        refresh_fx_list()
+    end
+    
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Add Rack", -1)
+    
+    return rack
+end
+
+-- Add a chain (D-container) to an existing rack (R-container)
+local function add_chain_to_rack(rack, plugin)
+    if not rack or not plugin then return nil end
+    if not is_rack_container(rack) then return nil end
+    
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+    
+    -- Get rack index from name
+    local rack_name = rack:get_name()
+    local rack_idx = rack_name:match("^R(%d+)") or "1"
+    
+    -- Count existing chains in this rack
+    local chain_count = 0
+    for child in rack:iter_container_children() do
+        local name = child:get_name()
+        if is_device_container(child) or name:match("^D%d+%.%d+") then
+            chain_count = chain_count + 1
+        end
+    end
+    
+    -- Create D-container for this chain with nested numbering (e.g., D2.1)
+    local chain_idx = chain_count + 1
+    local short_name = get_short_plugin_name(plugin.full_name)
+    local chain_name = string.format("D%s.%d: %s", rack_idx, chain_idx, short_name)
+    
+    -- Create the chain container at track level first
+    local chain = state.track:add_fx_by_name("Container", false, -1)
+    
+    if chain and chain.pointer >= 0 then
+        -- Rename the chain container
+        chain:set_named_config_param("renamed_name", chain_name)
+        
+        -- Add the main FX inside the chain
+        local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
+        if main_fx and main_fx.pointer >= 0 then
+            chain:add_fx_to_container(main_fx, 0)
+            
+            -- Set wet to 100%
+            local fx_inside = get_device_main_fx(chain)
+            if fx_inside then
+                local wet_idx = fx_inside:get_param_from_ident(":wet")
+                if wet_idx >= 0 then
+                    fx_inside:set_param_normalized(wet_idx, 1.0)
+                end
+            end
+            
+            -- Add utility
+            local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, -1)
+            if util_fx and util_fx.pointer >= 0 then
+                chain:add_fx_to_container(util_fx, 1)
+                
+                -- Rename utility
+                local util_inside = get_device_utility(chain)
+                if util_inside then
+                    util_inside:set_named_config_param("renamed_name", string.format("D%s.%d_Util", rack_idx, chain_idx))
+                end
+            end
+        end
+        
+        -- Move the chain container into the rack (before the mixer)
+        -- Find mixer position
+        local mixer_pos = 0
+        local pos = 0
+        for child in rack:iter_container_children() do
+            local name = child:get_name()
+            if name:find("Mixer") then
+                mixer_pos = pos
+                break
+            end
+            pos = pos + 1
+        end
+        
+        rack:add_fx_to_container(chain, mixer_pos)
+        
+        refresh_fx_list()
+    end
+    
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Add Chain to Rack", -1)
+    
+    return chain
+end
+
+--------------------------------------------------------------------------------
 -- Container Operations
 --------------------------------------------------------------------------------
 
@@ -1497,10 +1669,7 @@ local function draw_toolbar(ctx)
     ctx:push_style_color(r.ImGui_Col_Button(), 0x446688FF)
     if ctx:button("+ Rack") then
         if state.track then
-            r.Undo_BeginBlock()
-            local container = state.track:add_fx_by_name("Container", false, -1)
-            r.Undo_EndBlock("SideFX: Add Rack", -1)
-            refresh_fx_list()
+            add_rack_to_track()
         end
     end
     ctx:pop_style_color()
@@ -1698,67 +1867,185 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
             -- Note: Drop-on-device panels handles insertion (no between-device zones to prevent scroll jumping)
         end
         
-        if is_container then
-            -- Check if this rack is expanded
-            local is_expanded = state.expanded_path[1] == guid
+        if item.is_rack then
+            -- Draw R-container (Rack) with parallel chains
+            local rack = fx
+            local rack_guid = guid
+            local rack_name = get_fx_display_name(rack)
+            local is_expanded = state.expanded_path[1] == rack_guid
             
-            if is_expanded then
-                -- Draw expanded rack with chains
-                local children = {}
-                for child in fx:iter_container_children() do
-                    table.insert(children, child)
+            -- Get chains and mixer from rack
+            local chains = {}
+            local mixer = nil
+            for child in rack:iter_container_children() do
+                local child_name = child:get_name()
+                if child_name:find("Mixer") then
+                    mixer = child
+                else
+                    table.insert(chains, child)
+                end
+            end
+            
+            local rack_w = is_expanded and 400 or 180
+            local rack_h = math.min(avail_height - 20, is_expanded and 450 or 120)
+            
+            ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252535FF)
+            if ctx:begin_child("rack_" .. rack_guid, rack_w, rack_h, imgui.ChildFlags.Border()) then
+                
+                -- Rack header
+                local expand_icon = is_expanded and "▼" or "▶"
+                if ctx:button(expand_icon .. " " .. rack_name:sub(1, 20) .. "##rack_toggle", -60, 24) then
+                    if is_expanded then
+                        state.expanded_path = {}
+                    else
+                        state.expanded_path = { rack_guid }
+                    end
                 end
                 
-                -- Simple rack display (will use rack_panel when fully integrated)
-                ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
-                if ctx:begin_child("rack_" .. guid, 380, math.min(avail_height - 20, 400), imgui.ChildFlags.Border()) then
-                    -- Rack header
-                    ctx:text("▼ " .. get_fx_display_name(fx))
-                    ctx:same_line(260)
-                    if ctx:small_button("×##close_rack") then
-                        collapse_from_depth(1)
-                    end
+                ctx:same_line()
+                if ctx:small_button("UI##rack_ui") then
+                    rack:show(3)
+                end
+                ctx:same_line()
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x664444FF)
+                if ctx:small_button("×##rack_del") then
+                    rack:delete()
+                    refresh_fx_list()
+                end
+                ctx:pop_style_color()
+                
+                if is_expanded then
                     ctx:separator()
                     
-                    -- Chain rows
-                    if #children == 0 then
-                        ctx:text_disabled("Empty rack")
-                        ctx:text_disabled("Drag FX here")
+                    -- Chains area
+                    ctx:text_colored(0xAAAAAAFF, "Chains:")
+                    ctx:same_line()
+                    ctx:push_style_color(r.ImGui_Col_Button(), 0x446688FF)
+                    if ctx:small_button("+ Chain") then
+                        -- TODO: Open plugin selector or show drop zone
+                    end
+                    ctx:pop_style_color()
+                    
+                    -- Draw each chain as a row
+                    if #chains == 0 then
+                        ctx:spacing()
+                        ctx:text_disabled("No chains yet")
+                        ctx:text_disabled("Drag plugins here to create chains")
                     else
-                        for j, child in ipairs(children) do
-                            local child_name = child:get_name():sub(1, 20)
-                            local child_enabled = child:get_enabled()
+                        for j, chain in ipairs(chains) do
+                            ctx:push_id("chain_" .. j)
+                            local chain_name = chain:get_name()
+                            local chain_enabled = chain:get_enabled()
                             
-                            -- Simple FX button
-                            local btn_color = child_enabled and 0x3A4A5AFF or 0x2A2A35FF
-                            ctx:push_style_color(r.ImGui_Col_Button(), btn_color)
-                            if ctx:button(child_name .. "##child_" .. j, -1, 24) then
-                                child:show(3)
+                            -- Chain row with controls
+                            local row_color = chain_enabled and 0x3A4A5AFF or 0x2A2A35FF
+                            ctx:push_style_color(r.ImGui_Col_Button(), row_color)
+                            
+                            -- Chain button (click to expand/show)
+                            if ctx:button(chain_name:sub(1, 25) .. "##chain", -90, 28) then
+                                -- Get main FX inside the chain and show it
+                                local main_fx = get_device_main_fx(chain)
+                                if main_fx then
+                                    main_fx:show(3)
+                                else
+                                    chain:show(3)
+                                end
                             end
                             ctx:pop_style_color()
+                            
+                            -- Drop target on chain
+                            if ctx:begin_drag_drop_target() then
+                                local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                                if accepted and plugin_name then
+                                    -- Add FX to this chain
+                                    local plugin = { full_name = plugin_name, name = plugin_name }
+                                    -- TODO: Add to existing chain instead of creating new
+                                end
+                                ctx:end_drag_drop_target()
+                            end
+                            
+                            ctx:same_line()
+                            
+                            -- Enable/disable button
+                            if chain_enabled then
+                                ctx:push_style_color(r.ImGui_Col_Button(), 0x44AA44FF)
+                            else
+                                ctx:push_style_color(r.ImGui_Col_Button(), 0xAA4444FF)
+                            end
+                            if ctx:small_button(chain_enabled and "ON" or "OFF") then
+                                chain:set_enabled(not chain_enabled)
+                            end
+                            ctx:pop_style_color()
+                            
+                            ctx:same_line()
+                            
+                            -- Delete chain button
+                            ctx:push_style_color(r.ImGui_Col_Button(), 0x553333FF)
+                            if ctx:small_button("×##del_chain_" .. j) then
+                                chain:delete()
+                                refresh_fx_list()
+                            end
+                            ctx:pop_style_color()
+                            
+                            ctx:pop_id()
                         end
                     end
                     
-                    ctx:end_child()
-                end
-                ctx:pop_style_color()
-            else
-                -- Draw collapsed rack
-                ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
-                local child_count = 0
-                for _ in fx:iter_container_children() do
-                    child_count = child_count + 1
+                    -- Drop zone for adding new chains
+                    ctx:spacing()
+                    ctx:separator()
+                    ctx:spacing()
+                    
+                    local has_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
+                    if has_payload then
+                        ctx:push_style_color(r.ImGui_Col_Button(), 0x4488FF66)
+                        ctx:button("+ Drop to add chain", -1, 32)
+                        ctx:pop_style_color()
+                    else
+                        ctx:push_style_color(r.ImGui_Col_Button(), 0x33333388)
+                        ctx:button("Drag plugin here to add chain", -1, 32)
+                        ctx:pop_style_color()
+                    end
+                    
+                    if ctx:begin_drag_drop_target() then
+                        local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                        if accepted and plugin_name then
+                            local plugin = { full_name = plugin_name, name = plugin_name }
+                            add_chain_to_rack(rack, plugin)
+                        end
+                        ctx:end_drag_drop_target()
+                    end
+                    
+                    -- Mixer info
+                    if mixer then
+                        ctx:spacing()
+                        ctx:separator()
+                        ctx:text_colored(0x88AACCFF, "Mixer")
+                        ctx:same_line()
+                        if ctx:small_button("UI##mixer") then
+                            mixer:show(3)
+                        end
+                    end
+                else
+                    -- Collapsed view
+                    ctx:text_disabled(string.format("%d chains", #chains))
                 end
                 
-                if ctx:begin_child("rack_coll_" .. guid, 180, 100, imgui.ChildFlags.Border()) then
-                    if ctx:button("▶ " .. get_fx_display_name(fx):sub(1, 12), -1, 24) then
-                        state.expanded_path = { guid }
-                    end
-                    ctx:text_disabled(string.format("%d devices", child_count))
-                    ctx:end_child()
-                end
-                ctx:pop_style_color()
+                ctx:end_child()
             end
+            ctx:pop_style_color()
+            
+        elseif is_container then
+            -- Unknown container type - show basic view
+            ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
+            if ctx:begin_child("container_" .. guid, 180, 100, imgui.ChildFlags.Border()) then
+                ctx:text(get_fx_display_name(fx):sub(1, 15))
+                if ctx:small_button("Open") then
+                    fx:show(3)
+                end
+                ctx:end_child()
+            end
+            ctx:pop_style_color()
         else
             -- Regular FX - draw as device panel
             if device_panel then
