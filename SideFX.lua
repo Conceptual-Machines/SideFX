@@ -2003,8 +2003,10 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                     else
                         for j, chain in ipairs(chains) do
                             ctx:push_id("chain_" .. j)
-                            local chain_name = chain:get_name()
-                            local chain_enabled = chain:get_enabled()
+                            local ok_name, chain_raw_name = pcall(function() return chain:get_name() end)
+                            local chain_name = ok_name and get_fx_display_name(chain) or "Unknown"
+                            local ok_en, chain_enabled = pcall(function() return chain:get_enabled() end)
+                            chain_enabled = ok_en and chain_enabled or false
                             
                             -- Chain row with controls
                             local row_color = chain_enabled and 0x3A4A5AFF or 0x2A2A35FF

@@ -57,6 +57,10 @@ local sidebar_collapsed = {}
 -- Track panel collapsed state per FX (by GUID) - collapses the whole panel to just header
 local panel_collapsed = {}
 
+-- Rename state: which FX is being renamed and the edit buffer
+local rename_active = {}    -- guid -> true if rename mode active
+local rename_buffer = {}    -- guid -> current edit text
+
 --------------------------------------------------------------------------------
 -- Custom Widgets
 --------------------------------------------------------------------------------
@@ -198,15 +202,31 @@ end
 -- Helpers
 --------------------------------------------------------------------------------
 
+-- Get the internal REAPER name (with prefix)
+local function get_internal_name(fx)
+    if not fx then return "" end
+    local ok, renamed = pcall(function() return fx:get_named_config_param("renamed_name") end)
+    if ok and renamed and renamed ~= "" then
+        return renamed
+    end
+    local ok2, name = pcall(function() return fx:get_name() end)
+    return ok2 and name or ""
+end
+
+-- Extract the SideFX prefix from a name (R1_C1:, D1:, R1:)
+local function extract_prefix(name)
+    local prefix = name:match("^(R%d+_C%d+:%s*)")
+    if prefix then return prefix end
+    prefix = name:match("^(D%d+:%s*)")
+    if prefix then return prefix end
+    prefix = name:match("^(R%d+:%s*)")
+    if prefix then return prefix end
+    return ""
+end
+
 local function get_display_name(fx)
     if not fx then return "Unknown" end
-    local ok, renamed = pcall(function() return fx:get_named_config_param("renamed_name") end)
-    local name
-    if ok and renamed and renamed ~= "" then
-        name = renamed
-    else
-        name = fx:get_name()
-    end
+    local name = get_internal_name(fx)
     
     -- Strip SideFX internal prefixes for clean UI display
     -- R1_C1: Name -> Name
@@ -223,6 +243,18 @@ local function get_display_name(fx)
     name = name:gsub("^CLAP: ", "")
     
     return name
+end
+
+-- Rename an FX while preserving its internal prefix
+local function rename_fx(fx, new_display_name)
+    if not fx or not new_display_name then return false end
+    local internal_name = get_internal_name(fx)
+    local prefix = extract_prefix(internal_name)
+    local new_internal_name = prefix .. new_display_name
+    local ok = pcall(function() 
+        fx:set_named_config_param("renamed_name", new_internal_name) 
+    end)
+    return ok
 end
 
 local function truncate(str, max_len)
@@ -477,16 +509,66 @@ function M.draw(ctx, fx, opts)
                 ctx:end_drag_drop_target()
             end
             
-            -- Device name
+            -- Device name (double-click to rename)
             r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
             local max_name_len = math.floor(content_width / 7)
-            local display_name = truncate(name, max_name_len)
-            if not enabled then
-                ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
-            end
-            ctx:text(display_name)
-            if not enabled then
-                ctx:pop_style_color()
+            
+            if rename_active[state_guid] then
+                -- Rename mode: show input text
+                r.ImGui_SetNextItemWidth(ctx.ctx, content_width - 10)
+                
+                -- Focus on first frame
+                if not rename_buffer[state_guid] then
+                    rename_buffer[state_guid] = name
+                    r.ImGui_SetKeyboardFocusHere(ctx.ctx)
+                end
+                
+                local changed, new_text = r.ImGui_InputText(ctx.ctx, "##rename_" .. state_guid, rename_buffer[state_guid], r.ImGui_InputTextFlags_EnterReturnsTrue())
+                rename_buffer[state_guid] = new_text
+                
+                -- Commit on Enter
+                if changed then
+                    local target = opts.container or fx
+                    rename_fx(target, new_text)
+                    rename_active[state_guid] = nil
+                    rename_buffer[state_guid] = nil
+                    interacted = true
+                end
+                
+                -- Cancel on Escape or click elsewhere
+                if r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Escape()) or 
+                   (not r.ImGui_IsItemActive(ctx.ctx) and not r.ImGui_IsItemFocused(ctx.ctx) and rename_buffer[state_guid]) then
+                    -- Check if we lost focus (clicked elsewhere)
+                    if not r.ImGui_IsItemActive(ctx.ctx) and r.ImGui_IsMouseClicked(ctx.ctx, 0) then
+                        rename_active[state_guid] = nil
+                        rename_buffer[state_guid] = nil
+                    elseif r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Escape()) then
+                        rename_active[state_guid] = nil
+                        rename_buffer[state_guid] = nil
+                    end
+                end
+            else
+                -- Normal mode: show text, double-click to rename
+                local display_name = truncate(name, max_name_len)
+                if not enabled then
+                    ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
+                end
+                
+                -- Selectable for double-click detection
+                if r.ImGui_Selectable(ctx.ctx, display_name .. "##name_" .. state_guid, false, r.ImGui_SelectableFlags_AllowDoubleClick(), content_width - 10, 0) then
+                    if r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                        rename_active[state_guid] = true
+                        rename_buffer[state_guid] = name
+                        interacted = true
+                    end
+                end
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Double-click to rename")
+                end
+                
+                if not enabled then
+                    ctx:pop_style_color()
+                end
             end
             
             -- Close button
