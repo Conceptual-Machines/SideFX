@@ -176,14 +176,11 @@ local find_paired_utility = fx_utils.find_paired_utility
 
 -- Use fx_utils module for container type detection
 local is_device_container = fx_utils.is_device_container
-local is_chain_container = fx_utils.is_chain_container
 local is_rack_container = fx_utils.is_rack_container
 
 -- Use fx_utils module for device helpers
 local get_device_main_fx = fx_utils.get_device_main_fx
 get_device_utility = fx_utils.get_device_utility
-
-local get_short_plugin_name = naming.get_short_plugin_name
 
 -- Renumber all D-containers after chain changes
 renumber_device_chain = function()
