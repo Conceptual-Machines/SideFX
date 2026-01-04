@@ -1,5 +1,5 @@
 --- Reaper 7 Container API helpers.
--- Thin wrapper around TrackFX container functions.
+-- Provides container utilities working with ReaWrap TrackFX objects.
 -- @module container
 -- @author Nomad Monad
 -- @license MIT
@@ -9,104 +9,82 @@ local r = reaper
 local M = {}
 
 --------------------------------------------------------------------------------
--- Container Query Functions
+-- Container Query Functions (using ReaWrap TrackFX)
 --------------------------------------------------------------------------------
 
 --- Get a named config parameter from an FX.
--- @param track MediaTrack* Track pointer
--- @param fx_idx number FX index
+-- @param fx TrackFX ReaWrap FX object
 -- @param param_name string Parameter name
 -- @return string|nil Value or nil if not found
-function M.get_param(track, fx_idx, param_name)
-    local ok, value = r.TrackFX_GetNamedConfigParm(track, fx_idx, param_name)
-    if ok then
-        return value
-    end
-    return nil
+function M.get_param(fx, param_name)
+    local ok, value = pcall(function()
+        return fx:get_named_config_param(param_name)
+    end)
+    return ok and value or nil
 end
 
 --- Set a named config parameter on an FX.
--- @param track MediaTrack* Track pointer
--- @param fx_idx number FX index
+-- @param fx TrackFX ReaWrap FX object
 -- @param param_name string Parameter name
 -- @param value string Value to set
 -- @return boolean Success
-function M.set_param(track, fx_idx, param_name, value)
-    return r.TrackFX_SetNamedConfigParm(track, fx_idx, param_name, tostring(value))
+function M.set_param(fx, param_name, value)
+    local ok = pcall(function()
+        return fx:set_named_config_param(param_name, tostring(value))
+    end)
+    return ok
 end
 
 --- Check if an FX is a container.
--- @param track MediaTrack* Track pointer
--- @param fx_idx number FX index
+-- @param fx TrackFX ReaWrap FX object
 -- @return boolean
-function M.is_container(track, fx_idx)
-    local count = M.get_param(track, fx_idx, "container_count")
-    return count ~= nil
+function M.is_container(fx)
+    local ok, is_cont = pcall(function() return fx:is_container() end)
+    return ok and is_cont
 end
 
 --- Get the number of FX in a container.
--- @param track MediaTrack* Track pointer
--- @param container_idx number Container FX index
+-- @param container TrackFX Container FX object
 -- @return number Count (0 if not a container)
-function M.get_child_count(track, container_idx)
-    local count = M.get_param(track, container_idx, "container_count")
-    return count and tonumber(count) or 0
+function M.get_child_count(container)
+    local ok, count = pcall(function() return container:get_container_child_count() end)
+    return ok and count or 0
 end
 
---- Get child FX indices from a container.
--- @param track MediaTrack* Track pointer
--- @param container_idx number Container FX index
--- @return table Array of child FX indices
-function M.get_children(track, container_idx)
-    local count = M.get_child_count(track, container_idx)
+--- Get child FX from a container.
+-- @param container TrackFX Container FX object
+-- @return table Array of TrackFX objects
+function M.get_children(container)
     local children = {}
-    for i = 0, count - 1 do
-        local child_id = M.get_param(track, container_idx, "container_item." .. i)
-        if child_id then
-            children[#children + 1] = tonumber(child_id)
+    local ok = pcall(function()
+        for child in container:iter_container_children() do
+            children[#children + 1] = child
         end
-    end
+    end)
     return children
 end
 
 --- Get the parent container of an FX.
--- @param track MediaTrack* Track pointer
--- @param fx_idx number FX index
--- @return number|nil Parent container index, or nil if top-level
-function M.get_parent(track, fx_idx)
-    local parent = M.get_param(track, fx_idx, "parent_container")
-    return parent and tonumber(parent) or nil
+-- @param fx TrackFX ReaWrap FX object
+-- @return TrackFX|nil Parent container, or nil if top-level
+function M.get_parent(fx)
+    local ok, parent = pcall(function() return fx:get_parent_container() end)
+    return ok and parent or nil
 end
 
 --- Get FX type string.
--- @param track MediaTrack* Track pointer
--- @param fx_idx number FX index
+-- @param fx TrackFX ReaWrap FX object
 -- @return string|nil FX type (e.g., "VST", "VST3", "JS", "Container")
-function M.get_fx_type(track, fx_idx)
-    return M.get_param(track, fx_idx, "fx_type")
+function M.get_fx_type(fx)
+    return M.get_param(fx, "fx_type")
 end
 
 --- Get FX name.
--- @param track MediaTrack* Track pointer
--- @param fx_idx number FX index
+-- @param fx TrackFX ReaWrap FX object
 -- @return string FX name
-function M.get_fx_name(track, fx_idx)
-    local ok, name = r.TrackFX_GetFXName(track, fx_idx)
+function M.get_fx_name(fx)
+    local ok, name = pcall(function() return fx:get_name() end)
     return ok and name or "Unknown"
-end
-
---- Check if an FX is an instrument (VSTi, etc).
--- @param track MediaTrack* Track pointer
--- @param fx_idx number FX index
--- @return boolean
-function M.is_instrument(track, fx_idx)
-    local instrument_idx = r.TrackFX_GetInstrument(track)
-    if instrument_idx < 0 then
-        return false
-    end
-    -- Check if this FX or any of its parents is the instrument
-    -- For now, simple check - could be enhanced
-    return fx_idx == instrument_idx
 end
 
 --------------------------------------------------------------------------------
@@ -114,101 +92,92 @@ end
 --------------------------------------------------------------------------------
 
 --- Get container internal channel count.
--- @param track MediaTrack* Track pointer
--- @param container_idx number Container FX index
+-- @param container TrackFX Container FX object
 -- @return number Channel count
-function M.get_channel_count(track, container_idx)
-    local nch = M.get_param(track, container_idx, "container_nch")
-    return nch and tonumber(nch) or 2
+function M.get_channel_count(container)
+    local ok, nch = pcall(function() return container:get_container_channels() end)
+    return ok and nch or 2
 end
 
 --- Set container internal channel count.
--- @param track MediaTrack* Track pointer
--- @param container_idx number Container FX index
+-- @param container TrackFX Container FX object
 -- @param channels number Channel count (2, 4, 6, 8, etc.)
 -- @return boolean Success
-function M.set_channel_count(track, container_idx, channels)
-    return M.set_param(track, container_idx, "container_nch", channels)
+function M.set_channel_count(container, channels)
+    local ok = pcall(function()
+        return container:set_container_channels(channels)
+    end)
+    return ok
 end
 
 --- Get container input pin count.
--- @param track MediaTrack* Track pointer
--- @param container_idx number Container FX index
+-- @param container TrackFX Container FX object
 -- @return number Input pin count
-function M.get_input_pins(track, container_idx)
-    local pins = M.get_param(track, container_idx, "container_nch_in")
-    return pins and tonumber(pins) or 2
+function M.get_input_pins(container)
+    local val = M.get_param(container, "container_nch_in")
+    return val and tonumber(val) or 2
 end
 
 --- Set container input pin count.
--- @param track MediaTrack* Track pointer
--- @param container_idx number Container FX index
+-- @param container TrackFX Container FX object
 -- @param pins number Input pin count
 -- @return boolean Success
-function M.set_input_pins(track, container_idx, pins)
-    return M.set_param(track, container_idx, "container_nch_in", pins)
+function M.set_input_pins(container, pins)
+    return M.set_param(container, "container_nch_in", pins)
 end
 
 --- Get container output pin count.
--- @param track MediaTrack* Track pointer
--- @param container_idx number Container FX index
+-- @param container TrackFX Container FX object
 -- @return number Output pin count
-function M.get_output_pins(track, container_idx)
-    local pins = M.get_param(track, container_idx, "container_nch_out")
-    return pins and tonumber(pins) or 2
+function M.get_output_pins(container)
+    local val = M.get_param(container, "container_nch_out")
+    return val and tonumber(val) or 2
 end
 
 --- Set container output pin count.
--- @param track MediaTrack* Track pointer
--- @param container_idx number Container FX index
+-- @param container TrackFX Container FX object
 -- @param pins number Output pin count
 -- @return boolean Success
-function M.set_output_pins(track, container_idx, pins)
-    return M.set_param(track, container_idx, "container_nch_out", pins)
+function M.set_output_pins(container, pins)
+    return M.set_param(container, "container_nch_out", pins)
 end
 
 --------------------------------------------------------------------------------
--- Container Creation & Manipulation
+-- Container Creation & Manipulation (using ReaWrap Track)
 --------------------------------------------------------------------------------
 
 --- Create an empty container on a track.
--- @param track MediaTrack* Track pointer
+-- @param track Track ReaWrap Track object
 -- @param position number|nil Insert position (nil = end of chain)
--- @return number Container FX index, or -1 on failure
+-- @return TrackFX|nil Container FX object, or nil on failure
 function M.create(track, position)
-    local insert_pos = position or -1
-    return r.TrackFX_AddByName(track, "Container", false, insert_pos)
+    local ok, container = pcall(function()
+        return track:add_fx_by_name("Container", false, position or -1)
+    end)
+    return ok and container or nil
 end
 
 --- Move an FX into a container.
--- @param track MediaTrack* Track pointer
--- @param fx_idx number FX to move
--- @param container_idx number Destination container
+-- @param fx TrackFX FX to move
+-- @param container TrackFX Destination container
 -- @param position number|nil Position within container (nil = end)
 -- @return boolean Success
-function M.move_fx_to_container(track, fx_idx, container_idx, position)
-    -- Calculate the destination index within the container
-    local child_count = M.get_child_count(track, container_idx)
-    local dest_pos = position or child_count
-    
-    -- The destination FX index format for containers: container_idx + 0x2000000 + child_position
-    local dest_idx = container_idx + 0x2000000 + dest_pos
-    
-    return r.TrackFX_CopyToTrack(track, fx_idx, track, dest_idx, true) -- true = move
+function M.move_fx_to_container(fx, container, position)
+    local ok = pcall(function()
+        return container:add_fx_to_container(fx, position)
+    end)
+    return ok
 end
 
---- Copy an FX into a container.
--- @param track MediaTrack* Track pointer
--- @param fx_idx number FX to copy
--- @param container_idx number Destination container
--- @param position number|nil Position within container (nil = end)
+--- Move an FX out of its container to track level.
+-- @param fx TrackFX FX to move
+-- @param position number|nil Position at track level (nil = end)
 -- @return boolean Success
-function M.copy_fx_to_container(track, fx_idx, container_idx, position)
-    local child_count = M.get_child_count(track, container_idx)
-    local dest_pos = position or child_count
-    local dest_idx = container_idx + 0x2000000 + dest_pos
-    
-    return r.TrackFX_CopyToTrack(track, fx_idx, track, dest_idx, false) -- false = copy
+function M.move_fx_out_of_container(fx, position)
+    local ok = pcall(function()
+        return fx:move_out_of_container(position)
+    end)
+    return ok
 end
 
 --------------------------------------------------------------------------------
@@ -216,11 +185,10 @@ end
 --------------------------------------------------------------------------------
 
 --- Iterate over all FX in a container (non-recursive).
--- @param track MediaTrack* Track pointer
--- @param container_idx number Container FX index
--- @return function Iterator yielding (fx_idx, position)
-function M.iter_children(track, container_idx)
-    local children = M.get_children(track, container_idx)
+-- @param container TrackFX Container FX object
+-- @return function Iterator yielding (fx, position)
+function M.iter_children(container)
+    local children = M.get_children(container)
     local i = 0
     return function()
         i = i + 1
@@ -231,16 +199,15 @@ function M.iter_children(track, container_idx)
 end
 
 --- Get container hierarchy info for an FX.
--- @param track MediaTrack* Track pointer
--- @param fx_idx number FX index
--- @return table {depth: number, path: table of parent indices}
-function M.get_hierarchy(track, fx_idx)
+-- @param fx TrackFX ReaWrap FX object
+-- @return table {depth: number, path: table of parent FX objects}
+function M.get_hierarchy(fx)
     local path = {}
-    local current = fx_idx
+    local current = fx
     local depth = 0
     
     while true do
-        local parent = M.get_parent(track, current)
+        local parent = M.get_parent(current)
         if not parent then
             break
         end
@@ -260,34 +227,33 @@ end
 --------------------------------------------------------------------------------
 
 --- Get a flat list of all FX on a track (including inside containers).
--- @param track MediaTrack* Track pointer
--- @return table Array of {fx_idx, name, is_container, depth}
+-- @param track Track ReaWrap Track object
+-- @return table Array of {fx, name, is_container, depth}
 function M.get_all_fx_flat(track)
     local result = {}
-    local fx_count = r.TrackFX_GetCount(track)
     
-    local function add_fx(fx_idx, depth)
-        local name = M.get_fx_name(track, fx_idx)
-        local is_cont = M.is_container(track, fx_idx)
+    local function add_fx(fx, depth)
+        local name = M.get_fx_name(fx)
+        local is_cont = M.is_container(fx)
         
         result[#result + 1] = {
-            fx_idx = fx_idx,
+            fx = fx,
             name = name,
             is_container = is_cont,
             depth = depth
         }
         
         if is_cont then
-            for child_idx in M.iter_children(track, fx_idx) do
-                add_fx(child_idx, depth + 1)
+            for child in M.iter_children(fx) do
+                add_fx(child, depth + 1)
             end
         end
     end
     
-    for i = 0, fx_count - 1 do
+    for fx in track:iter_track_fx_chain() do
         -- Only add top-level FX (those without a parent)
-        if not M.get_parent(track, i) then
-            add_fx(i, 0)
+        if not M.get_parent(fx) then
+            add_fx(fx, 0)
         end
     end
     
@@ -295,15 +261,14 @@ function M.get_all_fx_flat(track)
 end
 
 --- Print container structure to console (debug).
--- @param track MediaTrack* Track pointer
+-- @param track Track ReaWrap Track object
 function M.debug_print_structure(track)
     local indent = "  "
-    for _, fx in ipairs(M.get_all_fx_flat(track)) do
-        local prefix = string.rep(indent, fx.depth)
-        local suffix = fx.is_container and " [Container]" or ""
-        reaper.ShowConsoleMsg(string.format("%s%s%s\n", prefix, fx.name, suffix))
+    for _, item in ipairs(M.get_all_fx_flat(track)) do
+        local prefix = string.rep(indent, item.depth)
+        local suffix = item.is_container and " [Container]" or ""
+        r.ShowConsoleMsg(string.format("%s%s%s\n", prefix, item.name, suffix))
     end
 end
 
 return M
-
