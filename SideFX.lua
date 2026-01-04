@@ -1984,7 +1984,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                 end
             end
             
-            local rack_w = is_expanded and 400 or 180
+            local rack_w = is_expanded and 200 or 150
             local rack_h = math.min(avail_height - 20, is_expanded and 450 or 120)
             
             ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252535FF)
@@ -2158,7 +2158,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                     end
                     
                     -- Draw chain contents column
-                    local chain_col_w = 300
+                    local chain_col_w = 500
                     ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x2A2A35FF)
                     if ctx:begin_child("chain_contents_" .. selected_chain_guid, chain_col_w, rack_h, imgui.ChildFlags.Border()) then
                         -- Chain header
