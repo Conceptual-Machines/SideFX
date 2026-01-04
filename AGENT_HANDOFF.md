@@ -56,13 +56,43 @@ The sidebar provides per-FX controls:
 Created `jsfx/SideFX_Utility.jsfx`:
 - Gain (dB), Pan, Phase L, Phase R controls
 - Level metering
-- **Auto-inserted** after every non-utility FX added to track
+- **Auto-inserted** inside D-container with each FX
 
 Installation: Symlinked to REAPER's Effects folder:
 ```bash
 ln -sf ".../SideFX/jsfx/SideFX_Utility.jsfx" ".../reaper-portable/Effects/SideFX/"
 ln -sf ".../SideFX/jsfx/SideFX_Modulator.jsfx" ".../reaper-portable/Effects/SideFX/"
 ```
+
+### 6. D-Container Architecture
+FX are now wrapped in "Device Containers" (D-prefix):
+
+```
+Track Chain:
+├── D1: ReaEQ              ← D-Container
+│   ├── ReaEQ              ← Main FX
+│   └── D1_Util            ← Utility JSFX
+├── D2: ReaComp
+│   ├── ReaComp
+│   └── D2_Util
+```
+
+**Benefits:**
+- Move FX + utility as a single unit
+- Cleaner chain organization
+- Self-documenting names in REAPER's native FX window
+- Auto-renumbering when chain order changes
+
+**Container Types:**
+| Prefix | Type | Description |
+|--------|------|-------------|
+| D | Device | Wraps single FX + utility |
+| R | Rack | Parallel chains (planned) |
+
+**Naming Format:**
+- Device: `D{n}: {fx_name}` (e.g., `D1: ReaEQ`)
+- Utility: `D{n}_Util` (e.g., `D1_Util`)
+- Nested: `D{n}.{m}: {name}` (inside racks)
 
 ### 6. Parameter Detection
 Smart detection for switch vs continuous parameters:

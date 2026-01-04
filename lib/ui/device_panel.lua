@@ -314,8 +314,17 @@ function M.draw(ctx, fx, opts)
     local ok, guid = pcall(function() return fx:get_guid() end)
     if not ok or not guid then return false end
     
+    -- Use container GUID for drag/drop if we have a container
+    local container = opts.container
+    local drag_guid = container and container:get_guid() or guid
+    
     local ok2, name = pcall(function() return get_display_name(fx) end)
     if not ok2 then name = "Unknown" end
+    
+    -- Use container name if provided (shows D-prefix)
+    if opts.container_name then
+        name = opts.container_name
+    end
     
     local ok3, enabled = pcall(function() return fx:get_enabled() end)
     if not ok3 then enabled = false end
@@ -343,11 +352,14 @@ function M.draw(ctx, fx, opts)
     -- Use available height passed in opts, or default
     local avail_height = opts.avail_height or 600
     
+    -- Use drag_guid for state (container GUID if applicable)
+    local state_guid = drag_guid
+    
     -- Check if panel is collapsed (just header bar)
-    local is_panel_collapsed = panel_collapsed[guid] or false
+    local is_panel_collapsed = panel_collapsed[state_guid] or false
     
     -- Check if sidebar is collapsed
-    local is_sidebar_collapsed = sidebar_collapsed[guid] or false
+    local is_sidebar_collapsed = sidebar_collapsed[state_guid] or false
     local collapsed_sidebar_w = 8  -- Minimal width when collapsed (button is in header)
     
     -- Calculate dimensions based on collapsed state
@@ -411,14 +423,13 @@ function M.draw(ctx, fx, opts)
             
             -- Drag handle / collapse toggle
             r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
-            local is_panel_collapsed = panel_collapsed[guid] or false
             ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
             ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
             ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
             local collapse_icon = is_panel_collapsed and "▶" or "≡"
             if ctx:button(collapse_icon .. "##drag", 20, 20) then
                 -- Toggle panel collapse on click
-                panel_collapsed[guid] = not is_panel_collapsed
+                panel_collapsed[state_guid] = not is_panel_collapsed
                 interacted = true
             end
             ctx:pop_style_color(3)
@@ -427,7 +438,7 @@ function M.draw(ctx, fx, opts)
             end
             
             if ctx:begin_drag_drop_source() then
-                ctx:set_drag_drop_payload("FX_GUID", guid)
+                ctx:set_drag_drop_payload("FX_GUID", drag_guid)
                 ctx:text("Moving: " .. truncate(name, 20))
                 ctx:end_drag_drop_source()
             end
@@ -435,14 +446,14 @@ function M.draw(ctx, fx, opts)
             if ctx:begin_drag_drop_target() then
                 -- Accept FX reorder drops
                 local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
-                if accepted and payload and payload ~= guid then
+                if accepted and payload and payload ~= drag_guid then
                     if opts.on_drop then
-                        opts.on_drop(payload, guid)
+                        opts.on_drop(payload, drag_guid)
                     end
                     interacted = true
                 end
                 
-                -- Accept plugin drops (insert before this FX)
+                -- Accept plugin drops (insert before this FX/container)
                 local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
                 if accepted_plugin and plugin_name then
                     if opts.on_plugin_drop then
@@ -487,14 +498,14 @@ function M.draw(ctx, fx, opts)
                 ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
                 if is_sidebar_collapsed then
                     if ctx:small_button("▶") then
-                        sidebar_collapsed[guid] = false
+                        sidebar_collapsed[state_guid] = false
                     end
                     if r.ImGui_IsItemHovered(ctx.ctx) then
                         ctx:set_tooltip("Expand sidebar")
                     end
                 else
                     if ctx:small_button("◀") then
-                        sidebar_collapsed[guid] = true
+                        sidebar_collapsed[state_guid] = true
                     end
                     if r.ImGui_IsItemHovered(ctx.ctx) then
                         ctx:set_tooltip("Collapse sidebar")

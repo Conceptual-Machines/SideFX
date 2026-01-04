@@ -179,6 +179,9 @@ local function refresh_fx_list()
         end
     end
     state.last_fx_count = state.track:get_track_fx_count()
+    
+    -- Renumber D-containers after any chain change
+    renumber_device_chain()
 end
 
 local function clear_multi_select()
@@ -352,41 +355,194 @@ local function find_paired_utility(track, fx)
     return nil
 end
 
-local function add_plugin_to_track(plugin, position)
-    if not state.track then return end
+--------------------------------------------------------------------------------
+-- D-Container (Device) Helpers
+--------------------------------------------------------------------------------
 
-    r.Undo_BeginBlock()
+-- Check if a container is a SideFX device container (D-prefix)
+local function is_device_container(fx)
+    if not fx then return false end
+    local ok, is_cont = pcall(function() return fx:is_container() end)
+    if not ok or not is_cont then return false end
     
-    -- Position: -1 = end, 0+ = specific position
-    -- REAPER uses negative values for position: -1 = end, -1000 - position = insert at position
-    local fx_position = position and (-1000 - position) or -1
+    local ok2, name = pcall(function() return fx:get_name() end)
+    if not ok2 or not name then return false end
     
-    -- Add the FX
-    local fx = state.track:add_fx_by_name(plugin.full_name, false, fx_position)
+    return name:match("^D%d") ~= nil
+end
+
+-- Check if a container is a SideFX rack container (R-prefix)
+local function is_rack_container(fx)
+    if not fx then return false end
+    local ok, is_cont = pcall(function() return fx:is_container() end)
+    if not ok or not is_cont then return false end
     
-    -- Auto-insert SideFX_Utility after it (unless it's already a utility or modulator)
-    if fx and fx.pointer >= 0 then
-        -- Set wet/dry to 100% by default
-        local wet_idx = fx:get_param_from_ident(":wet")
-        if wet_idx >= 0 then
-            fx:set_param_normalized(wet_idx, 1.0)  -- 100% wet
+    local ok2, name = pcall(function() return fx:get_name() end)
+    if not ok2 or not name then return false end
+    
+    return name:match("^R%d") ~= nil
+end
+
+-- Get the main FX from a D-container (first non-utility child)
+local function get_device_main_fx(container)
+    if not container then return nil end
+    for child in container:iter_container_children() do
+        if not is_utility_fx(child) then
+            return child
         end
-        
-        local name = plugin.full_name:lower()
-        if not name:find("sidefx_utility") and not name:find("sidefx_modulator") then
-            -- Insert utility right after the FX we just added
-            local util_position = position and (-1000 - (fx.pointer + 1)) or -1
-            local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, util_position)
-            if not util_fx or util_fx.pointer < 0 then
-                r.ShowConsoleMsg("SideFX: Could not add utility JSFX. Make sure SideFX_Utility.jsfx is installed in REAPER's Effects/SideFX folder.\n")
+    end
+    return nil
+end
+
+-- Get the utility FX from a D-container
+local function get_device_utility(container)
+    if not container then return nil end
+    for child in container:iter_container_children() do
+        if is_utility_fx(child) then
+            return child
+        end
+    end
+    return nil
+end
+
+-- Count D-containers at top level to get next index
+local function get_next_device_index()
+    if not state.track then return 1 end
+    local max_idx = 0
+    for fx in state.track:iter_track_fx_chain() do
+        local parent = fx:get_parent_container()
+        if not parent then  -- Top level only
+            local name = fx:get_name()
+            local idx = name:match("^D(%d+)")
+            if idx then
+                max_idx = math.max(max_idx, tonumber(idx))
             end
         end
+    end
+    return max_idx + 1
+end
+
+-- Get short name from plugin full name (strip prefixes)
+local function get_short_plugin_name(full_name)
+    local name = full_name
+    -- Strip common prefixes
+    name = name:gsub("^VST3?: ", "")
+    name = name:gsub("^AU: ", "")
+    name = name:gsub("^JS: ", "")
+    name = name:gsub("^CLAP: ", "")
+    name = name:gsub("^VSTi: ", "")
+    -- Strip path for JS
+    name = name:gsub("^.+/", "")
+    return name
+end
+
+-- Renumber all D-containers after chain changes
+local function renumber_device_chain()
+    if not state.track then return end
+    
+    local device_idx = 0
+    for fx in state.track:iter_track_fx_chain() do
+        local parent = fx:get_parent_container()
+        if not parent then  -- Top level only
+            local name = fx:get_name()
+            
+            -- Check if it's a D-container
+            local old_idx, fx_name = name:match("^D(%d+): (.+)$")
+            if old_idx and fx_name then
+                device_idx = device_idx + 1
+                local new_name = string.format("D%d: %s", device_idx, fx_name)
+                if new_name ~= name then
+                    r.TrackFX_SetNamedConfigParm(state.track.pointer, fx.pointer, "renamed_name", new_name)
+                    
+                    -- Also rename utility inside
+                    local utility = get_device_utility(fx)
+                    if utility then
+                        local util_name = string.format("D%d_Util", device_idx)
+                        r.TrackFX_SetNamedConfigParm(state.track.pointer, utility.pointer, "renamed_name", util_name)
+                    end
+                end
+            end
+            
+            -- Check if it's an R-container (rack)
+            local rack_idx = name:match("^R(%d+)")
+            if rack_idx then
+                device_idx = device_idx + 1
+                -- TODO: Renumber rack and its children
+            end
+        end
+    end
+end
+
+local function add_plugin_to_track(plugin, position)
+    if not state.track then return end
+    
+    local name_lower = plugin.full_name:lower()
+    
+    -- Don't wrap modulators in containers
+    if name_lower:find("sidefx_modulator") then
+        r.Undo_BeginBlock()
+        local fx_position = position and (-1000 - position) or -1
+        local fx = state.track:add_fx_by_name(plugin.full_name, false, fx_position)
+        r.Undo_EndBlock("SideFX: Add Modulator", -1)
+        refresh_fx_list()
+        return fx
+    end
+    
+    -- Don't wrap utilities in containers (shouldn't be added directly anyway)
+    if name_lower:find("sidefx_utility") then
+        return nil
+    end
+
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+    
+    -- Get next device index
+    local device_idx = get_next_device_index()
+    local short_name = get_short_plugin_name(plugin.full_name)
+    local container_name = string.format("D%d: %s", device_idx, short_name)
+    
+    -- Position for the container
+    local container_position = position and (-1000 - position) or -1
+    
+    -- Create the container first
+    local container = state.track:add_fx_by_name("Container", false, container_position)
+    
+    if container and container.pointer >= 0 then
+        -- Rename the container
+        r.TrackFX_SetNamedConfigParm(state.track.pointer, container.pointer, "renamed_name", container_name)
+        
+        -- Add the main FX inside the container
+        -- Container child addressing: 0x2000000 + container_idx * 0x1000 + child_position
+        local container_addr = 0x2000000 + container.pointer * 0x1000
+        local fx_idx = r.TrackFX_AddByName(state.track.pointer, plugin.full_name, false, container_addr)
+        
+        if fx_idx >= 0 then
+            -- Set wet/dry to 100% by default
+            local retval, wet_idx = r.TrackFX_GetParamFromIdent(state.track.pointer, fx_idx, ":wet")
+            if wet_idx >= 0 then
+                r.TrackFX_SetParamNormalized(state.track.pointer, fx_idx, wet_idx, 1.0)
+            end
+            
+            -- Add utility after the main FX (child position 1)
+            local util_addr = 0x2000000 + container.pointer * 0x1000 + 1
+            local util_idx = r.TrackFX_AddByName(state.track.pointer, UTILITY_JSFX, false, util_addr)
+            
+            if util_idx < 0 then
+                r.ShowConsoleMsg("SideFX: Could not add utility JSFX. Make sure SideFX_Utility.jsfx is installed in REAPER's Effects/SideFX folder.\n")
+            else
+                -- Rename utility
+                local util_name = string.format("D%d_Util", device_idx)
+                r.TrackFX_SetNamedConfigParm(state.track.pointer, util_idx, "renamed_name", util_name)
+            end
+        end
+        
         refresh_fx_list()
     end
     
-    r.Undo_EndBlock("SideFX: Add FX", -1)
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Add Device", -1)
     
-    return fx
+    return container
 end
 
 -- Add plugin by name at a specific position
@@ -1445,17 +1601,45 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
         if ok then rack_panel = mod end
     end
     
-    -- Filter out utility FX from display (they're shown in sidebar)
+    -- Build display list - handles D-containers and legacy FX
     local display_fx = {}
     for i, fx in ipairs(fx_list) do
-        if not is_utility_fx(fx) then
-            -- Find paired utility (next FX if it's a utility)
+        if is_device_container(fx) then
+            -- D-container: extract main FX and utility from inside
+            local main_fx = get_device_main_fx(fx)
+            local utility = get_device_utility(fx)
+            if main_fx then
+                table.insert(display_fx, {
+                    fx = main_fx,
+                    utility = utility,
+                    container = fx,  -- Reference to the container
+                    original_idx = fx.pointer,
+                    is_device = true,
+                })
+            end
+        elseif is_rack_container(fx) then
+            -- R-container (rack) - handle differently
+            table.insert(display_fx, {
+                fx = fx,
+                container = fx,
+                original_idx = fx.pointer,
+                is_rack = true,
+            })
+        elseif not is_utility_fx(fx) and not fx:is_container() then
+            -- Legacy FX (not in container) - show with paired utility if exists
             local utility = nil
             if i < #fx_list and is_utility_fx(fx_list[i + 1]) then
                 utility = fx_list[i + 1]
             end
-            table.insert(display_fx, { fx = fx, utility = utility, original_idx = fx.pointer })
+            table.insert(display_fx, {
+                fx = fx,
+                utility = utility,
+                original_idx = fx.pointer,
+                is_legacy = true,
+            })
         end
+        -- Skip standalone utilities (they're shown in sidebar)
+        -- Skip unknown containers
     end
     
     if #display_fx == 0 then
@@ -1559,19 +1743,30 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
         else
             -- Regular FX - draw as device panel
             if device_panel then
+                -- Determine what to use for drag/delete operations
+                local container = item.container  -- D-container if exists
+                local drag_target = container or fx
+                
                 device_panel.draw(ctx, fx, {
                     avail_height = avail_height - 10,
                     utility = utility,  -- Paired SideFX_Utility for gain/pan
+                    container = container,  -- Pass container reference
+                    container_name = container and container:get_name() or nil,
                     on_delete = function(fx_to_delete)
-                        -- Also delete paired utility if exists
-                        if utility then
-                            utility:delete()
+                        if container then
+                            -- Delete the whole D-container
+                            container:delete()
+                        else
+                            -- Legacy: delete FX and paired utility
+                            if utility then
+                                utility:delete()
+                            end
+                            fx_to_delete:delete()
                         end
-                        fx_to_delete:delete()
                         refresh_fx_list()
                     end,
                     on_drop = function(dragged_guid, target_guid)
-                        -- Handle FX reordering
+                        -- Handle FX/container reordering
                         local dragged = state.track:find_fx_by_guid(dragged_guid)
                         local target = state.track:find_fx_by_guid(target_guid)
                         if dragged and target then
@@ -1584,8 +1779,9 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                         end
                     end,
                     on_plugin_drop = function(plugin_name, insert_before_idx)
-                        -- Add plugin before this FX
-                        add_plugin_by_name(plugin_name, insert_before_idx)
+                        -- Add plugin before this FX/container
+                        local insert_pos = container and container.pointer or insert_before_idx
+                        add_plugin_by_name(plugin_name, insert_pos)
                     end,
                 })
             else
