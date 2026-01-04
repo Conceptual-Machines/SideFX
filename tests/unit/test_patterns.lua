@@ -98,7 +98,7 @@ function M.run()
     assert.section("truncate")
     
     assert.equals("Hello", naming.truncate("Hello", 10), "no truncation when short")
-    assert.equals("Hello W..", naming.truncate("Hello World", 10), "truncates with ellipsis")
+    assert.equals("Hello Wo..", naming.truncate("Hello World", 10), "truncates with ellipsis")
     assert.equals("", naming.truncate("", 10), "handles empty string")
     assert.equals("", naming.truncate(nil, 10), "handles nil")
 end
