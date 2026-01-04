@@ -81,6 +81,15 @@ local Project = require('project')
 local Plugins = require('plugins')
 local helpers = require('helpers')
 
+-- SideFX modules
+local naming = require('lib.naming')
+local fx_utils = require('lib.fx_utils')
+local state_module = require('lib.state')
+local rack_module = require('lib.rack')
+local device_module = require('lib.device')
+local container_module = require('lib.container')
+local modulator_module = require('lib.modulator')
+
 --------------------------------------------------------------------------------
 -- Icons (using OpenMoji font)
 --------------------------------------------------------------------------------
@@ -107,196 +116,45 @@ local function icon_text(icon_id)
 end
 
 --------------------------------------------------------------------------------
--- State
+-- State (from lib/state.lua)
 --------------------------------------------------------------------------------
 
-local state = {
-    track = nil,
-    track_name = "No track selected",
-
-    -- FX data
-    top_level_fx = {},
-    last_fx_count = 0,  -- For detecting external FX changes
-
-    -- Column navigation: list of expanded container GUIDs (breadcrumb trail)
-    expanded_path = {},  -- e.g. {container1_guid, container2_guid, ...}
-
-    -- Selected FX for detail panel
-    selected_fx = nil,
-
-    -- Multi-select for operations
-    multi_select = {},
-
-    -- Rename state
-    renaming_fx = nil,  -- GUID of FX being renamed
-    rename_text = "",    -- Current rename text
-
-    show_debug = false,
-
-    -- Plugin browser state
-    browser = {
-        search = "",
-        filter = "all",
-        plugins = {},
-        filtered = {},
-        scanned = false,
-    },
-    
-    -- Modulator state
-    modulators = {},  -- List of {fx_idx, links = {{target_fx_idx, param_idx}, ...}}
-    mod_link_selecting = nil,  -- {mod_idx, selecting = true} when choosing target
-    mod_selected_target = {},  -- {[mod_fx_idx] = {fx_idx, fx_name}} for two-dropdown linking
-}
+local state = state_module.state
 
 -- Create dynamic REAPER theme (reads actual theme colors)
 local reaper_theme = theme.from_reaper_theme("REAPER Dynamic")
 
 --------------------------------------------------------------------------------
--- Helpers
+-- Helpers (from lib/state.lua)
 --------------------------------------------------------------------------------
-
-local project = Project:new()
 
 -- Forward declarations for functions defined later
 local renumber_device_chain
 local get_device_utility
 local renumber_chains_in_rack
 
-local function get_selected_track()
-    if not project:has_selected_tracks() then
-        return nil, "No track selected"
-    end
-    local track = project:get_selected_track(0)
-    return track, track:get_name()
-end
+-- Use state module functions
+local get_selected_track = state_module.get_selected_track
+local clear_multi_select = state_module.clear_multi_select
+local check_fx_changes = state_module.check_fx_changes
+local get_container_children = state_module.get_container_children
+local get_multi_selected_fx = state_module.get_multi_selected_fx
+local get_multi_select_count = state_module.get_multi_select_count
 
+-- Local wrapper for refresh_fx_list that sets up the callback
 local function refresh_fx_list()
-    state.top_level_fx = {}
-    if not state.track then 
-        state.last_fx_count = 0
-        return 
-    end
-
-    for fx in state.track:iter_track_fx_chain() do
-        local parent = fx:get_parent_container()
-        if not parent then
-            state.top_level_fx[#state.top_level_fx + 1] = fx
-        end
-    end
-    state.last_fx_count = state.track:get_track_fx_count()
-    
-    -- Renumber D-containers after any chain change
-    renumber_device_chain()
+    -- Set callback before refreshing
+    state_module.on_refresh = renumber_device_chain
+    state_module.refresh_fx_list()
 end
 
-local function clear_multi_select()
-    state.multi_select = {}
-end
+-- Use fx_utils module for display name
+local get_fx_display_name = fx_utils.get_display_name
 
--- Check if FX chain changed externally and refresh if needed
-local function check_fx_changes()
-    if not state.track then return end
-    local current_count = state.track:get_track_fx_count()
-    if current_count ~= state.last_fx_count then
-        refresh_fx_list()
-        -- Clear invalid selections
-        clear_multi_select()
-        state.selected_fx = nil
-        -- Validate expanded_path - remove any GUIDs that no longer exist
-        local valid_path = {}
-        for _, guid in ipairs(state.expanded_path) do
-            if state.track:find_fx_by_guid(guid) then
-                valid_path[#valid_path + 1] = guid
-            else
-                break  -- Stop at first invalid - rest would be children
-            end
-        end
-        state.expanded_path = valid_path
-    end
-end
-
-local function get_container_children(container_guid)
-    if not state.track or not container_guid then return {} end
-
-    local container = state.track:find_fx_by_guid(container_guid)
-    if not container or not container:is_container() then return {} end
-
-    local children = {}
-    for child in container:iter_container_children() do
-        children[#children + 1] = child
-    end
-    return children
-end
-
-local function get_multi_selected_fx()
-    if not state.track then return {} end
-    local list = {}
-    for guid in pairs(state.multi_select) do
-        local fx = state.track:find_fx_by_guid(guid)
-        if fx then
-            list[#list + 1] = fx
-        end
-    end
-    return list
-end
-
-local function get_multi_select_count()
-    local count = 0
-    for _ in pairs(state.multi_select) do count = count + 1 end
-    return count
-end
-
--- Get display name for FX (uses renamed_name if set, otherwise default name)
--- Strips internal prefixes (R1_C1_D1_FX:, D1:, etc.) for clean UI display
-local function get_fx_display_name(fx)
-    if not fx then return "Unknown" end
-    local ok, renamed = pcall(function() return fx:get_named_config_param("renamed_name") end)
-    local name
-    if ok and renamed and renamed ~= "" then
-        name = renamed
-    else
-        name = fx:get_name()
-    end
-    
-    -- Strip SideFX internal prefixes for clean UI display
-    -- Patterns from most specific to least specific
-    name = name:gsub("^R%d+_C%d+_D%d+_FX:%s*", "")  -- R1_C1_D1_FX: prefix
-    name = name:gsub("^R%d+_C%d+_D%d+:%s*", "")     -- R1_C1_D1: prefix
-    name = name:gsub("^R%d+_C%d+:%s*", "")          -- R1_C1: prefix
-    name = name:gsub("^D%d+_FX:%s*", "")            -- D1_FX: prefix
-    name = name:gsub("^D%d+:%s*", "")               -- D1: prefix
-    name = name:gsub("^R%d+:%s*", "")               -- R1: prefix
-    
-    return name
-end
-
--- Collapse all columns from a certain depth onwards
-local function collapse_from_depth(depth)
-    while #state.expanded_path >= depth do
-        table.remove(state.expanded_path)
-    end
-    state.selected_fx = nil
-end
-
--- Toggle container at a specific depth
-local function toggle_container(guid, depth)
-    if state.expanded_path[depth] == guid then
-        collapse_from_depth(depth)
-    else
-        collapse_from_depth(depth)
-        state.expanded_path[depth] = guid
-    end
-    state.selected_fx = nil
-end
-
--- Toggle FX selection for detail panel
-local function toggle_fx_detail(guid)
-    if state.selected_fx == guid then
-        state.selected_fx = nil
-    else
-        state.selected_fx = guid
-    end
-end
+-- Use state module for navigation functions
+local collapse_from_depth = state_module.collapse_from_depth
+local toggle_container = state_module.toggle_container
+local toggle_fx_detail = state_module.toggle_fx_detail
 
 --------------------------------------------------------------------------------
 -- Plugin Browser Helpers
@@ -347,137 +205,36 @@ local function filter_plugins()
     state.browser.filtered = results
 end
 
--- JSFX name - when installed via ReaPack, this will be in the SideFX folder
--- Use just the name and let REAPER find it, or use full path for dev
-local UTILITY_JSFX = "JS:SideFX/SideFX_Utility"
+-- Use fx_utils module for is_utility_fx
+local is_utility_fx = fx_utils.is_utility_fx
 
-local function is_utility_fx(fx)
-    if not fx then return false end
-    local name = fx:get_name()
-    if not name then return false end
-    -- Check for original JSFX name or renamed utility formats:
-    -- D{n}_Util (top-level device)
-    -- R{n}_C{m}_D{p}_Util (device inside chain inside rack)
-    return name:find("SideFX_Utility") or name:find("SideFX Utility") or 
-           name:match("^D%d+_Util$") or name:match("_Util$")
-end
-
-local function find_paired_utility(track, fx)
-    -- Find the SideFX_Utility immediately after this FX
-    if not track or not fx then return nil end
-    
-    local fx_idx = fx.pointer
-    local next_idx = fx_idx + 1
-    local total = track:get_track_fx_count()
-    
-    if next_idx < total then
-        local next_fx = track:get_track_fx(next_idx)
-        if next_fx and is_utility_fx(next_fx) then
-            return next_fx
-        end
-    end
-    return nil
-end
+-- Use fx_utils module for find_paired_utility
+local find_paired_utility = fx_utils.find_paired_utility
 
 --------------------------------------------------------------------------------
 -- D-Container (Device) Helpers
 --------------------------------------------------------------------------------
 
--- Check if a container is a SideFX device container (D-prefix for top-level)
-local function is_device_container(fx)
-    if not fx then return false end
-    local ok, is_cont = pcall(function() return fx:is_container() end)
-    if not ok or not is_cont then return false end
-    
-    local ok2, name = pcall(function() return fx:get_name() end)
-    if not ok2 or not name then return false end
-    
-    return name:match("^D%d") ~= nil
-end
+-- Use fx_utils module for container type detection
+local is_device_container = fx_utils.is_device_container
+local is_chain_container = fx_utils.is_chain_container
+local is_rack_container = fx_utils.is_rack_container
 
--- Check if a container is a SideFX chain container (R{n}_C{n} pattern for chains inside racks)
-local function is_chain_container(fx)
-    if not fx then return false end
-    local ok, is_cont = pcall(function() return fx:is_container() end)
-    if not ok or not is_cont then return false end
-    
-    local ok2, name = pcall(function() return fx:get_name() end)
-    if not ok2 or not name then return false end
-    
-    -- Match R{n}_C{n}: pattern (e.g., R1_C1: ReaComp)
-    return name:match("^R%d+_C%d+") ~= nil
-end
+-- Use fx_utils module for device helpers
+local get_device_main_fx = fx_utils.get_device_main_fx
+get_device_utility = fx_utils.get_device_utility
 
--- Check if a container is a SideFX rack container (R-prefix, not a chain)
-local function is_rack_container(fx)
-    if not fx then return false end
-    local ok, is_cont = pcall(function() return fx:is_container() end)
-    if not ok or not is_cont then return false end
-    
-    local ok2, name = pcall(function() return fx:get_name() end)
-    if not ok2 or not name then return false end
-    
-    -- Match R{n}: pattern but NOT R{n}_C{n} (which is a chain)
-    return name:match("^R%d+:") ~= nil and not name:match("^R%d+_C%d+")
-end
-
--- Get the main FX from a D-container (first non-utility child)
-local function get_device_main_fx(container)
-    if not container then return nil end
-    for child in container:iter_container_children() do
-        if not is_utility_fx(child) then
-            return child
-        end
-    end
-    return nil
-end
-
--- Get the utility FX from a D-container
-get_device_utility = function(container)
-    if not container then return nil end
-    for child in container:iter_container_children() do
-        if is_utility_fx(child) then
-            return child
-        end
-    end
-    return nil
-end
-
--- Count D-containers at top level to get next index
+-- Wrapper functions using fx_utils and naming modules
 local function get_next_device_index()
-    if not state.track then return 1 end
-    local max_idx = 0
-    for fx in state.track:iter_track_fx_chain() do
-        local parent = fx:get_parent_container()
-        if not parent then  -- Top level only
-            local name = fx:get_name()
-            local idx = name:match("^D(%d+)")
-            if idx then
-                max_idx = math.max(max_idx, tonumber(idx))
-            end
-        end
-    end
-    return max_idx + 1
+    return fx_utils.get_next_device_index(state.track)
 end
 
--- Get short name from plugin full name (strip prefixes)
-local function get_short_plugin_name(full_name)
-    local name = full_name
-    -- Strip common prefixes
-    name = name:gsub("^VST3?: ", "")
-    name = name:gsub("^AU: ", "")
-    name = name:gsub("^JS: ", "")
-    name = name:gsub("^CLAP: ", "")
-    name = name:gsub("^VSTi: ", "")
-    -- Strip path for JS
-    name = name:gsub("^.+/", "")
-    return name
-end
+local get_short_plugin_name = naming.get_short_plugin_name
 
 -- Renumber all D-containers after chain changes
 renumber_device_chain = function()
     if not state.track then return end
-    
+
     local device_idx = 0
     for fx in state.track:iter_track_fx_chain() do
         local parent = fx:get_parent_container()
@@ -490,20 +247,20 @@ renumber_device_chain = function()
                 device_idx = device_idx + 1
                 local new_name = string.format("D%d: %s", device_idx, fx_name)
                 if new_name ~= name then
-                    r.TrackFX_SetNamedConfigParm(state.track.pointer, fx.pointer, "renamed_name", new_name)
+                    fx:set_named_config_param("renamed_name", new_name)
                     
                     -- Also rename FX inside (has _FX suffix)
                     local main_fx = get_device_main_fx(fx)
                     if main_fx then
                         local main_fx_name = string.format("D%d_FX: %s", device_idx, fx_name)
-                        r.TrackFX_SetNamedConfigParm(state.track.pointer, main_fx.pointer, "renamed_name", main_fx_name)
+                        main_fx:set_named_config_param("renamed_name", main_fx_name)
                     end
                     
                     -- Also rename utility inside
                     local utility = get_device_utility(fx)
                     if utility then
                         local util_name = string.format("D%d_Util", device_idx)
-                        r.TrackFX_SetNamedConfigParm(state.track.pointer, utility.pointer, "renamed_name", util_name)
+                        utility:set_named_config_param("renamed_name", util_name)
                     end
                 end
             end
@@ -518,160 +275,32 @@ renumber_device_chain = function()
     end
 end
 
+-- Device operations (uses state singleton via device_module)
 local function add_plugin_to_track(plugin, position)
-    if not state.track then return end
-    
-    local name_lower = plugin.full_name:lower()
-    
-    -- Don't wrap modulators in containers
-    if name_lower:find("sidefx_modulator") then
-        r.Undo_BeginBlock()
-        local fx_position = position and (-1000 - position) or -1
-        local fx = state.track:add_fx_by_name(plugin.full_name, false, fx_position)
-        r.Undo_EndBlock("SideFX: Add Modulator", -1)
-        refresh_fx_list()
-        return fx
-    end
-    
-    -- Don't wrap utilities in containers (shouldn't be added directly anyway)
-    if name_lower:find("sidefx_utility") then
-        return nil
-    end
-
-    r.Undo_BeginBlock()
-    r.PreventUIRefresh(1)
-    
-    -- Get next device index
-    local device_idx = get_next_device_index()
-    local short_name = get_short_plugin_name(plugin.full_name)
-    local container_name = string.format("D%d: %s", device_idx, short_name)
-    
-    -- Position for the container
-    local container_position = position and (-1000 - position) or -1
-    
-    -- Create the container first
-    local container = state.track:add_fx_by_name("Container", false, container_position)
-    
-    if container and container.pointer >= 0 then
-        -- Rename the container using ReaWrap
-        container:set_named_config_param("renamed_name", container_name)
-        
-        -- Add the main FX at track level first
-        local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
-        
-        if main_fx and main_fx.pointer >= 0 then
-            -- Move the FX into the container using ReaWrap
-            container:add_fx_to_container(main_fx, 0)
-            
-            -- Re-find the FX inside the container (pointer changed after move)
-            local fx_inside = get_device_main_fx(container)
-            
-            if fx_inside then
-                -- Set wet/dry to 100% by default
-                local wet_idx = fx_inside:get_param_from_ident(":wet")
-                if wet_idx >= 0 then
-                    fx_inside:set_param_normalized(wet_idx, 1.0)
-                end
-                -- Rename FX with _FX suffix to distinguish from container
-                local fx_name = string.format("D%d_FX: %s", device_idx, short_name)
-                fx_inside:set_named_config_param("renamed_name", fx_name)
-            end
-            
-            -- Add utility at track level, then move into container
-            local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, -1)
-            
-            if not util_fx or util_fx.pointer < 0 then
-                r.ShowConsoleMsg("SideFX: Could not add utility JSFX. Make sure SideFX_Utility.jsfx is installed in REAPER's Effects/SideFX folder.\n")
-            else
-                -- Move utility into container at position 1
-                container:add_fx_to_container(util_fx, 1)
-                
-                -- Re-find utility inside container and rename it
-                local util_inside = get_device_utility(container)
-                if util_inside then
-                    local util_name = string.format("D%d_Util", device_idx)
-                    util_inside:set_named_config_param("renamed_name", util_name)
-                end
-            end
-        else
-            r.ShowConsoleMsg("SideFX: Could not add FX.\n")
-        end
-        
-        refresh_fx_list()
-    end
-    
-    r.PreventUIRefresh(-1)
-    r.Undo_EndBlock("SideFX: Add Device", -1)
-    
-    return container
+    local result = device_module.add_plugin_to_track(plugin, position)
+    if result then refresh_fx_list() end
+    return result
 end
 
--- Add plugin by name at a specific position
 local function add_plugin_by_name(plugin_name, position)
-    if not state.track or not plugin_name then return end
-    
-    -- Create a minimal plugin object for add_plugin_to_track
-    local plugin = { full_name = plugin_name, name = plugin_name }
-    return add_plugin_to_track(plugin, position)
+    local result = device_module.add_plugin_by_name(plugin_name, position)
+    if result then refresh_fx_list() end
+    return result
 end
 
 --------------------------------------------------------------------------------
--- R-Container (Rack) Functions
+-- R-Container (Rack) Functions (from lib/rack.lua)
 --------------------------------------------------------------------------------
 
-local MIXER_JSFX = "JS:SideFX/SideFX_Mixer"
+local MIXER_JSFX = rack_module.MIXER_JSFX
 
--- Get next rack index for R-naming
+-- Use rack module functions
+local get_rack_mixer = fx_utils.get_rack_mixer
+local get_mixer_chain_volume_param = rack_module.get_mixer_chain_volume_param
+local get_mixer_chain_pan_param = rack_module.get_mixer_chain_pan_param
+
 local function get_next_rack_index()
-    if not state.track then return 1 end
-    local max_idx = 0
-    for fx in state.track:iter_track_fx_chain() do
-        local parent = fx:get_parent_container()
-        if not parent then  -- Top level only
-            local name = fx:get_name()
-            -- Check for R-containers
-            local idx = name:match("^R(%d+)")
-            if idx then
-                max_idx = math.max(max_idx, tonumber(idx))
-            end
-            -- Also count D-containers for overall numbering
-            local d_idx = name:match("^D(%d+)")
-            if d_idx then
-                max_idx = math.max(max_idx, tonumber(d_idx))
-            end
-        end
-    end
-    return max_idx + 1
-end
-
--- Get the mixer FX from a rack container
-local function get_rack_mixer(rack)
-    if not rack then return nil end
-    for child in rack:iter_container_children() do
-        local ok, name = pcall(function() return child:get_name() end)
-        if ok and name then
-            -- Mixer is named _R{n}_M or contains "Mixer"
-            if name:match("^_R%d+_M$") or (name:find("SideFX") and name:find("Mixer")) then
-                return child
-            end
-        end
-    end
-    return nil
-end
-
--- Get the parameter index for chain volume in the mixer
--- Parameter index is based on DECLARATION ORDER in JSFX, not slider number!
--- slider1 (Master Gain) = param 0
--- slider2 (Master Pan) = param 1
--- slider10-25 (Chain 1-16 Vol) = param 2-17
--- slider30-45 (Chain 1-16 Pan) = param 18-33
-local function get_mixer_chain_volume_param(chain_index)
-    return 1 + chain_index  -- Chain 1 = param 2, Chain 2 = param 3, etc.
-end
-
--- Get the parameter index for chain pan in the mixer
-local function get_mixer_chain_pan_param(chain_index)
-    return 17 + chain_index  -- Chain 1 Pan = param 18, Chain 2 Pan = param 19, etc.
+    return fx_utils.get_next_rack_index(state.track)
 end
 
 -- Custom pan slider with center line indicator
@@ -778,596 +407,54 @@ local function draw_pan_slider(ctx, label, pan_val, width)
     return changed, new_val
 end
 
--- Add a new rack (R-container) to the track
+-- Rack operations (uses state singleton via rack_module)
 local function add_rack_to_track(position)
-    if not state.track then return nil end
-    
-    r.Undo_BeginBlock()
-    r.PreventUIRefresh(1)
-    
-    -- Get next index
-    local rack_idx = get_next_rack_index()
-    local rack_name = string.format("R%d: Rack", rack_idx)
-    
-    -- Position for the container
-    local container_position = position and (-1000 - position) or -1
-    
-    -- Create the rack container
-    local rack = state.track:add_fx_by_name("Container", false, container_position)
-    
-    if rack and rack.pointer >= 0 then
-        -- Rename the rack
-        rack:set_named_config_param("renamed_name", rack_name)
-        
-        -- Set up for parallel routing (64 channels for up to 32 stereo chains)
-        rack:set_container_channels(64)
-        
-        -- Add the mixer JSFX at track level, then move into rack
-        local mixer_fx = state.track:add_fx_by_name(MIXER_JSFX, false, -1)
-        
-        if mixer_fx and mixer_fx.pointer >= 0 then
-            -- Move mixer into rack
-            rack:add_fx_to_container(mixer_fx, 0)
-            
-            -- Rename mixer
-            local mixer_inside = nil
-            for child in rack:iter_container_children() do
-                local ok, name = pcall(function() return child:get_name() end)
-                -- Match various mixer name patterns: original JSFX name or already renamed
-                if ok and name and ((name:find("SideFX") and name:find("Mixer")) or name:match("^_R%d+_M$")) then
-                    mixer_inside = child
-                    break
-                end
-            end
-            if mixer_inside then
-                -- Use consistent naming: _R1_M (underscore = internal/hidden)
-                mixer_inside:set_named_config_param("renamed_name", string.format("_R%d_M", rack_idx))
-                
-                -- Initialize master and chain params:
-                -- Param 0 = Master Gain (0 dB = 0.667 in range -24 to +12)
-                -- Param 1 = Master Pan (center = 0.5)
-                -- Params 2-17 = Chain volumes (0 dB = 0.833 in range -60 to +12)
-                -- Params 18-33 = Chain pans (center = 0.5)
-                local master_0db_norm = (0 + 24) / 36  -- 0.667
-                local pan_center_norm = 0.5
-                local vol_0db_norm = (0 + 60) / 72  -- 0.833
-                
-                pcall(function() mixer_inside:set_param_normalized(0, master_0db_norm) end)  -- Master gain
-                pcall(function() mixer_inside:set_param_normalized(1, pan_center_norm) end)  -- Master pan
-                
-                for i = 1, 16 do
-                    pcall(function() mixer_inside:set_param_normalized(1 + i, vol_0db_norm) end)  -- Vol params 2-17
-                    pcall(function() mixer_inside:set_param_normalized(17 + i, pan_center_norm) end)  -- Pan params 18-33
-                end
-            end
-        else
-            r.ShowConsoleMsg("SideFX: Could not add mixer JSFX. Make sure SideFX_Mixer.jsfx is installed in REAPER's Effects/SideFX folder.\n")
-        end
-        
-        -- Expand the rack to show it
+    local rack = rack_module.add_rack_to_track(position)
+    if rack then
         state.expanded_path = { rack:get_guid() }
-        
         refresh_fx_list()
     end
-    
-    r.PreventUIRefresh(-1)
-    r.Undo_EndBlock("SideFX: Add Rack", -1)
-    
     return rack
 end
 
--- Add a chain (C-container) to an existing rack (R-container)
 local function add_chain_to_rack(rack, plugin)
-    if not rack or not plugin then return nil end
-    if not is_rack_container(rack) then return nil end
-    
-    r.Undo_BeginBlock()
-    r.PreventUIRefresh(1)
-    
-    -- Get rack name for prefix (e.g., "R1")
-    local rack_name = rack:get_name()
-    local rack_prefix = rack_name:match("^(R%d+)") or "R1"
-    
-    -- Count existing chains in this rack (exclude mixer)
-    local chain_count = 0
-    for child in rack:iter_container_children() do
-        local ok, name = pcall(function() return child:get_name() end)
-        if ok and name and not name:match("^_") and not name:find("Mixer") then
-            chain_count = chain_count + 1
-        end
-    end
-    
-    -- Chain index (1-based)
-    local chain_idx = chain_count + 1
-    
-    -- Max 31 chains (channels 3-64, since 1/2 reserved for dry signal)
-    if chain_idx > 31 then
-        r.ShowConsoleMsg("SideFX: Maximum 31 chains per rack (channels 3-64, 1/2 reserved)\n")
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Chain to Rack (failed)", -1)
-        return nil
-    end
-    
-    -- Hierarchical naming (fully recursive):
-    -- Chain container:  R1_C1 (routing only)
-    -- Device container: R1_C1_D1: <name>
-    -- FX inside device: R1_C1_D1_FX: <name>
-    -- Utility:          R1_C1_D1_Util
-    local short_name = get_short_plugin_name(plugin.full_name)
-    local chain_prefix = string.format("%s_C%d", rack_prefix, chain_idx)
-    local chain_name = chain_prefix  -- Chain container has no suffix, just the prefix
-    local device_prefix = string.format("%s_D1", chain_prefix)  -- First device in chain
-    local device_name = string.format("%s: %s", device_prefix, short_name)
-    
-    -- Build device container completely at track level first, then nest it
-    -- This avoids issues with nested container addressing
-    
-    -- Step 1: Create device container at track level
-    local device = state.track:add_fx_by_name("Container", false, -1)
-    if not device or device.pointer < 0 then
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Chain (failed)", -1)
-        return nil
-    end
-    device:set_named_config_param("renamed_name", device_name)
-    
-    -- Step 2: Add FX to device container (while still at track level)
-    local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
-    if main_fx and main_fx.pointer >= 0 then
-        device:add_fx_to_container(main_fx, 0)
-        
-        -- Re-find and configure FX
-        local fx_inside = get_device_main_fx(device)
-        if fx_inside then
-            local wet_idx = fx_inside:get_param_from_ident(":wet")
-            if wet_idx and wet_idx >= 0 then
-                fx_inside:set_param_normalized(wet_idx, 1.0)
-            end
-            fx_inside:set_named_config_param("renamed_name", string.format("%s_FX: %s", device_prefix, short_name))
-        end
-    end
-    
-    -- Step 3: Add utility to device container (while still at track level)
-    local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, -1)
-    if util_fx and util_fx.pointer >= 0 then
-        device:add_fx_to_container(util_fx, 1)
-        
-        local util_inside = get_device_utility(device)
-        if util_inside then
-            util_inside:set_named_config_param("renamed_name", string.format("%s_Util", device_prefix))
-        end
-    end
-    
-    -- Step 4: Create chain container at track level
-    local chain = state.track:add_fx_by_name("Container", false, -1)
-    if chain and chain.pointer >= 0 then
-        chain:set_named_config_param("renamed_name", chain_name)
-        
-        -- Step 5: Move device into chain (device is complete now)
-        chain:add_fx_to_container(device, 0)
-        
-        -- Move the chain container into the rack (before the internal mixer)
-        local mixer_pos = 0
-        local pos = 0
-        for child in rack:iter_container_children() do
-            local ok, name = pcall(function() return child:get_name() end)
-            if ok and name and (name:match("^_") or name:find("Mixer")) then
-                mixer_pos = pos
-                break
-            end
-            pos = pos + 1
-        end
-        
-        rack:add_fx_to_container(chain, mixer_pos)
-        
-        -- Re-find chain inside rack to set pin mappings
-        local chain_inside = nil
-        for child in rack:iter_container_children() do
-            local ok, name = pcall(function() return child:get_name() end)
-            if ok and name == chain_name then
-                chain_inside = child
-                break
-            end
-        end
-        
-        if chain_inside then
-            -- CRITICAL: Set chain container to have enough internal channels
-            -- Without this, output pin mappings to channels 3+ have nowhere to go!
-            chain_inside:set_container_channels(64)
-            
-            -- Set output channel routing for this chain
-            -- All chains read from 1/2 (main signal), output to sideband channels:
-            -- Chain 1 → 3/4, Chain 2 → 5/6, Chain 3 → 7/8, Chain 4 → 9/10, etc.
-            -- Channels 1/2 are reserved for the dry signal pass-through
-            -- Pin mappings use bitmask: bit N = channel N (0-indexed)
-            local out_channel = chain_idx * 2  -- 2, 4, 6, 8... (0-indexed, so 3/4, 5/6, 7/8, 9/10...)
-            
-            -- Calculate bitmasks: 2^out_channel for left, 2^(out_channel+1) for right
-            local left_bits = math.floor(2 ^ out_channel)      -- 4, 16, 64, 256...
-            local right_bits = math.floor(2 ^ (out_channel + 1)) -- 8, 32, 128, 512...
-            
-            chain_inside:set_pin_mappings(1, 0, left_bits, 0)   -- output pin 0 (left)
-            chain_inside:set_pin_mappings(1, 1, right_bits, 0)  -- output pin 1 (right)
-            
-            -- Input pins stay on 1/2 (default) so all chains process the same input
-        end
-        
-        refresh_fx_list()
-    end
-    
-    r.PreventUIRefresh(-1)
-    r.Undo_EndBlock("SideFX: Add Chain to Rack", -1)
-    
+    local chain = rack_module.add_chain_to_rack(rack, plugin)
+    if chain then refresh_fx_list() end
     return chain
 end
 
--- Add a device (D-container with FX + Utility) to an existing chain
 local function add_device_to_chain(chain, plugin)
-    if not chain or not plugin then return nil end
-    if not is_chain_container(chain) then return nil end
-    
-    -- CRITICAL: Capture GUID before ANY modifications to track!
-    local chain_guid = chain:get_guid()
-    if not chain_guid then return nil end
-    
-    r.Undo_BeginBlock()
-    r.PreventUIRefresh(1)
-    
-    -- Get chain name to extract prefix
-    local chain_name = chain:get_name()
-    local chain_prefix = chain_name:match("^(R%d+_C%d+)") or chain_name
-    
-    -- Count existing devices in this chain
-    local device_count = 0
-    for child in chain:iter_container_children() do
-        local ok, child_name = pcall(function() return child:get_name() end)
-        if ok and child_name then
-            if child_name:match("_D%d+") or (not child_name:match("^_") and not child_name:find("Util") and not child_name:find("Mixer")) then
-                device_count = device_count + 1
-            end
-        end
-    end
-    
-    local device_idx = device_count + 1
-    local short_name = get_short_plugin_name(plugin.full_name)
-    local device_prefix = string.format("%s_D%d", chain_prefix, device_idx)
-    local device_name = string.format("%s: %s", device_prefix, short_name)
-    
-    -- Step 1: Create device container at track level
-    local device = state.track:add_fx_by_name("Container", false, -1)
-    if not device or device.pointer < 0 then
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Device to Chain (failed)", -1)
-        return nil
-    end
-    device:set_named_config_param("renamed_name", device_name)
-    
-    -- Step 2: Add FX to device container (while still at track level)
-    local main_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
-    if main_fx and main_fx.pointer >= 0 then
-        device:add_fx_to_container(main_fx, 0)
-        
-        -- Re-find and configure FX
-        local fx_inside = get_device_main_fx(device)
-        if fx_inside then
-            local wet_idx = fx_inside:get_param_from_ident(":wet")
-            if wet_idx and wet_idx >= 0 then
-                fx_inside:set_param_normalized(wet_idx, 1.0)
-            end
-            fx_inside:set_named_config_param("renamed_name", string.format("%s_FX: %s", device_prefix, short_name))
-        end
-    end
-    
-    -- Step 3: Add utility to device container (while still at track level)
-    local util_fx = state.track:add_fx_by_name(UTILITY_JSFX, false, -1)
-    if util_fx and util_fx.pointer >= 0 then
-        device:add_fx_to_container(util_fx, 1)
-        
-        local util_inside = get_device_utility(device)
-        if util_inside then
-            util_inside:set_named_config_param("renamed_name", string.format("%s_Util", device_prefix))
-        end
-    end
-    
-    -- Step 4: Move device into chain
-    -- Following the WORKING pattern from add_chain_to_rack:
-    -- Both device AND chain must be at TRACK LEVEL when we add device to chain
-    -- So if chain is nested: move it OUT, add device, move it back IN
-    local device_guid = device:get_guid()
-    
-    -- Re-find chain (pointer may be stale after adding FX)
-    local fresh_chain = state.track:find_fx_by_guid(chain_guid)
-    if not fresh_chain then
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Device to Chain (chain lost)", -1)
-        return nil
-    end
-    
-    local rack = fresh_chain:get_parent_container()
-    if rack then
-        -- Chain is nested - move it OUT to track level first
-        local rack_guid = rack:get_guid()
-        
-        -- Find chain's position in rack (to restore later)
-        local chain_pos_in_rack = 0
-        for child in rack:iter_container_children() do
-            if child:get_guid() == chain_guid then break end
-            chain_pos_in_rack = chain_pos_in_rack + 1
-        end
-        
-        -- Step 4a: Move chain OUT of rack to track level
-        fresh_chain:move_out_of_container()
-        
-        -- Re-find chain at track level
-        fresh_chain = state.track:find_fx_by_guid(chain_guid)
-        if not fresh_chain then
-            r.PreventUIRefresh(-1)
-            r.Undo_EndBlock("SideFX: Add Device to Chain (chain lost)", -1)
-            return nil
-        end
-        
-        -- Re-find device (pointer may have changed)
-        device = state.track:find_fx_by_guid(device_guid)
-        if not device then
-            r.PreventUIRefresh(-1)
-            r.Undo_EndBlock("SideFX: Add Device to Chain (device lost)", -1)
-            return nil
-        end
-        
-        -- Step 4b: Move device into chain (BOTH AT TRACK LEVEL NOW!)
-        local insert_pos = fresh_chain:get_container_child_count()
-        fresh_chain:add_fx_to_container(device, insert_pos)
-        
-        -- Re-find chain (pointer changed after adding device)
-        fresh_chain = state.track:find_fx_by_guid(chain_guid)
-        if not fresh_chain then
-            r.PreventUIRefresh(-1)
-            r.Undo_EndBlock("SideFX: Add Device to Chain (chain lost)", -1)
-            return nil
-        end
-        
-        -- Step 4c: Move chain back INTO rack
-        local fresh_rack = state.track:find_fx_by_guid(rack_guid)
-        if not fresh_rack then
-            r.PreventUIRefresh(-1)
-            r.Undo_EndBlock("SideFX: Add Device to Chain (rack lost)", -1)
-            return nil
-        end
-        fresh_rack:add_fx_to_container(fresh_chain, chain_pos_in_rack)
-    else
-        -- Chain is top-level - direct move works
-        local insert_pos = fresh_chain:get_container_child_count()
-        fresh_chain:add_fx_to_container(device, insert_pos)
-    end
-    
-    refresh_fx_list()
-    
-    r.PreventUIRefresh(-1)
-    r.Undo_EndBlock("SideFX: Add Device to Chain", -1)
-    
+    local device = rack_module.add_device_to_chain(chain, plugin)
+    if device then refresh_fx_list() end
     return device
 end
 
--- Reorder a chain within a rack (move chain_guid to position before target_chain_guid)
--- If target_chain_guid is nil, move to end
 local function reorder_chain_in_rack(rack, chain_guid, target_chain_guid)
-    if not rack or not chain_guid then return false end
-    if not is_rack_container(rack) then return false end
-    
-    local chain = state.track:find_fx_by_guid(chain_guid)
-    if not chain then return false end
-    
-    -- Check chain is actually in this rack
-    local parent = chain:get_parent_container()
-    if not parent or parent:get_guid() ~= rack:get_guid() then return false end
-    
-    r.Undo_BeginBlock()
-    r.PreventUIRefresh(1)
-    
-    -- Get list of children in rack (including mixer)
-    local children = {}
-    local chain_pos = nil
-    local target_pos = nil
-    local mixer_pos = nil
-    
-    local pos = 0
-    for child in rack:iter_container_children() do
-        local guid = child:get_guid()
-        local ok, name = pcall(function() return child:get_name() end)
-        
-        children[#children + 1] = { guid = guid, fx = child }
-        
-        if guid == chain_guid then
-            chain_pos = pos
-        end
-        if guid == target_chain_guid then
-            target_pos = pos
-        end
-        -- Mixer is at the end (prefixed with _)
-        if ok and name and (name:match("^_") or name:find("Mixer")) then
-            mixer_pos = pos
-        end
-        
-        pos = pos + 1
-    end
-    
-    if chain_pos == nil then
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Reorder Chain (failed)", -1)
-        return false
-    end
-    
-    -- Calculate destination position
-    local dest_pos
-    if target_chain_guid == nil then
-        -- Move to end (before mixer if present)
-        dest_pos = mixer_pos or #children
-    else
-        dest_pos = target_pos or mixer_pos or #children
-    end
-    
-    -- Adjust destination if moving forward (position shifts after removal)
-    if dest_pos > chain_pos then
-        dest_pos = dest_pos - 1
-    end
-    
-    -- No move needed if already in position
-    if dest_pos == chain_pos then
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Reorder Chain", -1)
-        return true
-    end
-    
-    -- Perform the move using ReaWrap container operations
-    -- Move out first, then back in at new position
-    chain:move_out_of_container()
-    
-    -- Re-find chain and rack (pointers may have changed)
-    chain = state.track:find_fx_by_guid(chain_guid)
-    rack = state.track:find_fx_by_guid(rack:get_guid())
-    
-    if chain and rack then
-        rack:add_fx_to_container(chain, dest_pos)
-        
-        -- Renumber chain names to maintain sequential ordering
-        renumber_chains_in_rack(rack)
-    end
-    
-    refresh_fx_list()
-    
-    r.PreventUIRefresh(-1)
-    r.Undo_EndBlock("SideFX: Reorder Chain", -1)
-    
-    return true
+    local result = rack_module.reorder_chain_in_rack(rack, chain_guid, target_chain_guid)
+    if result then refresh_fx_list() end
+    return result
 end
 
--- Renumber chains within a rack after reordering (R1_C1, R1_C2, etc.)
-renumber_chains_in_rack = function(rack)
-    if not rack then return end
-    
-    local rack_name = rack:get_name()
-    local rack_prefix = rack_name:match("^(R%d+)") or "R1"
-    
-    local chain_idx = 0
-    for child in rack:iter_container_children() do
-        local ok, name = pcall(function() return child:get_name() end)
-        if ok and name then
-            -- Skip internal elements (mixer, prefixed with _)
-            if not name:match("^_") and not name:find("Mixer") then
-                chain_idx = chain_idx + 1
-                local old_prefix = name:match("^(R%d+_C%d+)")
-                if old_prefix then
-                    local new_prefix = string.format("%s_C%d", rack_prefix, chain_idx)
-                    if old_prefix ~= new_prefix then
-                        -- Rename chain
-                        local new_name = name:gsub("^R%d+_C%d+", new_prefix)
-                        child:set_named_config_param("renamed_name", new_name)
-                        
-                        -- Also rename devices inside chain
-                        for device in child:iter_container_children() do
-                            local ok_d, device_name = pcall(function() return device:get_name() end)
-                            if ok_d and device_name then
-                                local new_device_name = device_name:gsub("^R%d+_C%d+", new_prefix)
-                                if new_device_name ~= device_name then
-                                    device:set_named_config_param("renamed_name", new_device_name)
-                                    
-                                    -- Rename FX and utility inside device
-                                    for inner in device:iter_container_children() do
-                                        local ok_i, inner_name = pcall(function() return inner:get_name() end)
-                                        if ok_i and inner_name then
-                                            local new_inner_name = inner_name:gsub("^R%d+_C%d+", new_prefix)
-                                            if new_inner_name ~= inner_name then
-                                                inner:set_named_config_param("renamed_name", new_inner_name)
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-end
+local renumber_chains_in_rack = rack_module.renumber_chains_in_rack
 
 --------------------------------------------------------------------------------
 -- Container Operations
 --------------------------------------------------------------------------------
 
+-- Container operations (uses container_module)
 local function add_to_new_container(fx_list)
-    if #fx_list == 0 then return end
-    if not state.track then return end
-
-    r.Undo_BeginBlock()
-    r.PreventUIRefresh(1)
-
-    local container = state.track:add_fx_to_new_container(fx_list)
-
-    r.PreventUIRefresh(-1)
-    r.Undo_EndBlock("SideFX: Add to Container", -1)
-
+    local container = container_module.add_to_new_container(fx_list)
     if container then
         state.expanded_path = { container:get_guid() }
         refresh_fx_list()
     end
-
     return container
 end
 
 local function dissolve_container(container)
-    if not container or not container:is_container() then return false end
-    if not state.track then return false end
-
-    -- Get all children before we start moving them
-    local children = {}
-    for child in container:iter_container_children() do
-        local ok, guid = pcall(function() return child:get_guid() end)
-        if ok and guid then
-            children[#children + 1] = guid
-        end
-    end
-
-    if #children == 0 then
-        -- Empty container, just delete it
-        container:delete()
-        return true
-    end
-
-    r.Undo_BeginBlock()
-    r.PreventUIRefresh(1)
-
-    -- Get the parent container (or nil if at track level)
-    local parent_container = container:get_parent_container()
-    
-    -- Move all children out of the container
-    -- We need to re-lookup by GUID after each move since pointers may change
-    for _, child_guid in ipairs(children) do
-        local child = state.track:find_fx_by_guid(child_guid)
-        if child then
-            -- Move out of container - this will move to parent or track level
-            while child:get_parent_container() and child:get_parent_container():get_guid() == container:get_guid() do
-                child:move_out_of_container()
-                -- Re-lookup after move (pointer may have changed)
-                child = state.track:find_fx_by_guid(child_guid)
-                if not child then break end
-            end
-        end
-    end
-
-    -- Re-lookup container (pointer may have changed after moves)
-    local container_guid = container:get_guid()
-    container = state.track:find_fx_by_guid(container_guid)
-    
-    -- Delete the now-empty container
-    if container then
-        container:delete()
-    end
-
-    r.PreventUIRefresh(-1)
-    r.Undo_EndBlock("SideFX: Dissolve Container", -1)
-
-    return true
+    local result = container_module.dissolve_container(container)
+    if result then refresh_fx_list() end
+    return result
 end
 
 --------------------------------------------------------------------------------
@@ -1898,135 +985,38 @@ end
 -- Modulators
 --------------------------------------------------------------------------------
 
-local MODULATOR_JSFX = "JS:SideFX/SideFX_Modulator"
+-- Modulator operations (uses modulator_module)
+local MODULATOR_JSFX = modulator_module.MODULATOR_JSFX
 
 local function find_modulators_on_track()
-    if not state.track then return {} end
-    local modulators = {}
-    for fx in state.track:iter_track_fx_chain() do
-        local name = fx:get_name()
-        if name and (name:find(MODULATOR_JSFX) or name:find("SideFX Modulator")) then
-            table.insert(modulators, {
-                fx = fx,
-                fx_idx = fx.pointer,
-                name = "LFO " .. (#modulators + 1),
-            })
-        end
-    end
-    return modulators
+    return modulator_module.find_modulators_on_track()
 end
 
 local function add_modulator()
-    if not state.track then return end
-    r.Undo_BeginBlock()
-    -- Add at position 0 (before instruments)
-    local fx = state.track:add_fx_by_name(MODULATOR_JSFX, false, -1000)  -- -1000 = position 0
-    r.Undo_EndBlock("Add SideFX Modulator", -1)
-    refresh_fx_list()
+    local fx = modulator_module.add_modulator()
+    if fx then refresh_fx_list() end
+    return fx
 end
 
 local function delete_modulator(fx_idx)
-    if not state.track then return end
-    r.Undo_BeginBlock()
-    r.TrackFX_Delete(state.track.pointer, fx_idx)
-    r.Undo_EndBlock("Delete SideFX Modulator", -1)
+    modulator_module.delete_modulator(fx_idx)
     refresh_fx_list()
 end
 
 local function get_linkable_fx()
-    -- Get list of FX that can be modulated (exclude modulators and containers)
-    -- Uses iter_all_fx_flat to include FX inside containers
-    if not state.track then return {} end
-    local linkable = {}
-    for fx_info in state.track:iter_all_fx_flat() do
-        local fx = fx_info.fx
-        local name = fx:get_name()
-        -- Skip modulators and containers
-        if name and not name:find(MODULATOR_JSFX) and not name:find("SideFX Modulator") and not name:find("Container") then
-            local params = {}
-            local param_count = fx:get_num_params()
-            for p = 0, param_count - 1 do
-                local pname = fx:get_param_name(p)
-                table.insert(params, {idx = p, name = pname})
-            end
-            -- Add depth indicator to name for nested FX
-            local display_name = fx_info.depth > 0 and string.rep("  ", fx_info.depth) .. "↳ " .. name or name
-            table.insert(linkable, {fx = fx, fx_idx = fx.pointer, name = display_name, params = params})
-        end
-    end
-    return linkable
+    return modulator_module.get_linkable_fx()
 end
 
 local function create_param_link(mod_fx_idx, target_fx_idx, target_param_idx)
-    -- Create parameter modulation link using REAPER API
-    -- The modulator output is slider4 (param index 3, 0-indexed)
-    if not state.track then return false end
-    
-    local MOD_OUTPUT_PARAM = 3  -- slider4 in JSFX
-    
-    -- Use TrackFX_SetNamedConfigParm to set up parameter modulation
-    -- Format: "param.X.plink.active", "param.X.plink.effect", "param.X.plink.param"
-    local plink_prefix = string.format("param.%d.plink.", target_param_idx)
-    
-    -- For FX in containers, we need the container-aware index
-    -- mod_fx_idx should be simple top-level index
-    -- target_fx_idx may be container-encoded (0x2000000+) for nested FX
-    
-    -- Enable parameter link
-    local ok1 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "active", "1")
-    -- Set source effect (modulator) - modulator must be at top level
-    local ok2 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "effect", tostring(mod_fx_idx))
-    -- Set source parameter (modulator output)
-    local ok3 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "param", tostring(MOD_OUTPUT_PARAM))
-    
-    if not (ok1 and ok2 and ok3) then
-        r.ShowConsoleMsg(string.format("Plink failed: mod=%d target=%d param=%d (ok: %s %s %s)\n", 
-            mod_fx_idx, target_fx_idx, target_param_idx, 
-            tostring(ok1), tostring(ok2), tostring(ok3)))
-    end
-    
-    return ok1 and ok2 and ok3
+    return modulator_module.create_param_link(mod_fx_idx, target_fx_idx, target_param_idx)
 end
 
 local function remove_param_link(target_fx_idx, target_param_idx)
-    if not state.track then return end
-    local plink_prefix = string.format("param.%d.plink.", target_param_idx)
-    r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "active", "0")
+    modulator_module.remove_param_link(target_fx_idx, target_param_idx)
 end
 
 local function get_modulator_links(mod_fx_idx)
-    -- Find all parameters linked to this modulator (including FX in containers)
-    if not state.track then return {} end
-    local links = {}
-    local MOD_OUTPUT_PARAM = 3
-    
-    for fx_info in state.track:iter_all_fx_flat() do
-        local fx = fx_info.fx
-        local fx_name = fx:get_name()
-        local fx_idx = fx.pointer
-        -- Skip modulators and containers
-        if fx_name and not (fx_name:find(MODULATOR_JSFX) or fx_name:find("SideFX Modulator") or fx_name:find("Container")) then
-            local param_count = fx:get_num_params()
-            for param_idx = 0, param_count - 1 do
-                local plink_prefix = string.format("param.%d.plink.", param_idx)
-                local rv, active = r.TrackFX_GetNamedConfigParm(state.track.pointer, fx_idx, plink_prefix .. "active")
-                if rv and active == "1" then
-                    local _, effect = r.TrackFX_GetNamedConfigParm(state.track.pointer, fx_idx, plink_prefix .. "effect")
-                    local _, param = r.TrackFX_GetNamedConfigParm(state.track.pointer, fx_idx, plink_prefix .. "param")
-                    if tonumber(effect) == mod_fx_idx and tonumber(param) == MOD_OUTPUT_PARAM then
-                        local param_name = fx:get_param_name(param_idx)
-                        table.insert(links, {
-                            target_fx_idx = fx_idx,
-                            target_fx_name = fx_name,
-                            target_param_idx = param_idx,
-                            target_param_name = param_name,
-                        })
-                    end
-                end
-            end
-        end
-    end
-    return links
+    return modulator_module.get_modulator_links(mod_fx_idx)
 end
 
 --------------------------------------------------------------------------------
@@ -2069,11 +1059,8 @@ local function load_chain_preset(preset_name)
     return true
 end
 
-local function is_modulator_fx(fx)
-    if not fx then return false end
-    local name = fx:get_name()
-    return name and (name:find(MODULATOR_JSFX) or name:find("SideFX Modulator"))
-end
+-- Use fx_utils module for is_modulator_fx
+local is_modulator_fx = fx_utils.is_modulator_fx
 
 local function draw_modulator_column(ctx, width)
     if ctx:begin_child("Modulators", width, 0, imgui.ChildFlags.Border()) then

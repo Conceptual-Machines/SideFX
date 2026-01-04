@@ -169,7 +169,7 @@ local function test_fx_utils()
     
     -- Add container
     local container = test_track:add_fx_by_name("Container", false, -1)
-    r.TrackFX_SetNamedConfigParm(test_track.pointer, container.pointer, "renamed_name", "D1: Test Device")
+    container:set_named_config_param("renamed_name", "D1: Test Device")
     
     -- Re-fetch to get updated name
     container = test_track:get_track_fx(1)
