@@ -229,21 +229,20 @@ end
 function M.get_next_rack_index(track)
     if not track then return 1 end
     local max_idx = 0
-    for fx in track:iter_track_fx_chain() do
-        local parent = fx:get_parent_container()
-        if not parent then  -- Top level only
-            local ok, name = pcall(function() return fx:get_name() end)
-            if ok and name then
-                -- Check for R-containers
-                local r_idx = naming.parse_rack_index(name)
-                if r_idx then
-                    max_idx = math.max(max_idx, r_idx)
-                end
-                -- Also count D-containers for overall numbering
-                local d_idx = naming.parse_device_index(name)
-                if d_idx then
-                    max_idx = math.max(max_idx, d_idx)
-                end
+    -- Use iter_all_fx_flat() to find ALL racks including nested ones
+    for fx_info in track:iter_all_fx_flat() do
+        local fx = fx_info.fx
+        local ok, name = pcall(function() return fx:get_name() end)
+        if ok and name then
+            -- Check for R-containers (racks can be at any depth)
+            local r_idx = naming.parse_rack_index(name)
+            if r_idx then
+                max_idx = math.max(max_idx, r_idx)
+            end
+            -- Also count D-containers for overall numbering
+            local d_idx = naming.parse_device_index(name)
+            if d_idx then
+                max_idx = math.max(max_idx, d_idx)
             end
         end
     end
