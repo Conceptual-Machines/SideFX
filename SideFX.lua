@@ -643,7 +643,8 @@ local function add_rack_to_track(position)
                 end
             end
             if mixer_inside then
-                mixer_inside:set_named_config_param("renamed_name", string.format("R%d_Mixer", rack_idx))
+                -- Prefix with _ to indicate internal/hidden
+                mixer_inside:set_named_config_param("renamed_name", string.format("_R%d_Mixer", rack_idx))
             end
         else
             r.ShowConsoleMsg("SideFX: Could not add mixer JSFX. Make sure SideFX_Mixer.jsfx is installed in REAPER's Effects/SideFX folder.\n")
@@ -721,13 +722,13 @@ local function add_chain_to_rack(rack, plugin)
             end
         end
         
-        -- Move the chain container into the rack (before the mixer)
-        -- Find mixer position
+        -- Move the chain container into the rack (before the internal mixer)
+        -- Find mixer position (internal mixer has _ prefix or "Mixer" in name)
         local mixer_pos = 0
         local pos = 0
         for child in rack:iter_container_children() do
             local name = child:get_name()
-            if name:find("Mixer") then
+            if name:match("^_") or name:find("Mixer") then
                 mixer_pos = pos
                 break
             end
@@ -1874,14 +1875,12 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
             local rack_name = get_fx_display_name(rack)
             local is_expanded = state.expanded_path[1] == rack_guid
             
-            -- Get chains and mixer from rack
+            -- Get chains from rack (filter out internal mixer)
             local chains = {}
-            local mixer = nil
             for child in rack:iter_container_children() do
                 local child_name = child:get_name()
-                if child_name:find("Mixer") then
-                    mixer = child
-                else
+                -- Skip internal mixer (prefixed with _)
+                if not child_name:match("^_") and not child_name:find("Mixer") then
                     table.insert(chains, child)
                 end
             end
@@ -2016,16 +2015,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                         ctx:end_drag_drop_target()
                     end
                     
-                    -- Mixer info
-                    if mixer then
-                        ctx:spacing()
-                        ctx:separator()
-                        ctx:text_colored(0x88AACCFF, "Mixer")
-                        ctx:same_line()
-                        if ctx:small_button("UI##mixer") then
-                            mixer:show(3)
-                        end
-                    end
+                    -- Mixer is internal - no UI shown
                 else
                     -- Collapsed view
                     ctx:text_disabled(string.format("%d chains", #chains))

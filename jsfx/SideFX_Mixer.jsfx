@@ -1,9 +1,10 @@
 desc:SideFX Chain Mixer
 author:Nomad Monad
 version:1.0
+options:no_meter
 
-// Mixes up to 4 stereo chains (8 channels) to stereo output
-// Used at the end of R-containers (parallel racks)
+// Internal mixer for R-containers - sums parallel chains to stereo
+// This is an implementation detail, controlled by SideFX UI
 
 // Configure for 8 inputs, 2 outputs
 in_pin:Chain 1 L
@@ -17,15 +18,16 @@ in_pin:Chain 4 R
 out_pin:Mix L
 out_pin:Mix R
 
-slider1:0<-24,12,0.1>Chain 1 (dB)
-slider2:0<-24,12,0.1>Chain 2 (dB)
-slider3:0<-24,12,0.1>Chain 3 (dB)
-slider4:0<-24,12,0.1>Chain 4 (dB)
-slider5:0<-24,12,0.1>Master (dB)
-slider6:0<0,1,1{Off,On}>Mute Chain 1
-slider7:0<0,1,1{Off,On}>Mute Chain 2
-slider8:0<0,1,1{Off,On}>Mute Chain 3
-slider9:0<0,1,1{Off,On}>Mute Chain 4
+// Hidden sliders (- prefix hides from UI, controlled via API)
+slider1:0<-24,12,0.1>-Chain 1 (dB)
+slider2:0<-24,12,0.1>-Chain 2 (dB)
+slider3:0<-24,12,0.1>-Chain 3 (dB)
+slider4:0<-24,12,0.1>-Chain 4 (dB)
+slider5:0<-24,12,0.1>-Master (dB)
+slider6:0<0,1,1{Off,On}>-Mute Chain 1
+slider7:0<0,1,1{Off,On}>-Mute Chain 2
+slider8:0<0,1,1{Off,On}>-Mute Chain 3
+slider9:0<0,1,1{Off,On}>-Mute Chain 4
 
 @init
 smooth_coeff = exp(-1 / (srate * 0.005));  // 5ms smoothing
@@ -58,57 +60,5 @@ out_r = spl1 * gain1_smooth + spl3 * gain2_smooth + spl5 * gain3_smooth + spl7 *
 spl0 = out_l * master_smooth;
 spl1 = out_r * master_smooth;
 
-@gfx 200 80
-gfx_clear = 0x1a1a1a;
-
-// Draw channel meters and labels
-function draw_meter(x, y, w, h, val, label) (
-  // Background
-  gfx_set(0.15, 0.15, 0.18, 1);
-  gfx_rect(x, y, w, h);
-  
-  // Level bar
-  level_norm = max(0, min(1, val));
-  level_norm < 0.7 ? (
-    gfx_set(0.2, 0.7, 0.4, 1);
-  ) : level_norm < 0.9 ? (
-    gfx_set(0.9, 0.8, 0.2, 1);
-  ) : (
-    gfx_set(0.9, 0.2, 0.2, 1);
-  );
-  gfx_rect(x + 1, y + h - level_norm * (h - 2) - 1, w - 2, level_norm * (h - 2));
-  
-  // Label
-  gfx_set(0.7, 0.7, 0.7, 1);
-  gfx_x = x + 2;
-  gfx_y = y + h + 2;
-  gfx_drawstr(label);
-);
-
-// Calculate levels for display
-lvl1 = (abs(spl0) + abs(spl1)) * 0.5 * gain1_smooth;
-lvl2 = (abs(spl2) + abs(spl3)) * 0.5 * gain2_smooth;
-lvl3 = (abs(spl4) + abs(spl5)) * 0.5 * gain3_smooth;
-lvl4 = (abs(spl6) + abs(spl7)) * 0.5 * gain4_smooth;
-lvl_out = (abs(spl0) + abs(spl1)) * 0.5;
-
-meter_w = 30;
-meter_h = 50;
-gap = 8;
-
-draw_meter(10, 5, meter_w, meter_h, lvl1, "1");
-draw_meter(10 + (meter_w + gap), 5, meter_w, meter_h, lvl2, "2");
-draw_meter(10 + (meter_w + gap) * 2, 5, meter_w, meter_h, lvl3, "3");
-draw_meter(10 + (meter_w + gap) * 3, 5, meter_w, meter_h, lvl4, "4");
-
-// Output meter (wider)
-gfx_set(0.3, 0.3, 0.35, 1);
-gfx_rect(165, 5, 30, meter_h);
-gfx_set(0.3, 0.6, 0.9, 1);
-out_norm = max(0, min(1, lvl_out));
-gfx_rect(166, 5 + meter_h - out_norm * (meter_h - 2) - 1, 28, out_norm * (meter_h - 2));
-gfx_set(0.7, 0.7, 0.7, 1);
-gfx_x = 167;
-gfx_y = meter_h + 7;
-gfx_drawstr("Out");
+// No @gfx - this is an internal plugin with no UI
 
