@@ -1006,38 +1006,32 @@ local function add_device_to_chain(chain, plugin)
     if not chain or not plugin then return nil end
     if not is_chain_container(chain) then return nil end
     
+    -- CRITICAL: Capture GUID before ANY modifications to track!
+    local chain_guid = chain:get_guid()
+    if not chain_guid then return nil end
+    
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
     
-    -- Get chain name to extract prefix (e.g., "R1_C1" from "R1_C1" or "R1_C1: Something")
+    -- Get chain name to extract prefix
     local chain_name = chain:get_name()
     local chain_prefix = chain_name:match("^(R%d+_C%d+)") or chain_name
     
-    -- Count existing devices in this chain (non-hidden, non-utility children)
+    -- Count existing devices in this chain
     local device_count = 0
     for child in chain:iter_container_children() do
         local ok, child_name = pcall(function() return child:get_name() end)
         if ok and child_name then
-            -- Count device containers (D-prefix) or FX that aren't utilities/mixers
             if child_name:match("_D%d+") or (not child_name:match("^_") and not child_name:find("Util") and not child_name:find("Mixer")) then
                 device_count = device_count + 1
             end
         end
     end
     
-    -- Device index (1-based)
     local device_idx = device_count + 1
-    
-    -- Hierarchical naming:
-    -- Device container: R1_C1_D2: <name>
-    -- FX inside device: R1_C1_D2_FX: <name>
-    -- Utility:          R1_C1_D2_Util
     local short_name = get_short_plugin_name(plugin.full_name)
     local device_prefix = string.format("%s_D%d", chain_prefix, device_idx)
     local device_name = string.format("%s: %s", device_prefix, short_name)
-    
-    -- Build device container completely at track level first, then move into chain
-    -- This avoids issues with nested container addressing
     
     -- Step 1: Create device container at track level
     local device = state.track:add_fx_by_name("Container", false, -1)
@@ -1075,14 +1069,76 @@ local function add_device_to_chain(chain, plugin)
         end
     end
     
-    -- Step 4: Move device into chain at the end
-    -- Count children to find insertion position
-    local insert_pos = 0
-    for _ in chain:iter_container_children() do
-        insert_pos = insert_pos + 1
+    -- Step 4: Move device into chain
+    -- Following the WORKING pattern from add_chain_to_rack:
+    -- Both device AND chain must be at TRACK LEVEL when we add device to chain
+    -- So if chain is nested: move it OUT, add device, move it back IN
+    local device_guid = device:get_guid()
+    
+    -- Re-find chain (pointer may be stale after adding FX)
+    local fresh_chain = state.track:find_fx_by_guid(chain_guid)
+    if not fresh_chain then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Device to Chain (chain lost)", -1)
+        return nil
     end
     
-    chain:add_fx_to_container(device, insert_pos)
+    local rack = fresh_chain:get_parent_container()
+    if rack then
+        -- Chain is nested - move it OUT to track level first
+        local rack_guid = rack:get_guid()
+        
+        -- Find chain's position in rack (to restore later)
+        local chain_pos_in_rack = 0
+        for child in rack:iter_container_children() do
+            if child:get_guid() == chain_guid then break end
+            chain_pos_in_rack = chain_pos_in_rack + 1
+        end
+        
+        -- Step 4a: Move chain OUT of rack to track level
+        fresh_chain:move_out_of_container()
+        
+        -- Re-find chain at track level
+        fresh_chain = state.track:find_fx_by_guid(chain_guid)
+        if not fresh_chain then
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Device to Chain (chain lost)", -1)
+            return nil
+        end
+        
+        -- Re-find device (pointer may have changed)
+        device = state.track:find_fx_by_guid(device_guid)
+        if not device then
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Device to Chain (device lost)", -1)
+            return nil
+        end
+        
+        -- Step 4b: Move device into chain (BOTH AT TRACK LEVEL NOW!)
+        local insert_pos = fresh_chain:get_container_child_count()
+        fresh_chain:add_fx_to_container(device, insert_pos)
+        
+        -- Re-find chain (pointer changed after adding device)
+        fresh_chain = state.track:find_fx_by_guid(chain_guid)
+        if not fresh_chain then
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Device to Chain (chain lost)", -1)
+            return nil
+        end
+        
+        -- Step 4c: Move chain back INTO rack
+        local fresh_rack = state.track:find_fx_by_guid(rack_guid)
+        if not fresh_rack then
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Device to Chain (rack lost)", -1)
+            return nil
+        end
+        fresh_rack:add_fx_to_container(fresh_chain, chain_pos_in_rack)
+    else
+        -- Chain is top-level - direct move works
+        local insert_pos = fresh_chain:get_container_child_count()
+        fresh_chain:add_fx_to_container(device, insert_pos)
+    end
     
     refresh_fx_list()
     
