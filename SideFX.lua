@@ -2427,23 +2427,23 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
     local chain_content_h = rack_h - 30  -- Leave room for header
     local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
     
-    -- Calculate chain column width based on number of devices (min 650px)
-    local device_width = 450  -- Approximate width per device panel
-    local min_width = 650
-    local chain_col_w = math.max(min_width, #devices * device_width + 100)
+    -- Auto-resize chain column to fit content
+    -- ChildFlags: Border (1) + AutoResizeX (16) + AlwaysAutoResize (64) = 81
+    local chain_wrapper_flags = 81
     
     ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x252530FF)
-    if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, chain_col_w, rack_h, imgui.ChildFlags.Border()) then
+    if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, 0, rack_h, chain_wrapper_flags) then
         -- Header
         ctx:text_colored(0xAAAAAAFF, "Chain:")
         ctx:same_line()
         ctx:text(chain_display_name)
         ctx:separator()
         
-        -- Chain contents with horizontal scroll
+        -- Chain contents - auto-resize to fit devices
         ctx:push_style_color(r.ImGui_Col_ChildBg(), 0x2A2A35FF)
-        local chain_scroll_flags = r.ImGui_WindowFlags_HorizontalScrollbar()
-        if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, imgui.ChildFlags.Border(), chain_scroll_flags) then
+        -- ChildFlags: Border (1) + AutoResizeX (16) + AlwaysAutoResize (64) = 81
+        local chain_content_flags = 81
+        if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, chain_content_flags) then
             
             if #devices == 0 then
                 -- Empty chain - show drop zone
