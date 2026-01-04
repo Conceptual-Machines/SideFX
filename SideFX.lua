@@ -1369,11 +1369,13 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, i
     ctx:push_style_color(imgui.Col.Button(), row_color)
     if ctx:button(chain_name .. "##chain_btn", -1, 20) then
         if is_nested_rack then
-            -- Nested rack chain: use expanded_nested_chain instead of expanded_path[2]
+            -- Nested rack chain: use expanded_nested_chains keyed by rack GUID
+            -- This allows multiple nested racks to each have their own expanded chain
+            local rack_guid = rack:get_guid()
             if is_selected then
-                state.expanded_nested_chain = nil
+                state.expanded_nested_chains[rack_guid] = nil
             else
-                state.expanded_nested_chain = chain_guid
+                state.expanded_nested_chains[rack_guid] = chain_guid
             end
         else
             -- Top-level rack chain: use expanded_path[2] as before
@@ -1439,7 +1441,8 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, i
         chain:delete()
         if is_selected then
             if is_nested_rack then
-                state.expanded_nested_chain = nil
+                local rack_guid = rack:get_guid()
+                state.expanded_nested_chains[rack_guid] = nil
             else
                 state.expanded_path[2] = nil
             end
@@ -1584,9 +1587,11 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                         -- It's a rack - draw using rack panel (mark as nested)
                         local rack_data = draw_rack_panel(ctx, dev, chain_content_h - 20, true)
                         
-                        -- If a chain in the nested rack is selected, show its chain column
-                        if rack_data.is_expanded and state.expanded_nested_chain then
-                            local nested_chain_guid = state.expanded_nested_chain
+                        -- If a chain in this nested rack is selected, show its chain column
+                        -- Use the rack's GUID to look up which chain is expanded for this specific rack
+                        local rack_guid = dev:get_guid()
+                        local nested_chain_guid = state.expanded_nested_chains[rack_guid]
+                        if rack_data.is_expanded and nested_chain_guid then
                             local nested_chain = nil
                             for _, chain in ipairs(rack_data.chains) do
                                 if chain:get_guid() == nested_chain_guid then
@@ -2039,9 +2044,11 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                         ctx:push_id("chain_" .. j)
                         local chain_guid = chain:get_guid()
                         -- Check selection based on whether this is a nested rack
+                        -- For nested racks, use the rack's GUID to look up the expanded chain
                         local is_selected
                         if is_nested then
-                            is_selected = (state.expanded_nested_chain == chain_guid)
+                            local rack_guid = rack:get_guid()
+                            is_selected = (state.expanded_nested_chains[rack_guid] == chain_guid)
                         else
                             is_selected = (state.expanded_path[2] == chain_guid)
                         end

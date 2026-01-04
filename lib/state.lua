@@ -26,8 +26,9 @@ M.state = {
     -- Expanded racks: set of rack GUIDs that are expanded (for nested racks)
     expanded_racks = {},  -- {[rack_guid] = true}
     
-    -- Expanded chain in nested rack (separate from expanded_path to avoid conflicts)
-    expanded_nested_chain = nil,  -- chain GUID
+    -- Expanded chains in nested racks: track which chain is expanded per nested rack
+    -- Keyed by rack GUID to avoid conflicts between multiple nested racks
+    expanded_nested_chains = {},  -- {[rack_guid] = chain_guid}
 
     -- Selected FX for detail panel
     selected_fx = nil,
