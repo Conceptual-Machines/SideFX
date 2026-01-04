@@ -664,7 +664,8 @@ local function add_rack_to_track(position)
             local mixer_inside = nil
             for child in rack:iter_container_children() do
                 local ok, name = pcall(function() return child:get_name() end)
-                if ok and name and (name:find("SideFX_Mixer") or name:find("SideFX Mixer") or name:match("^_R%d+_M$")) then
+                -- Match various mixer name patterns: original JSFX name or already renamed
+                if ok and name and ((name:find("SideFX") and name:find("Mixer")) or name:match("^_R%d+_M$")) then
                     mixer_inside = child
                     break
                 end
