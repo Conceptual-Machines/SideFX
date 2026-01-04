@@ -516,19 +516,20 @@ local function add_plugin_to_track(plugin, position)
         r.TrackFX_SetNamedConfigParm(state.track.pointer, container.pointer, "renamed_name", container_name)
         
         -- Add the main FX inside the container
-        -- Container child addressing: 0x2000000 + container_idx * 0x1000 + child_position
-        local container_addr = 0x2000000 + container.pointer * 0x1000
+        -- Container child addressing: 0x2000000 + (container_idx << 16) + child_position
+        -- << 16 is equivalent to * 0x10000 (65536)
+        local container_addr = 0x2000000 + (container.pointer * 0x10000)
         local fx_idx = r.TrackFX_AddByName(state.track.pointer, plugin.full_name, false, container_addr)
         
         if fx_idx >= 0 then
             -- Set wet/dry to 100% by default
             local retval, wet_idx = r.TrackFX_GetParamFromIdent(state.track.pointer, fx_idx, ":wet")
-            if wet_idx >= 0 then
+            if wet_idx and wet_idx >= 0 then
                 r.TrackFX_SetParamNormalized(state.track.pointer, fx_idx, wet_idx, 1.0)
             end
             
             -- Add utility after the main FX (child position 1)
-            local util_addr = 0x2000000 + container.pointer * 0x1000 + 1
+            local util_addr = 0x2000000 + (container.pointer * 0x10000) + 1
             local util_idx = r.TrackFX_AddByName(state.track.pointer, UTILITY_JSFX, false, util_addr)
             
             if util_idx < 0 then
@@ -538,6 +539,8 @@ local function add_plugin_to_track(plugin, position)
                 local util_name = string.format("D%d_Util", device_idx)
                 r.TrackFX_SetNamedConfigParm(state.track.pointer, util_idx, "renamed_name", util_name)
             end
+        else
+            r.ShowConsoleMsg("SideFX: Could not add FX to container. fx_idx=" .. tostring(fx_idx) .. "\n")
         end
         
         refresh_fx_list()
