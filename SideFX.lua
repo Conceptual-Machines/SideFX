@@ -88,6 +88,7 @@ local state_module = require('lib.state')
 local rack_module = require('lib.rack')
 local device_module = require('lib.device')
 local container_module = require('lib.container')
+local modulator_module = require('lib.modulator')
 
 --------------------------------------------------------------------------------
 -- Icons (using OpenMoji font)
@@ -984,135 +985,38 @@ end
 -- Modulators
 --------------------------------------------------------------------------------
 
-local MODULATOR_JSFX = "JS:SideFX/SideFX_Modulator"
+-- Modulator operations (uses modulator_module)
+local MODULATOR_JSFX = modulator_module.MODULATOR_JSFX
 
 local function find_modulators_on_track()
-    if not state.track then return {} end
-    local modulators = {}
-    for fx in state.track:iter_track_fx_chain() do
-        local name = fx:get_name()
-        if name and (name:find(MODULATOR_JSFX) or name:find("SideFX Modulator")) then
-            table.insert(modulators, {
-                fx = fx,
-                fx_idx = fx.pointer,
-                name = "LFO " .. (#modulators + 1),
-            })
-        end
-    end
-    return modulators
+    return modulator_module.find_modulators_on_track()
 end
 
 local function add_modulator()
-    if not state.track then return end
-    r.Undo_BeginBlock()
-    -- Add at position 0 (before instruments)
-    local fx = state.track:add_fx_by_name(MODULATOR_JSFX, false, -1000)  -- -1000 = position 0
-    r.Undo_EndBlock("Add SideFX Modulator", -1)
-    refresh_fx_list()
+    local fx = modulator_module.add_modulator()
+    if fx then refresh_fx_list() end
+    return fx
 end
 
 local function delete_modulator(fx_idx)
-    if not state.track then return end
-    r.Undo_BeginBlock()
-    r.TrackFX_Delete(state.track.pointer, fx_idx)
-    r.Undo_EndBlock("Delete SideFX Modulator", -1)
+    modulator_module.delete_modulator(fx_idx)
     refresh_fx_list()
 end
 
 local function get_linkable_fx()
-    -- Get list of FX that can be modulated (exclude modulators and containers)
-    -- Uses iter_all_fx_flat to include FX inside containers
-    if not state.track then return {} end
-    local linkable = {}
-    for fx_info in state.track:iter_all_fx_flat() do
-        local fx = fx_info.fx
-        local name = fx:get_name()
-        -- Skip modulators and containers
-        if name and not name:find(MODULATOR_JSFX) and not name:find("SideFX Modulator") and not name:find("Container") then
-            local params = {}
-            local param_count = fx:get_num_params()
-            for p = 0, param_count - 1 do
-                local pname = fx:get_param_name(p)
-                table.insert(params, {idx = p, name = pname})
-            end
-            -- Add depth indicator to name for nested FX
-            local display_name = fx_info.depth > 0 and string.rep("  ", fx_info.depth) .. "↳ " .. name or name
-            table.insert(linkable, {fx = fx, fx_idx = fx.pointer, name = display_name, params = params})
-        end
-    end
-    return linkable
+    return modulator_module.get_linkable_fx()
 end
 
 local function create_param_link(mod_fx_idx, target_fx_idx, target_param_idx)
-    -- Create parameter modulation link using REAPER API
-    -- The modulator output is slider4 (param index 3, 0-indexed)
-    if not state.track then return false end
-    
-    local MOD_OUTPUT_PARAM = 3  -- slider4 in JSFX
-    
-    -- Use TrackFX_SetNamedConfigParm to set up parameter modulation
-    -- Format: "param.X.plink.active", "param.X.plink.effect", "param.X.plink.param"
-    local plink_prefix = string.format("param.%d.plink.", target_param_idx)
-    
-    -- For FX in containers, we need the container-aware index
-    -- mod_fx_idx should be simple top-level index
-    -- target_fx_idx may be container-encoded (0x2000000+) for nested FX
-    
-    -- Enable parameter link
-    local ok1 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "active", "1")
-    -- Set source effect (modulator) - modulator must be at top level
-    local ok2 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "effect", tostring(mod_fx_idx))
-    -- Set source parameter (modulator output)
-    local ok3 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "param", tostring(MOD_OUTPUT_PARAM))
-    
-    if not (ok1 and ok2 and ok3) then
-        r.ShowConsoleMsg(string.format("Plink failed: mod=%d target=%d param=%d (ok: %s %s %s)\n", 
-            mod_fx_idx, target_fx_idx, target_param_idx, 
-            tostring(ok1), tostring(ok2), tostring(ok3)))
-    end
-    
-    return ok1 and ok2 and ok3
+    return modulator_module.create_param_link(mod_fx_idx, target_fx_idx, target_param_idx)
 end
 
 local function remove_param_link(target_fx_idx, target_param_idx)
-    if not state.track then return end
-    local plink_prefix = string.format("param.%d.plink.", target_param_idx)
-    r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "active", "0")
+    modulator_module.remove_param_link(target_fx_idx, target_param_idx)
 end
 
 local function get_modulator_links(mod_fx_idx)
-    -- Find all parameters linked to this modulator (including FX in containers)
-    if not state.track then return {} end
-    local links = {}
-    local MOD_OUTPUT_PARAM = 3
-    
-    for fx_info in state.track:iter_all_fx_flat() do
-        local fx = fx_info.fx
-        local fx_name = fx:get_name()
-        local fx_idx = fx.pointer
-        -- Skip modulators and containers
-        if fx_name and not (fx_name:find(MODULATOR_JSFX) or fx_name:find("SideFX Modulator") or fx_name:find("Container")) then
-            local param_count = fx:get_num_params()
-            for param_idx = 0, param_count - 1 do
-                local plink_prefix = string.format("param.%d.plink.", param_idx)
-                local rv, active = r.TrackFX_GetNamedConfigParm(state.track.pointer, fx_idx, plink_prefix .. "active")
-                if rv and active == "1" then
-                    local _, effect = r.TrackFX_GetNamedConfigParm(state.track.pointer, fx_idx, plink_prefix .. "effect")
-                    local _, param = r.TrackFX_GetNamedConfigParm(state.track.pointer, fx_idx, plink_prefix .. "param")
-                    if tonumber(effect) == mod_fx_idx and tonumber(param) == MOD_OUTPUT_PARAM then
-                        local param_name = fx:get_param_name(param_idx)
-                        table.insert(links, {
-                            target_fx_idx = fx_idx,
-                            target_fx_name = fx_name,
-                            target_param_idx = param_idx,
-                            target_param_name = param_name,
-                        })
-                    end
-                end
-            end
-        end
-    end
-    return links
+    return modulator_module.get_modulator_links(mod_fx_idx)
 end
 
 --------------------------------------------------------------------------------
