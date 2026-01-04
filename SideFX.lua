@@ -157,6 +157,10 @@ local reaper_theme = theme.from_reaper_theme("REAPER Dynamic")
 
 local project = Project:new()
 
+-- Forward declarations for functions defined later
+local renumber_device_chain
+local get_device_utility
+
 local function get_selected_track()
     if not project:has_selected_tracks() then
         return nil, "No track selected"
@@ -395,7 +399,7 @@ local function get_device_main_fx(container)
 end
 
 -- Get the utility FX from a D-container
-local function get_device_utility(container)
+get_device_utility = function(container)
     if not container then return nil end
     for child in container:iter_container_children() do
         if is_utility_fx(child) then
@@ -437,7 +441,7 @@ local function get_short_plugin_name(full_name)
 end
 
 -- Renumber all D-containers after chain changes
-local function renumber_device_chain()
+renumber_device_chain = function()
     if not state.track then return end
     
     local device_idx = 0
