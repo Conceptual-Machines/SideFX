@@ -43,17 +43,17 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
     -- Check if rack is being renamed
     local is_renaming_rack = (state.renaming_fx == rack_guid)
     
-    -- Use table for layout: Label 70% | Path 10% | ON 10% | X 10%
-    -- Using weights: 7, 1, 1, 1 to achieve 70%, 10%, 10%, 10% distribution
+    -- Use table for layout: Equal 25% per column (collapse | path | ON | X)
+    -- Using equal weights: 1, 1, 1, 1 to achieve 25%, 25%, 25%, 25% distribution
     local table_flags = imgui.TableFlags.SizingStretchProp()
     if ctx:begin_table("rack_header_" .. rack_guid, 4, table_flags) then
-        -- Column 0: Rack name (70% - weight 7)
-        ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 7)
-        -- Column 1: Path identifier (10% - weight 1)
+        -- Column 0: Collapse button (25% - weight 1)
+        ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthStretch(), 1)
+        -- Column 1: Path identifier (25% - weight 1)
         ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 1)
-        -- Column 2: ON button (10% - weight 1)
+        -- Column 2: ON button (25% - weight 1)
         ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
-        -- Column 3: X button (10% - weight 1)
+        -- Column 3: X button (25% - weight 1)
         ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
         
         ctx:table_next_row()
@@ -107,8 +107,9 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
                 state._rename_focused = nil
             end
         else
-            local button_text = expand_icon .. " " .. rack_name:sub(1, 20)
-            if ctx:button(button_text .. "##" .. button_id, -1, 24) then
+            -- Show only icon when collapsed, full name when expanded
+            local button_text = is_expanded and (expand_icon .. " " .. rack_name:sub(1, 20)) or expand_icon
+            if ctx:button(button_text .. "##" .. button_id, -1, 20) then
                 callbacks.on_toggle_expand(rack_guid, is_expanded)
             end
             
@@ -141,7 +142,7 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
         local ok_enabled, rack_enabled = pcall(function() return rack:get_enabled() end)
         rack_enabled = ok_enabled and rack_enabled or false
         ctx:push_style_color(imgui.Col.Button(), rack_enabled and 0x44AA44FF or 0xAA4444FF)
-        if ctx:button(rack_enabled and "ON" or "OF", -1, 24) then
+        if ctx:button(rack_enabled and "ON" or "OF", -1, 20) then
             pcall(function() rack:set_enabled(not rack_enabled) end)
         end
         ctx:pop_style_color()
@@ -149,7 +150,7 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
         -- Column 3: X button (10%)
         ctx:table_set_column_index(3)
         ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
-        if ctx:button("×##rack_del", -1, 24) then
+        if ctx:button("×##rack_del", -1, 20) then
             callbacks.on_delete(rack)
         end
         ctx:pop_style_color()
