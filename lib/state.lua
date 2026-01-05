@@ -101,13 +101,23 @@ function M.refresh_fx_list()
         return 
     end
 
-    for fx in state.track:iter_track_fx_chain() do
-        local parent = fx:get_parent_container()
-        if not parent then
-            state.top_level_fx[#state.top_level_fx + 1] = fx
+    -- Safely access track (may have been deleted)
+    local ok, err = pcall(function()
+        for fx in state.track:iter_track_fx_chain() do
+            local parent = fx:get_parent_container()
+            if not parent then
+                state.top_level_fx[#state.top_level_fx + 1] = fx
+            end
         end
+        state.last_fx_count = state.track:get_track_fx_count()
+    end)
+    
+    -- If track was deleted, clear state
+    if not ok then
+        state.track = nil
+        state.last_fx_count = 0
+        return
     end
-    state.last_fx_count = state.track:get_track_fx_count()
     
     -- Call refresh callback (e.g., renumber_device_chain)
     if M.on_refresh then
@@ -122,23 +132,44 @@ end
 
 --- Check if FX chain changed externally and refresh if needed.
 function M.check_fx_changes()
-    if not state.track then return end
-    local current_count = state.track:get_track_fx_count()
+    if not state.track then 
+        -- Clear FX list if track is gone
+        state.top_level_fx = {}
+        state.last_fx_count = 0
+        return 
+    end
+    
+    -- Safely check track FX count (track may have been deleted)
+    local ok, current_count = pcall(function() 
+        return state.track:get_track_fx_count()
+    end)
+    
+    if not ok then
+        -- Track was deleted, clear state
+        state.track = nil
+        state.top_level_fx = {}
+        state.last_fx_count = 0
+        return
+    end
+    
     if current_count ~= state.last_fx_count then
         M.refresh_fx_list()
         -- Clear invalid selections
         M.clear_multi_select()
         state.selected_fx = nil
         -- Validate expanded_path - remove any GUIDs that no longer exist
-        local valid_path = {}
-        for _, guid in ipairs(state.expanded_path) do
-            if state.track:find_fx_by_guid(guid) then
-                valid_path[#valid_path + 1] = guid
-            else
-                break  -- Stop at first invalid - rest would be children
+        if state.track then
+            local valid_path = {}
+            for _, guid in ipairs(state.expanded_path) do
+                local fx = state.track:find_fx_by_guid(guid)
+                if fx then
+                    valid_path[#valid_path + 1] = guid
+                else
+                    break  -- Stop at first invalid - rest would be children
+                end
             end
+            state.expanded_path = valid_path
         end
-        state.expanded_path = valid_path
     end
 end
 
@@ -244,8 +275,13 @@ end
 function M.save_expansion_state()
     if not state.track then return end
     
-    local track_guid = state.track:get_guid()
-    if not track_guid then return end
+    -- Safely get track GUID (track may have been deleted)
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then 
+        -- Track was deleted or invalid, clear state
+        state.track = nil
+        return 
+    end
     
     -- Serialize expansion state
     local data = {

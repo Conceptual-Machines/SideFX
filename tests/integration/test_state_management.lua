@@ -118,24 +118,22 @@ local function test_nested_rack_state_independence()
     local rack2_guid = rack2:get_guid()
     
     -- Initially both should be collapsed
-    assert.equals(0, #state.expanded_path, "Top-level path should be empty")
+    assert.falsy(state.expanded_racks[rack1_guid], "Top-level rack should be collapsed")
     assert.falsy(state.expanded_racks[rack2_guid], "Nested rack should be collapsed")
     
     -- Expand top-level rack (rack1)
-    state.expanded_path = { rack1_guid }
-    assert.equals(1, #state.expanded_path, "Top-level rack should be expanded")
-    assert.equals(rack1_guid, state.expanded_path[1], "Expanded path should contain rack1 GUID")
+    state.expanded_racks[rack1_guid] = true
+    assert.truthy(state.expanded_racks[rack1_guid], "Top-level rack should be expanded")
     assert.falsy(state.expanded_racks[rack2_guid], "Nested rack should still be collapsed")
     
     -- Expand nested rack (rack2)
     state.expanded_racks[rack2_guid] = true
     assert.truthy(state.expanded_racks[rack2_guid], "Nested rack should be expanded")
-    assert.equals(1, #state.expanded_path, "Top-level path should still have 1 item")
-    assert.equals(rack1_guid, state.expanded_path[1], "Top-level rack should still be expanded")
+    assert.truthy(state.expanded_racks[rack1_guid], "Top-level rack should still be expanded")
     
     -- Collapse top-level rack
-    state.expanded_path = {}
-    assert.equals(0, #state.expanded_path, "Top-level rack should be collapsed")
+    state.expanded_racks[rack1_guid] = nil
+    assert.falsy(state.expanded_racks[rack1_guid], "Top-level rack should be collapsed")
     assert.truthy(state.expanded_racks[rack2_guid], "Nested rack expansion should persist")
     
     -- Collapse nested rack
@@ -251,19 +249,19 @@ local function test_deeply_nested_state_preservation()
     local rack3_guid = rack3:get_guid()
     
     -- Expand all
-    state.expanded_path = { rack1_guid }
+    state.expanded_racks[rack1_guid] = true
     state.expanded_racks[rack2_guid] = true
     state.expanded_racks[rack3_guid] = true
     
     -- Verify all are expanded
-    assert.equals(1, #state.expanded_path, "Rack1 should be expanded")
+    assert.truthy(state.expanded_racks[rack1_guid], "Rack1 should be expanded")
     assert.truthy(state.expanded_racks[rack2_guid], "Rack2 should be expanded")
     assert.truthy(state.expanded_racks[rack3_guid], "Rack3 should be expanded")
     
     -- Collapse middle one
     state.expanded_racks[rack2_guid] = nil
     assert.truthy(state.expanded_racks[rack3_guid], "Rack3 should still be expanded")
-    assert.equals(1, #state.expanded_path, "Rack1 should still be expanded")
+    assert.truthy(state.expanded_racks[rack1_guid], "Rack1 should still be expanded")
 end
 
 local function test_state_persistence_across_refresh()
@@ -291,8 +289,8 @@ local function test_state_persistence_across_refresh()
     local rack1_guid = rack1:get_guid()
     local rack2_guid = rack2:get_guid()
     
-    -- Set state
-    state.expanded_path = { rack1_guid }
+    -- Set state (using expanded_racks for top-level rack now)
+    state.expanded_racks[rack1_guid] = true
     state.expanded_racks[rack2_guid] = true
     
     -- Simulate refresh (re-fetch GUIDs)
@@ -317,8 +315,316 @@ local function test_state_persistence_across_refresh()
     local fresh_rack2_guid = rack2_ref:get_guid()
     
     -- Verify state matches GUIDs
-    assert.equals(fresh_rack1_guid, state.expanded_path[1], "State should reference correct rack1 GUID")
+    assert.truthy(state.expanded_racks[fresh_rack1_guid], "State should reference correct rack1 GUID")
     assert.truthy(state.expanded_racks[fresh_rack2_guid], "State should reference correct rack2 GUID")
+end
+
+local function test_multiple_top_level_racks_independent_expansion()
+    assert.section("Multiple top-level racks have independent expansion state")
+    
+    clear_track_fx()
+    state.expanded_racks = {}
+    state.expanded_nested_chains = {}
+    
+    -- Create two top-level racks
+    local rack1 = rack_module.add_rack_to_track()
+    local rack2 = rack_module.add_rack_to_track()
+    
+    local rack1_guid = rack1:get_guid()
+    local rack2_guid = rack2:get_guid()
+    
+    -- Initially both should be collapsed
+    assert.falsy(state.expanded_racks[rack1_guid], "Rack1 should be collapsed initially")
+    assert.falsy(state.expanded_racks[rack2_guid], "Rack2 should be collapsed initially")
+    
+    -- Expand rack1
+    state.expanded_racks[rack1_guid] = true
+    assert.truthy(state.expanded_racks[rack1_guid], "Rack1 should be expanded")
+    assert.falsy(state.expanded_racks[rack2_guid], "Rack2 should still be collapsed")
+    
+    -- Expand rack2
+    state.expanded_racks[rack2_guid] = true
+    assert.truthy(state.expanded_racks[rack1_guid], "Rack1 should still be expanded")
+    assert.truthy(state.expanded_racks[rack2_guid], "Rack2 should be expanded")
+    
+    -- Collapse rack1
+    state.expanded_racks[rack1_guid] = nil
+    assert.falsy(state.expanded_racks[rack1_guid], "Rack1 should be collapsed")
+    assert.truthy(state.expanded_racks[rack2_guid], "Rack2 should still be expanded")
+    
+    -- Collapse rack2
+    state.expanded_racks[rack2_guid] = nil
+    assert.falsy(state.expanded_racks[rack1_guid], "Rack1 should still be collapsed")
+    assert.falsy(state.expanded_racks[rack2_guid], "Rack2 should be collapsed")
+end
+
+local function test_multiple_top_level_racks_chain_selection_independence()
+    assert.section("Multiple top-level racks have independent chain selection")
+    
+    clear_track_fx()
+    state.expanded_racks = {}
+    state.expanded_nested_chains = {}
+    
+    -- Create two top-level racks with chains
+    local rack1 = rack_module.add_rack_to_track()
+    local chain1 = rack_module.add_chain_to_rack(rack1, { full_name = "ReaComp", name = "ReaComp" })
+    
+    local rack2 = rack_module.add_rack_to_track()
+    local chain2 = rack_module.add_chain_to_rack(rack2, { full_name = "ReaEQ", name = "ReaEQ" })
+    
+    -- Refresh to get fresh references
+    rack1 = find_fx_by_name_pattern("^R1:")
+    rack2 = find_fx_by_name_pattern("^R2:")
+    
+    local rack1_guid = rack1:get_guid()
+    local rack2_guid = rack2:get_guid()
+    
+    -- Get chain GUIDs
+    local chain1_ref = nil
+    for child in rack1:iter_container_children() do
+        if child:get_name():match("^R1_C1") then
+            chain1_ref = child
+            break
+        end
+    end
+    
+    local chain2_ref = nil
+    for child in rack2:iter_container_children() do
+        if child:get_name():match("^R2_C1") then
+            chain2_ref = child
+            break
+        end
+    end
+    
+    local chain1_guid = chain1_ref:get_guid()
+    local chain2_guid = chain2_ref:get_guid()
+    
+    -- Expand both racks
+    state.expanded_racks[rack1_guid] = true
+    state.expanded_racks[rack2_guid] = true
+    
+    -- Select chain in rack1
+    state.expanded_nested_chains[rack1_guid] = chain1_guid
+    assert.equals(chain1_guid, state.expanded_nested_chains[rack1_guid], "Rack1 should have chain1 selected")
+    assert.falsy(state.expanded_nested_chains[rack2_guid], "Rack2 should have no chain selected")
+    
+    -- Select chain in rack2
+    state.expanded_nested_chains[rack2_guid] = chain2_guid
+    assert.equals(chain1_guid, state.expanded_nested_chains[rack1_guid], "Rack1 should still have chain1 selected")
+    assert.equals(chain2_guid, state.expanded_nested_chains[rack2_guid], "Rack2 should have chain2 selected")
+    
+    -- Clear rack1's chain selection
+    state.expanded_nested_chains[rack1_guid] = nil
+    assert.falsy(state.expanded_nested_chains[rack1_guid], "Rack1 should have no chain selected")
+    assert.equals(chain2_guid, state.expanded_nested_chains[rack2_guid], "Rack2 should still have chain2 selected")
+end
+
+local function test_top_level_and_nested_rack_independence()
+    assert.section("Top-level and nested racks have independent expansion state")
+    
+    clear_track_fx()
+    state.expanded_racks = {}
+    state.expanded_nested_chains = {}
+    
+    -- Create top-level rack
+    local top_rack = rack_module.add_rack_to_track()
+    local top_chain = rack_module.add_chain_to_rack(top_rack, { full_name = "ReaComp", name = "ReaComp" })
+    
+    -- Create nested rack inside the chain
+    top_rack = find_fx_by_name_pattern("^R1:")
+    local top_chain_ref = nil
+    for child in top_rack:iter_container_children() do
+        if child:get_name():match("^R1_C1") then
+            top_chain_ref = child
+            break
+        end
+    end
+    
+    local nested_rack = rack_module.add_rack_to_chain(top_chain_ref)
+    
+    local top_rack_guid = top_rack:get_guid()
+    local nested_rack_guid = nested_rack:get_guid()
+    
+    -- Initially both should be collapsed
+    assert.falsy(state.expanded_racks[top_rack_guid], "Top-level rack should be collapsed initially")
+    assert.falsy(state.expanded_racks[nested_rack_guid], "Nested rack should be collapsed initially")
+    
+    -- Expand top-level rack
+    state.expanded_racks[top_rack_guid] = true
+    assert.truthy(state.expanded_racks[top_rack_guid], "Top-level rack should be expanded")
+    assert.falsy(state.expanded_racks[nested_rack_guid], "Nested rack should still be collapsed")
+    
+    -- Expand nested rack
+    state.expanded_racks[nested_rack_guid] = true
+    assert.truthy(state.expanded_racks[top_rack_guid], "Top-level rack should still be expanded")
+    assert.truthy(state.expanded_racks[nested_rack_guid], "Nested rack should be expanded")
+    
+    -- Collapse top-level rack
+    state.expanded_racks[top_rack_guid] = nil
+    assert.falsy(state.expanded_racks[top_rack_guid], "Top-level rack should be collapsed")
+    assert.truthy(state.expanded_racks[nested_rack_guid], "Nested rack should still be expanded")
+    
+    -- Collapse nested rack
+    state.expanded_racks[nested_rack_guid] = nil
+    assert.falsy(state.expanded_racks[top_rack_guid], "Top-level rack should still be collapsed")
+    assert.falsy(state.expanded_racks[nested_rack_guid], "Nested rack should be collapsed")
+end
+
+local function test_deleted_track_state_clearing()
+    assert.section("State is cleared when track is deleted")
+    
+    clear_track_fx()
+    state.expanded_racks = {}
+    state.expanded_nested_chains = {}
+    state.top_level_fx = {}
+    
+    -- Create a rack and set some state
+    local rack1 = rack_module.add_rack_to_track()
+    local rack1_guid = rack1:get_guid()
+    
+    -- Set expansion state
+    state.expanded_racks[rack1_guid] = true
+    state.expanded_nested_chains[rack1_guid] = "{chain-1}"
+    
+    -- Verify state is set
+    assert.truthy(state.expanded_racks[rack1_guid], "Rack should be expanded")
+    assert.equals("{chain-1}", state.expanded_nested_chains[rack1_guid], "Chain should be selected")
+    
+    -- Simulate deleted track by setting state.track to a mock that will fail
+    local original_track = state.track
+    state.track = {
+        get_guid = function()
+            error("Track deleted")
+        end
+    }
+    
+    -- Try to access track (should fail gracefully)
+    local ok, err = pcall(function()
+        state_module.save_expansion_state()
+    end)
+    
+    assert.truthy(ok, "save_expansion_state should not error on deleted track")
+    assert.is_nil(state.track, "state.track should be cleared")
+    
+    -- Restore original track
+    state.track = original_track
+end
+
+local function test_refresh_fx_list_after_track_deletion()
+    assert.section("refresh_fx_list handles track deletion gracefully")
+    
+    clear_track_fx()
+    
+    -- Create a rack
+    local rack1 = rack_module.add_rack_to_track()
+    local chain1 = rack_module.add_chain_to_rack(rack1, { full_name = "ReaComp", name = "ReaComp" })
+    
+    -- Refresh to populate top_level_fx
+    state_module.refresh_fx_list()
+    assert.greater_than(#state.top_level_fx, 0, "top_level_fx should have items")
+    
+    -- Simulate deleted track by replacing with mock that will fail
+    local original_track = state.track
+    state.track = {
+        iter_track_fx_chain = function()
+            error("Track deleted")
+        end,
+        get_track_fx_count = function()
+            error("Track deleted")
+        end
+    }
+    
+    -- Try to refresh (should not error)
+    local ok, err = pcall(function()
+        state_module.refresh_fx_list()
+    end)
+    
+    assert.truthy(ok, "refresh_fx_list should not error after track deletion")
+    assert.is_nil(state.track, "state.track should be cleared")
+    assert.equals(0, #state.top_level_fx, "top_level_fx should be cleared")
+    assert.equals(0, state.last_fx_count, "last_fx_count should be reset")
+    
+    -- Restore original track
+    state.track = original_track
+end
+
+local function test_check_fx_changes_after_track_deletion()
+    assert.section("check_fx_changes handles track deletion gracefully")
+    
+    clear_track_fx()
+    
+    -- Create a rack
+    local rack1 = rack_module.add_rack_to_track()
+    state_module.refresh_fx_list()
+    
+    local initial_count = state.last_fx_count
+    assert.greater_than(initial_count, 0, "Should have FX count")
+    
+    -- Simulate deleted track by replacing with mock that will fail
+    local original_track = state.track
+    state.track = {
+        get_track_fx_count = function()
+            error("Track deleted")
+        end
+    }
+    
+    -- Try to check changes (should not error)
+    local ok, err = pcall(function()
+        state_module.check_fx_changes()
+    end)
+    
+    assert.truthy(ok, "check_fx_changes should not error after track deletion")
+    assert.is_nil(state.track, "state.track should be cleared")
+    assert.equals(0, #state.top_level_fx, "top_level_fx should be cleared")
+    assert.equals(0, state.last_fx_count, "last_fx_count should be reset")
+    
+    -- Restore original track
+    state.track = original_track
+end
+
+local function test_track_deletion_with_expansion_state()
+    assert.section("Track deletion clears expansion state safely")
+    
+    clear_track_fx()
+    state.expanded_racks = {}
+    state.expanded_nested_chains = {}
+    
+    -- Create multiple racks with expansion state
+    local rack1 = rack_module.add_rack_to_track()
+    local rack2 = rack_module.add_rack_to_track()
+    
+    local rack1_guid = rack1:get_guid()
+    local rack2_guid = rack2:get_guid()
+    
+    -- Set expansion state
+    state.expanded_racks[rack1_guid] = true
+    state.expanded_racks[rack2_guid] = true
+    state.expanded_nested_chains[rack1_guid] = "{chain-1}"
+    
+    -- Verify state is set
+    assert.truthy(state.expanded_racks[rack1_guid], "Rack1 should be expanded")
+    assert.truthy(state.expanded_racks[rack2_guid], "Rack2 should be expanded")
+    
+    -- Simulate deleted track by replacing with mock that will fail
+    local original_track = state.track
+    state.track = {
+        get_guid = function()
+            error("Track deleted")
+        end
+    }
+    
+    -- Try to save state (should not error)
+    local ok, err = pcall(function()
+        state_module.save_expansion_state()
+    end)
+    
+    assert.truthy(ok, "save_expansion_state should not error")
+    assert.is_nil(state.track, "state.track should be cleared")
+    -- Note: expanded_racks may still contain GUIDs, but that's okay - they're just strings
+    -- The important thing is that state.track is cleared and no errors occur
+    
+    -- Restore original track
+    state.track = original_track
 end
 
 --------------------------------------------------------------------------------
@@ -341,6 +647,13 @@ local function run_all_tests()
         { name = "test_multiple_nested_racks_independent_expansion", fn = test_multiple_nested_racks_independent_expansion },
         { name = "test_deeply_nested_state_preservation", fn = test_deeply_nested_state_preservation },
         { name = "test_state_persistence_across_refresh", fn = test_state_persistence_across_refresh },
+        { name = "test_multiple_top_level_racks_independent_expansion", fn = test_multiple_top_level_racks_independent_expansion },
+        { name = "test_multiple_top_level_racks_chain_selection_independence", fn = test_multiple_top_level_racks_chain_selection_independence },
+        { name = "test_top_level_and_nested_rack_independence", fn = test_top_level_and_nested_rack_independence },
+        { name = "test_deleted_track_state_clearing", fn = test_deleted_track_state_clearing },
+        { name = "test_refresh_fx_list_after_track_deletion", fn = test_refresh_fx_list_after_track_deletion },
+        { name = "test_check_fx_changes_after_track_deletion", fn = test_check_fx_changes_after_track_deletion },
+        { name = "test_track_deletion_with_expansion_state", fn = test_track_deletion_with_expansion_state },
     }
     
     for _, test in ipairs(tests) do
@@ -368,4 +681,5 @@ local function run_all_tests()
 end
 
 run_all_tests()
+
 

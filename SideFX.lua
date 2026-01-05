@@ -93,30 +93,29 @@ local device_module = require('lib.device')
 local container_module = require('lib.container')
 local modulator_module = require('lib.modulator')
 local browser_module = require('lib.browser')
+local constants = require('lib.constants')
+
+-- UI modules
+local widgets = require('lib.ui.widgets')
+local browser_panel = require('lib.ui.browser_panel')
+local fx_menu = require('lib.ui.fx_menu')
+local fx_detail_panel = require('lib.ui.fx_detail_panel')
+local modulator_panel = require('lib.ui.modulator_panel')
+local toolbar = require('lib.ui.toolbar')
+local drag_drop = require('lib.ui.drag_drop')
+local rack_ui = require('lib.ui.rack_ui')
 
 --------------------------------------------------------------------------------
 -- Icons (using OpenMoji font)
 --------------------------------------------------------------------------------
 
-local Icons = {
-    folder_open = "1F4C2",      -- 📂
-    folder_closed = "1F4C1",    -- 📁
-    package = "1F4E6",          -- 📦
-    plug = "1F50C",             -- 🔌
-    musical_keyboard = "1F3B9", -- 🎹
-    wrench = "1F527",           -- 🔧
-    speaker_high = "1F50A",     -- 🔊
-    speaker_muted = "1F507",    -- 🔇
-    arrows_counterclockwise = "1F504", -- 🔄
-}
-
+local Icons = constants.Icons
 local icon_font = nil
 local icon_size = 16
 local default_font = nil
 
 local function icon_text(icon_id)
-    local info = EmojImGui.Asset.CharInfo("OpenMoji", icon_id)
-    return info and info.utf8 or "?"
+    return constants.icon_text(EmojImGui, icon_id)
 end
 
 --------------------------------------------------------------------------------
@@ -250,207 +249,16 @@ end
 -- Use rack module functions
 local get_rack_mixer = fx_utils.get_rack_mixer
 
--- Custom pan slider with center line indicator
--- Returns: changed (bool), new_value (-100 to +100)
-local function draw_pan_slider(ctx, label, pan_val, width)
-    width = width or 50
-    local slider_h = 12
-    local text_h = 16
-    local gap = 2
-    local total_h = slider_h + gap + text_h
-
-    local changed = false
-    local new_val = pan_val
-
-    -- Format label
-    local pan_format
-    if pan_val <= -1 then
-        pan_format = string.format("%.0fL", -pan_val)
-    elseif pan_val >= 1 then
-        pan_format = string.format("%.0fR", pan_val)
-    else
-        pan_format = "C"
-    end
-
-    local screen_x, screen_y = ctx:get_cursor_screen_pos()
-    local draw_list = ctx:get_window_draw_list()
-
-    -- Background track
-    ctx:draw_list_add_rect_filled(draw_list, screen_x, screen_y, screen_x + width, screen_y + slider_h, 0x333333FF, 2)
-
-    -- Center line (vertical tick)
-    local center_x = screen_x + width / 2
-    ctx:draw_list_add_line(draw_list, center_x, screen_y - 1, center_x, screen_y + slider_h + 1, 0x666666FF, 1)
-
-    -- Pan indicator line from center
-    local pan_norm = (pan_val + 100) / 200  -- 0 to 1
-    local pan_x = screen_x + pan_norm * width
-
-    -- Draw filled region from center to pan position
-    if pan_val < -1 then
-        ctx:draw_list_add_rect_filled(draw_list, pan_x, screen_y + 1, center_x, screen_y + slider_h - 1, 0x5588AAFF, 1)
-    elseif pan_val > 1 then
-        ctx:draw_list_add_rect_filled(draw_list, center_x, screen_y + 1, pan_x, screen_y + slider_h - 1, 0x5588AAFF, 1)
-    end
-
-    -- Pan position indicator (small line)
-    ctx:draw_list_add_line(draw_list, pan_x, screen_y, pan_x, screen_y + slider_h, 0xAADDFFFF, 2)
-
-    -- Text label background (full width)
-    local text_y = screen_y + slider_h + gap
-    ctx:draw_list_add_rect_filled(draw_list, screen_x, text_y, screen_x + width, text_y + text_h, 0x222222FF, 2)
-
-    -- Invisible button for slider dragging (only covers slider area)
-    ctx:set_cursor_screen_pos(screen_x, screen_y)
-    ctx:invisible_button(label .. "_slider_btn", width, slider_h)
-
-    -- Handle dragging
-    if ctx:is_item_active() then
-        local mouse_x = ctx:get_mouse_pos()
-        local new_norm = (mouse_x - screen_x) / width
-        new_norm = math.max(0, math.min(1, new_norm))
-        new_val = -100 + new_norm * 200
-        changed = true
-    end
-
-    -- Double-click on slider to reset to center
-    if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-        new_val = 0
-        changed = true
-    end
-
-    -- Draw formatted text centered
-    local text_w = ctx:calc_text_size(pan_format)
-    ctx:draw_list_add_text(draw_list, screen_x + (width - text_w) / 2, text_y + 2, 0xCCCCCCFF, pan_format)
-
-    -- Invisible button for text label (separate from slider)
-    ctx:set_cursor_screen_pos(screen_x, text_y)
-    ctx:invisible_button(label .. "_text_btn", width, text_h)
-
-    -- Double-click on text to edit value
-    if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-        ctx:open_popup(label .. "_edit_popup")
-    end
-
-    -- Edit popup
-    if ctx:begin_popup(label .. "_edit_popup") then
-        ctx:set_next_item_width(60)
-        ctx:set_keyboard_focus_here()
-        local input_changed, input_val = ctx:input_double("##" .. label .. "_input", pan_val, 0, 0, "%.0f")
-        if input_changed then
-            new_val = math.max(-100, math.min(100, input_val))
-            changed = true
-        end
-        if ctx:is_key_pressed(imgui.Key.Enter()) or ctx:is_key_pressed(imgui.Key.Escape()) then
-            ctx:close_current_popup()
-        end
-        ctx:end_popup()
-    end
-
-    -- Advance cursor
-    ctx:set_cursor_screen_pos(screen_x, screen_y + total_h)
-    ctx:dummy(width, 0)
-
-    return changed, new_val
-end
-
--- Draw a vertical fader with fill and dB display
--- Similar style to draw_pan_slider but vertical orientation
-local function draw_fader(ctx, label, db_val, width, height, min_db, max_db)
-    width = width or 30
-    height = height or 120
-    min_db = min_db or -24
-    max_db = max_db or 12
-
-    local changed = false
-    local new_val = db_val
-
-    local screen_x, screen_y = ctx:get_cursor_screen_pos()
-    local draw_list = ctx:get_window_draw_list()
-
-    -- Background track
-    ctx:draw_list_add_rect_filled(draw_list, screen_x, screen_y, screen_x + width, screen_y + height, 0x1A1A1AFF, 3)
-
-    -- Calculate fill height based on dB value
-    local normalized = (db_val - min_db) / (max_db - min_db)
-    normalized = math.max(0, math.min(1, normalized))
-    local fill_height = height * normalized
-
-    -- Draw fill from bottom
-    if fill_height > 2 then
-        local fill_top = screen_y + height - fill_height
-        -- Color gradient based on level
-        local fill_color
-        if db_val > 0 then
-            fill_color = 0xDD8844CC  -- Orange for above 0dB
-        elseif db_val > -6 then
-            fill_color = 0x66AA88CC  -- Green-ish for normal
-        else
-            fill_color = 0x5588AACC  -- Blue for lower levels
-        end
-        ctx:draw_list_add_rect_filled(draw_list, screen_x + 2, fill_top, screen_x + width - 2, screen_y + height - 2, fill_color, 2)
-    end
-
-    -- Border
-    ctx:draw_list_add_rect(draw_list, screen_x, screen_y, screen_x + width, screen_y + height, 0x555555FF, 3)
-
-    -- Draw dB tick marks on the right side
-    local tick_dbs = {12, 6, 0, -6, -12, -18, -24}
-    for _, tick_db in ipairs(tick_dbs) do
-        if tick_db >= min_db and tick_db <= max_db then
-            local tick_norm = (tick_db - min_db) / (max_db - min_db)
-            local tick_y = screen_y + height - (tick_norm * height)
-            local tick_len = (tick_db == 0) and 6 or 3
-            local tick_color = (tick_db == 0) and 0x888888FF or 0x444444FF
-            ctx:draw_list_add_line(draw_list, screen_x + width - tick_len, tick_y, screen_x + width, tick_y, tick_color, 1)
-        end
-    end
-
-    -- Zero line indicator (horizontal across the full width at 0dB)
-    local zero_norm = (0 - min_db) / (max_db - min_db)
-    local zero_y = screen_y + height - (zero_norm * height)
-    ctx:draw_list_add_line(draw_list, screen_x, zero_y, screen_x + width, zero_y, 0x666666AA, 1)
-
-    -- Invisible button for dragging
-    ctx:set_cursor_screen_pos(screen_x, screen_y)
-    ctx:invisible_button(label .. "_fader_btn", width, height)
-
-    -- Handle dragging (inverted because Y increases downward)
-    if ctx:is_item_active() then
-        local _, mouse_y = ctx:get_mouse_pos()
-        local new_norm = 1 - ((mouse_y - screen_y) / height)
-        new_norm = math.max(0, math.min(1, new_norm))
-        new_val = min_db + new_norm * (max_db - min_db)
-        changed = true
-    end
-
-    -- Double-click to reset to 0dB
-    if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-        new_val = 0
-        changed = true
-    end
-
-    -- Draw dB value label below fader
-    local label_h = 16
-    local label_y = screen_y + height + 2
-    ctx:draw_list_add_rect_filled(draw_list, screen_x, label_y, screen_x + width, label_y + label_h, 0x222222FF, 2)
-
-    local db_label = db_val >= 0 and string.format("+%.0f", db_val) or string.format("%.0f", db_val)
-    local text_w, _ = ctx:calc_text_size(db_label)
-    ctx:draw_list_add_text(draw_list, screen_x + (width - text_w) / 2, label_y + 1, 0xCCCCCCFF, db_label)
-
-    -- Advance cursor
-    ctx:set_cursor_screen_pos(screen_x, label_y + label_h)
-    ctx:dummy(width, 0)
-
-    return changed, new_val
-end
+-- Use widgets module for pan slider and fader
+local draw_pan_slider = widgets.draw_pan_slider
+local draw_fader = widgets.draw_fader
 
 -- Rack operations (uses state singleton via rack_module)
 local function add_rack_to_track(position)
     local rack = rack_module.add_rack_to_track(position)
     if rack then
-        state.expanded_path = { rack:get_guid() }
+        -- Use expanded_racks for top-level racks (consistent with nested racks)
+        state.expanded_racks[rack:get_guid()] = true
         refresh_fx_list()
     end
     return rack
@@ -468,14 +276,11 @@ local function add_chain_to_rack(rack, plugin)
         local chain_guid = chain:get_guid()
         if chain_guid then
             -- Force the chain to be expanded/selected so user can see it
-            if is_nested and rack_guid then
-                -- Nested rack: ensure rack is expanded and chain is selected
+            if rack_guid then
+                -- Ensure rack is expanded (works for both top-level and nested)
                 state.expanded_racks[rack_guid] = true
+                -- Track which chain is selected (works for both top-level and nested)
                 state.expanded_nested_chains[rack_guid] = chain_guid
-            elseif rack_guid then
-                -- Top-level rack: ensure rack is expanded and chain is selected
-                state.expanded_path[1] = rack_guid
-                state.expanded_path[2] = chain_guid
             end
             state_module.save_expansion_state()
         end
@@ -504,14 +309,11 @@ local function add_nested_rack_to_rack(parent_rack)
             
             -- Also select the chain that contains the nested rack
             if chain_guid then
-                if is_parent_nested and parent_rack_guid then
-                    -- Parent is nested: use expanded_nested_chains
+                if parent_rack_guid then
+                    -- Ensure parent rack is expanded (works for both top-level and nested)
                     state.expanded_racks[parent_rack_guid] = true
+                    -- Track which chain is selected (works for both top-level and nested)
                     state.expanded_nested_chains[parent_rack_guid] = chain_guid
-                elseif parent_rack_guid then
-                    -- Top-level parent rack: ensure it's expanded and chain is selected
-                    state.expanded_path[1] = parent_rack_guid
-                    state.expanded_path[2] = chain_guid
                 end
             end
             state_module.save_expansion_state()
@@ -541,14 +343,11 @@ local function add_device_to_chain(chain, plugin)
     local device = rack_module.add_device_to_chain(chain, plugin)
     if device then
         -- Force the chain to be expanded/selected so user can see the device that was just added
-        if is_nested and rack_guid then
-            -- Nested rack: ensure rack is expanded and chain is selected
+        if rack_guid then
+            -- Ensure rack is expanded (works for both top-level and nested)
             state.expanded_racks[rack_guid] = true
+            -- Track which chain is selected (works for both top-level and nested)
             state.expanded_nested_chains[rack_guid] = chain_guid
-        elseif rack_guid then
-            -- Top-level rack: ensure rack is expanded and chain is selected
-            state.expanded_path[1] = rack_guid
-            state.expanded_path[2] = chain_guid
         end
         state_module.save_expansion_state()
         refresh_fx_list()
@@ -578,7 +377,8 @@ local renumber_chains_in_rack = rack_module.renumber_chains_in_rack
 local function add_to_new_container(fx_list)
     local container = container_module.add_to_new_container(fx_list)
     if container then
-        state.expanded_path = { container:get_guid() }
+        -- Use expanded_racks for containers (consistent with racks)
+        state.expanded_racks[container:get_guid()] = true
         refresh_fx_list()
     end
     return container
@@ -595,72 +395,7 @@ end
 --------------------------------------------------------------------------------
 
 local function draw_plugin_browser(ctx)
-    ctx:set_next_item_width(-1)
-    local changed, search = ctx:input_text("##search", state.browser.search)
-    if changed then
-        state.browser.search = search
-        filter_plugins()
-    end
-    if ctx:is_item_hovered() then ctx:set_tooltip("Search plugins...") end
-
-    if ctx:begin_tab_bar("BrowserTabs") then
-        if ctx:begin_tab_item("  All  ") then
-            if state.browser.filter ~= "all" then
-                state.browser.filter = "all"
-                filter_plugins()
-            end
-            ctx:end_tab_item()
-        end
-        if ctx:begin_tab_item(" Inst ") then
-            if state.browser.filter ~= "instruments" then
-                state.browser.filter = "instruments"
-                filter_plugins()
-            end
-            ctx:end_tab_item()
-        end
-        if ctx:begin_tab_item(" FX ") then
-            if state.browser.filter ~= "effects" then
-                state.browser.filter = "effects"
-                filter_plugins()
-            end
-            ctx:end_tab_item()
-        end
-        ctx:end_tab_bar()
-    end
-
-    if ctx:begin_child("PluginList", 0, 0, imgui.ChildFlags.Border()) then
-        local i = 0
-        for plugin in helpers.iter(state.browser.filtered) do
-            i = i + 1
-            ctx:push_id(i)
-
-            -- Icon with emoji font
-            if icon_font then ctx:push_font(icon_font, icon_size) end
-            local icon = plugin.is_instrument and icon_text(Icons.musical_keyboard) or icon_text(Icons.wrench)
-            ctx:text(icon)
-            if icon_font then ctx:pop_font() end
-
-            -- Text with default font
-            ctx:same_line()
-            if ctx:selectable(plugin.name, false) then
-                add_plugin_to_track(plugin)
-            end
-
-            -- Drag source for plugin (drag to add to chain)
-            if ctx:begin_drag_drop_source() then
-                ctx:set_drag_drop_payload("PLUGIN_ADD", plugin.full_name)
-                ctx:text("Add: " .. plugin.name)
-                ctx:end_drag_drop_source()
-            end
-
-            if ctx:is_item_hovered() then
-                ctx:set_tooltip(plugin.full_name .. "\n(drag to chain or click to add)")
-            end
-
-            ctx:pop_id()
-        end
-        ctx:end_child()
-    end
+    browser_panel.draw(ctx, state, icon_font, icon_size, add_plugin_to_track, filter_plugins)
 end
 
 --------------------------------------------------------------------------------
@@ -668,165 +403,52 @@ end
 --------------------------------------------------------------------------------
 
 local function draw_fx_context_menu(ctx, fx, guid, i, enabled, is_container, depth)
-    if ctx:begin_popup_context_item("fxmenu" .. i) then
-        if ctx:menu_item("Open FX Window") then
-            fx:show(3)
-        end
-        if ctx:menu_item(enabled and "Bypass" or "Enable") then
-            fx:set_enabled(not enabled)
-        end
-        ctx:separator()
-        if ctx:menu_item("Rename") then
+    fx_menu.draw(ctx, fx, guid, "fxmenu" .. i, enabled, is_container, depth, get_fx_display_name, {
+        on_open_fx = function(fx) fx:show(3) end,
+        on_toggle_enabled = function(fx) fx:set_enabled(not fx:get_enabled()) end,
+        on_rename = function(guid, display_name)
             state.renaming_fx = guid
-            state.rename_text = get_fx_display_name(fx)
-        end
-        ctx:separator()
-        -- Remove from container option (only if inside a container)
-        local parent = fx:get_parent_container()
-        if parent then
-            if ctx:menu_item("Remove from Container") then
+            state.rename_text = display_name
+        end,
+        on_remove_from_container = function(fx, depth)
                 fx:move_out_of_container()
                 collapse_from_depth(depth)
                 refresh_fx_list()
-            end
-            ctx:separator()
-        end
-        -- Dissolve container option (only for containers)
-        if is_container then
-            if ctx:menu_item("Dissolve Container") then
+        end,
+        on_dissolve_container = function(fx, depth)
                 dissolve_container(fx)
                 collapse_from_depth(depth)
                 refresh_fx_list()
-            end
-            ctx:separator()
-        end
-        if ctx:menu_item("Delete") then
+        end,
+        on_delete = function(fx, depth)
             fx:delete()
             collapse_from_depth(depth)
             refresh_fx_list()
-        end
-        ctx:separator()
-        local sel_count = get_multi_select_count()
-        if sel_count > 0 then
-            if ctx:menu_item("Add Selected to Container (" .. sel_count .. ")") then
-                add_to_new_container(get_multi_selected_fx())
-                clear_multi_select()
-            end
-        else
-            -- Single item - add to new container (works for FX and containers)
-            if ctx:menu_item("Add to New Container") then
-                add_to_new_container({fx})
-            end
-        end
-        ctx:end_popup()
-    end
+        end,
+        on_add_to_container = function(fx_list)
+            add_to_new_container(fx_list)
+        end,
+        get_multi_select_count = get_multi_select_count,
+        get_multi_selected_fx = get_multi_selected_fx,
+        clear_multi_select = clear_multi_select,
+    })
 end
 
 --- Handle drop target for FX reordering and container drops.
 local function handle_fx_drop_target(ctx, fx, guid, is_container)
-            if ctx:begin_drag_drop_target() then
-        local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
-        if accepted and payload and payload ~= guid then
-            local drag_fx = state.track:find_fx_by_guid(payload)
-            if drag_fx then
-                if is_container then
-                    -- Dropping onto a container: move into it
-                    drag_fx:move_to_container(fx)
-                else
-                    -- Dropping onto a non-container FX: reorder
-                    local drag_parent = drag_fx:get_parent_container()
-                    local target_parent = fx:get_parent_container()
-                    local drag_parent_guid = drag_parent and drag_parent:get_guid() or nil
-                    local target_parent_guid = target_parent and target_parent:get_guid() or nil
-
-                    if drag_parent_guid == target_parent_guid then
-                        -- Same container: reorder using REAPER's swap
-                        local drag_pos = drag_fx.pointer
-                        local target_pos = fx.pointer
-
-                        if target_parent then
-                            -- Inside a container - use container child positions
-                            local children = {}
-                            for child in target_parent:iter_container_children() do
-                                children[#children + 1] = child
-                            end
-                            for idx, child in ipairs(children) do
-                                if child:get_guid() == payload then drag_pos = idx - 1 end
-                                if child:get_guid() == guid then target_pos = idx - 1 end
-                            end
-                        end
-
-                        -- Swap using TrackFX_CopyToTrack
-                        if drag_pos ~= target_pos then
-                            r.TrackFX_CopyToTrack(
-                                state.track.pointer, drag_fx.pointer,
-                                state.track.pointer, fx.pointer,
-                                true
-                            )
-                        end
-                    else
-                        -- Different containers: move to target's container at target's position
-                        if target_parent then
-                            -- Find target's position in its container
-                            local target_pos = 0
-                            for child in target_parent:iter_container_children() do
-                                if child:get_guid() == guid then break end
-                                target_pos = target_pos + 1
-                            end
-                            target_parent:add_fx_to_container(drag_fx, target_pos)
-                        else
-                            -- Target is at track level
-                            drag_fx:move_out_of_container()
-                        end
-                    end
-                end
-                refresh_fx_list()
-            end
-        end
-        ctx:end_drag_drop_target()
-    end
+    drag_drop.handle_fx_drop_target(ctx, fx, guid, is_container, state.track, {
+        on_refresh = refresh_fx_list
+    })
 end
 
 --- Move FX to track level (out of all containers).
 local function move_fx_to_track_level(guid)
-                    local fx = state.track:find_fx_by_guid(guid)
-    if not fx then return end
-
-                                while fx:get_parent_container() do
-                                    fx:move_out_of_container()
-                                    fx = state.track:find_fx_by_guid(guid)
-                                    if not fx then break end
-                                end
+    drag_drop.move_fx_to_track_level(guid, state.track)
 end
 
 --- Move FX to a target container by navigating through hierarchy.
 local function move_fx_to_container(guid, target_container_guid)
-    local target_container = state.track:find_fx_by_guid(target_container_guid)
-    if not target_container then return end
-
-    -- Build path from root to target container
-    local target_path = {}
-                                    local container = target_container
-                                    while container do
-                                        table.insert(target_path, 1, container:get_guid())
-                                        container = container:get_parent_container()
-                                    end
-
-                                    -- Move FX through each level
-                                    for _, container_guid in ipairs(target_path) do
-        local fx = state.track:find_fx_by_guid(guid)
-                                        if not fx then break end
-
-                                        local current_parent = fx:get_parent_container()
-                                        local current_parent_guid = current_parent and current_parent:get_guid() or nil
-
-                                        if current_parent_guid ~= container_guid then
-                                            local c = state.track:find_fx_by_guid(container_guid)
-                                            if c then
-                                                c:add_fx_to_container(fx)
-                                            end
-                                        end
-                                    end
+    drag_drop.move_fx_to_container(guid, target_container_guid, state.track)
 end
 
 --------------------------------------------------------------------------------
@@ -1026,114 +648,9 @@ end
 --------------------------------------------------------------------------------
 
 local function draw_fx_detail_column(ctx, width)
-    if not state.selected_fx then return end
-
-    if ctx:begin_child("FXDetail", width, 0, imgui.ChildFlags.Border()) then
-        local fx = state.track:find_fx_by_guid(state.selected_fx)
-        if not fx then
-            ctx:text_disabled("FX not found")
-            ctx:end_child()
-            return
-        end
-
-        -- Header
-        ctx:text(get_fx_display_name(fx))
-        ctx:separator()
-
-        -- Bypass toggle + Open button on same line
-        local enabled = fx:get_enabled()
-        local button_w = (width - 20) / 2
-        if ctx:button(enabled and "ON" or "OFF", button_w, 0) then
-            fx:set_enabled(not enabled)
-        end
-        ctx:same_line()
-        if ctx:button("Open FX", button_w, 0) then
-            fx:show(3)
-        end
-
-        ctx:separator()
-
-        -- Parameters header
-        local param_count = fx:get_num_params()
-        ctx:text(string.format("Parameters (%d)", param_count))
-
-        if param_count == 0 then
-            ctx:text_disabled("No parameters")
-        else
-            -- Scrollable parameter list with two columns for many params
-            if ctx:begin_child("ParamList", 0, 0, imgui.ChildFlags.Border()) then
-                local use_two_cols = param_count > 8 and width > 350
-
-                if use_two_cols then
-                    local half = math.ceil(param_count / 2)
-
-                    if ctx:begin_table("ParamTable", 2) then
-                        ctx:table_setup_column("Col1", imgui.TableColumnFlags.WidthStretch())
-                        ctx:table_setup_column("Col2", imgui.TableColumnFlags.WidthStretch())
-
-                        for row = 0, half - 1 do
-                            ctx:table_next_row()
-
-                            ctx:table_set_column_index(0)
-                            local i = row
-                            if i < param_count then
-                                local name = fx:get_param_name(i)
-                                local val = fx:get_param_normalized(i) or 0
-                                local display_name = (name and name ~= "") and name or ("P" .. (i + 1))
-
-                                ctx:push_id(i)
-                                ctx:text(display_name)
-                                ctx:set_next_item_width(-1)
-                                local changed, new_val = ctx:slider_double("##p", val, 0.0, 1.0, "%.2f")
-                                if changed then
-                                    fx:set_param_normalized(i, new_val)
-                                end
-                                ctx:pop_id()
-                            end
-
-                            ctx:table_set_column_index(1)
-                            local j = row + half
-                            if j < param_count then
-                                local name = fx:get_param_name(j)
-                                local val = fx:get_param_normalized(j) or 0
-                                local display_name = (name and name ~= "") and name or ("P" .. (j + 1))
-
-                                ctx:push_id(j)
-                                ctx:text(display_name)
-                                ctx:set_next_item_width(-1)
-                                local changed, new_val = ctx:slider_double("##p", val, 0.0, 1.0, "%.2f")
-                                if changed then
-                                    fx:set_param_normalized(j, new_val)
-                                end
-                                ctx:pop_id()
-                            end
-                        end
-
-                        ctx:end_table()
-                    end
-                else
-                    for i = 0, param_count - 1 do
-                        local name = fx:get_param_name(i)
-                        local val = fx:get_param_normalized(i) or 0
-                        local display_name = (name and name ~= "") and name or ("Param " .. (i + 1))
-
-                        ctx:push_id(i)
-                        ctx:text(display_name)
-                        ctx:set_next_item_width(-1)
-                        local changed, new_val = ctx:slider_double("##p", val, 0.0, 1.0, "%.3f")
-                        if changed then
-                            fx:set_param_normalized(i, new_val)
-                        end
-                        ctx:spacing()
-                        ctx:pop_id()
-                    end
-                end
-                ctx:end_child()
-            end
-        end
-
-        ctx:end_child()
-    end
+    fx_detail_panel.draw(ctx, width, state.selected_fx, function(guid)
+        return state.track and state.track:find_fx_by_guid(guid) or nil
+    end, get_fx_display_name)
 end
 
 --------------------------------------------------------------------------------
@@ -1164,127 +681,15 @@ end
 local is_modulator_fx = fx_utils.is_modulator_fx
 
 local function draw_modulator_column(ctx, width)
-    if ctx:begin_child("Modulators", width, 0, imgui.ChildFlags.Border()) then
-    ctx:text("Modulators")
-    ctx:same_line()
-    if ctx:small_button("+ Add") then
-            add_modulator()
-    end
-    ctx:separator()
-
-    if not state.track then
-        ctx:text_colored(0x888888FF, "Select a track")
-            ctx:end_child()
-        return
-    end
-
-        local modulators = find_modulators_on_track()
-
-    if #modulators == 0 then
-        ctx:text_colored(0x888888FF, "No modulators")
-            ctx:text_colored(0x666666FF, "Click '+ Add'")
-    else
-            local linkable_fx = get_linkable_fx()
-
-        for i, mod in ipairs(modulators) do
-                ctx:push_id("mod_" .. mod.fx_idx)
-
-                -- Header row: buttons first, then name
-                -- Show UI button
-                if ctx:small_button("UI##ui_" .. mod.fx_idx) then
-                    mod.fx:show(3)
-                end
-                ctx:same_line()
-
-                -- Delete button
-                ctx:push_style_color(imgui.Col.Button(), 0x993333FF)
-                if ctx:small_button("X##del_" .. mod.fx_idx) then
-                    ctx:pop_style_color()
-                    ctx:pop_id()
-                    delete_modulator(mod.fx_idx)
-                    ctx:end_child()
-                    return
-                end
-                ctx:pop_style_color()
-                ctx:same_line()
-
-                -- Modulator name as collapsing header
-                ctx:push_style_color(imgui.Col.Header(), 0x445566FF)
-                ctx:push_style_color(imgui.Col.HeaderHovered(), 0x556677FF)
-                local header_open = ctx:collapsing_header(mod.name, imgui.TreeNodeFlags.DefaultOpen())
-                ctx:pop_style_color(2)
-
-                if header_open then
-                    -- Show existing links
-                    local links = get_modulator_links(mod.fx_idx)
-                    if #links > 0 then
-                        ctx:text_colored(0xAAAAAAFF, "Links:")
-                        for _, link in ipairs(links) do
-                            ctx:push_id("link_" .. link.target_fx_idx .. "_" .. link.target_param_idx)
-
-                            -- Truncate names to fit
-                            local fx_short = link.target_fx_name:sub(1, 15)
-                            local param_short = link.target_param_name:sub(1, 12)
-
-                            ctx:text_colored(0x88CC88FF, "→")
-                            ctx:same_line()
-                            ctx:text_wrapped(fx_short .. " : " .. param_short)
-                            ctx:same_line(width - 30)
-
-                            -- Remove link button
-                            ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
-                            if ctx:small_button("×") then
-                                remove_param_link(link.target_fx_idx, link.target_param_idx)
-            end
-            ctx:pop_style_color()
-
-            ctx:pop_id()
-        end
-                        ctx:spacing()
-                    end
-
-                    -- Two dropdowns to add new link
-                    ctx:text_colored(0xAAAAAAFF, "+ Add link:")
-
-                    -- Get current selection for this modulator
-                    local selected_target = state.mod_selected_target[mod.fx_idx]
-                    local fx_preview = selected_target and selected_target.name or "Select FX..."
-
-                    -- Dropdown 1: Select target FX
-                    ctx:set_next_item_width(width - 20)
-                    if ctx:begin_combo("##targetfx_" .. i, fx_preview) then
-                        for _, fx in ipairs(linkable_fx) do
-                            if ctx:selectable(fx.name .. "##fx_" .. fx.fx_idx) then
-                                state.mod_selected_target[mod.fx_idx] = {fx_idx = fx.fx_idx, name = fx.name, params = fx.params}
-                            end
-                        end
-                        ctx:end_combo()
-                    end
-
-                    -- Dropdown 2: Select parameter (only if FX is selected)
-                    if selected_target then
-                        ctx:set_next_item_width(width - 20)
-                        if ctx:begin_combo("##targetparam_" .. i, "Select param...") then
-                            for _, param in ipairs(selected_target.params) do
-                                if ctx:selectable(param.name .. "##p_" .. param.idx) then
-                                    create_param_link(mod.fx_idx, selected_target.fx_idx, param.idx)
-                                    -- Clear selection after linking
-                                    state.mod_selected_target[mod.fx_idx] = nil
-                                end
-                            end
-                            ctx:end_combo()
-                        end
-                    end
-                end
-
-                ctx:spacing()
-                ctx:separator()
-                ctx:pop_id()
-            end
-        end
-
-        ctx:end_child()
-    end
+    modulator_panel.draw(ctx, width, state, {
+        find_modulators_on_track = find_modulators_on_track,
+        get_linkable_fx = get_linkable_fx,
+        get_modulator_links = get_modulator_links,
+        create_param_link = create_param_link,
+        remove_param_link = remove_param_link,
+        add_modulator = add_modulator,
+        delete_modulator = delete_modulator,
+    })
 end
 
 --------------------------------------------------------------------------------
@@ -1292,70 +697,12 @@ end
 --------------------------------------------------------------------------------
 
 local function draw_toolbar(ctx)
-    -- Refresh button
-    if icon_font then ctx:push_font(icon_font, icon_size) end
-    if ctx:button(icon_text(Icons.arrows_counterclockwise)) then
-        refresh_fx_list()
-    end
-    if icon_font then ctx:pop_font() end
-    if ctx:is_item_hovered() then ctx:set_tooltip("Refresh FX list") end
-
-    ctx:same_line()
-
-    -- Add Rack button (also draggable)
-    ctx:push_style_color(imgui.Col.Button(), 0x446688FF)
-    if ctx:button("+ Rack") then
-        if state.track then
-            add_rack_to_track()
-        end
-    end
-    ctx:pop_style_color()
-    -- Drag source for rack
-    if ctx:begin_drag_drop_source() then
-        ctx:set_drag_drop_payload("RACK_ADD", "new_rack")
-        ctx:text("Drop to create Rack")
-        ctx:end_drag_drop_source()
-    end
-    if ctx:is_item_hovered() then ctx:set_tooltip("Click to add rack at end\nOr drag to drop anywhere") end
-
-    ctx:same_line()
-
-    -- Add FX button
-    if ctx:button("+ FX") then
-        -- TODO: Open FX browser popup or add last used FX
-        if state.track then
-            -- For now, just focus the plugin browser
-        end
-    end
-    if ctx:is_item_hovered() then ctx:set_tooltip("Add FX at end of chain") end
-
-    ctx:same_line()
-    ctx:text("|")
-    ctx:same_line()
-
-    -- Track name
-    ctx:push_style_color(imgui.Col.Text(), 0xAADDFFFF)
-    ctx:text(state.track_name)
-    ctx:pop_style_color()
-
-    -- Breadcrumb trail (for navigating into containers)
-    if #state.expanded_path > 0 then
-        ctx:same_line()
-        ctx:text_disabled(">")
-        for i, guid in ipairs(state.expanded_path) do
-            ctx:same_line()
-            local container = state.track:find_fx_by_guid(guid)
-            if container then
-                if ctx:small_button(get_fx_display_name(container) .. "##bread_" .. i) then
-                    collapse_from_depth(i + 1)
-                end
-            end
-            if i < #state.expanded_path then
-                ctx:same_line()
-                ctx:text_disabled(">")
-            end
-        end
-    end
+    toolbar.draw(ctx, state, icon_font, icon_size, get_fx_display_name, {
+        on_refresh = refresh_fx_list,
+        on_add_rack = add_rack_to_track,
+        on_add_fx = function() end,  -- TODO: Implement
+        on_collapse_from_depth = collapse_from_depth,
+    })
 end
 
 --------------------------------------------------------------------------------
@@ -1365,229 +712,13 @@ end
 local device_panel = nil  -- Lazy loaded
 local rack_panel = nil    -- Lazy loaded
 
--- Helper to draw a drop zone for adding plugins
--- Always reserves space to prevent scroll jumping, but only shows visual when dragging
-local function draw_drop_zone(ctx, position, is_empty, avail_height)
-    local has_plugin_payload = ctx:get_drag_drop_payload("PLUGIN_ADD")
-    local has_fx_payload = ctx:get_drag_drop_payload("FX_GUID")
-    local is_dragging = has_plugin_payload or has_fx_payload
-
-    local zone_w = 24
-    local zone_h = math.min(avail_height - 20, 80)
-    local label = is_empty and "+ Drop here" or "+"
-    local btn_w = is_empty and 100 or zone_w
-
-    if is_dragging then
-        -- Show visible drop indicator when dragging
-        ctx:push_style_color(imgui.Col.Button(), 0x4488FF44)
-        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x66AAFF88)
-        ctx:push_style_color(imgui.Col.ButtonActive(), 0x88CCFFAA)
-
-        ctx:button(label .. "##drop_" .. position, btn_w, zone_h)
-        ctx:pop_style_color(3)
-
-        if ctx:begin_drag_drop_target() then
-            -- Accept plugin drops
-            local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
-            if accepted and plugin_name then
-                add_plugin_by_name(plugin_name, position)
-            end
-
-            -- Accept FX reorder drops
-            local accepted_fx, fx_guid = ctx:accept_drag_drop_payload("FX_GUID")
-            if accepted_fx and fx_guid then
-                local fx = state.track:find_fx_by_guid(fx_guid)
-                if fx then
-                    -- Move FX to new position
-                    r.TrackFX_CopyToTrack(
-                        state.track.pointer, fx.pointer,
-                        state.track.pointer, position,
-                        true  -- move
-                    )
-                    refresh_fx_list()
-                end
-            end
-
-            ctx:end_drag_drop_target()
-        end
-    else
-        -- Reserve space with invisible element to prevent scroll jumping
-        -- Don't show between items when not dragging (only at end)
-        if not is_empty then
-            return false  -- Don't reserve space between items when not dragging
-        end
-        ctx:dummy(btn_w, zone_h)
-    end
-    return true
-end
+-- draw_drop_zone moved to widgets module (not currently used, but available if needed)
 
 --------------------------------------------------------------------------------
 -- Rack Drawing Helpers (extracted from draw_device_chain)
 --------------------------------------------------------------------------------
 
--- Draw a single chain row in the chains table
-local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_nested_rack)
-    -- Explicitly check if is_nested_rack is true (not just truthy)
-    is_nested_rack = (is_nested_rack == true)
-    local ok_name, chain_raw_name = pcall(function() return chain:get_name() end)
-    local chain_name = ok_name and get_fx_display_name(chain) or "Unknown"
-    local ok_en, chain_enabled = pcall(function() return chain:get_enabled() end)
-    chain_enabled = ok_en and chain_enabled or false
-    local chain_guid = chain:get_guid()
-
-    -- Column 1: Chain name button
-    ctx:table_set_column_index(0)
-
-    -- Check if dragging for visual feedback
-    local has_plugin_drag = ctx:get_drag_drop_payload("PLUGIN_ADD")
-    local has_chain_drag = ctx:get_drag_drop_payload("CHAIN_REORDER")
-
-    local row_color = chain_enabled and 0x3A4A5AFF or 0x2A2A35FF
-    if is_selected then
-        row_color = 0x5588AAFF
-    elseif has_plugin_drag then
-        row_color = 0x4488AA88  -- Blue tint when plugin dragging
-    elseif has_chain_drag then
-        row_color = 0x44AA4488  -- Green tint when chain dragging
-    end
-
-    ctx:push_style_color(imgui.Col.Button(), row_color)
-    if ctx:button(chain_name .. "##chain_btn", -1, 20) then
-        if is_nested_rack then
-            -- Nested rack chain: use expanded_nested_chains keyed by rack GUID
-            -- This allows multiple nested racks to each have their own expanded chain
-            local rack_guid = rack:get_guid()
-            if is_selected then
-                state.expanded_nested_chains[rack_guid] = nil
-            else
-                state.expanded_nested_chains[rack_guid] = chain_guid
-            end
-        else
-            -- Top-level rack chain: use expanded_path[2] as before
-            if is_selected then
-                state.expanded_path[2] = nil
-            else
-                state.expanded_path[2] = chain_guid
-            end
-        end
-        -- Save expansion state when it changes
-        state_module.save_expansion_state()
-    end
-    ctx:pop_style_color()
-
-    -- Make the button a drag-drop target (must be called right after the button)
-    if ctx:begin_drag_drop_target() then
-        -- Handle plugin drop onto chain
-        local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
-        if accepted_plugin and plugin_name then
-            local plugin = { full_name = plugin_name, name = plugin_name }
-            add_device_to_chain(chain, plugin)
-        end
-        ctx:end_drag_drop_target()
-    end
-
-    -- Drag source for chain reordering
-    if ctx:begin_drag_drop_source() then
-        ctx:set_drag_drop_payload("CHAIN_REORDER", chain_guid)
-        ctx:text("Moving: " .. chain_name)
-        ctx:end_drag_drop_source()
-    end
-
-    -- Drop target for chain reordering (on the rest of the row)
-    if ctx:begin_drag_drop_target() then
-        -- Handle chain reorder
-        local accepted_chain, dragged_guid = ctx:accept_drag_drop_payload("CHAIN_REORDER")
-        if accepted_chain and dragged_guid then
-            reorder_chain_in_rack(rack, dragged_guid, chain_guid)
-        end
-        ctx:end_drag_drop_target()
-    end
-
-    -- Tooltip
-    if ctx:is_item_hovered() then
-        if has_plugin_drag then
-            ctx:set_tooltip("Drop to add FX to " .. chain_name)
-        elseif has_chain_drag then
-            ctx:set_tooltip("Drop to reorder chain")
-        else
-            ctx:set_tooltip("Click to " .. (is_selected and "collapse" or "expand"))
-        end
-    end
-
-    -- Column 2: Enable button
-    ctx:table_set_column_index(1)
-    if chain_enabled then
-        ctx:push_style_color(imgui.Col.Button(), 0x44AA44FF)
-    else
-        ctx:push_style_color(imgui.Col.Button(), 0xAA4444FF)
-    end
-    if ctx:small_button(chain_enabled and "ON" or "OF") then
-        pcall(function() chain:set_enabled(not chain_enabled) end)
-    end
-    ctx:pop_style_color()
-
-    -- Column 3: Delete button
-    ctx:table_set_column_index(2)
-    ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
-    if ctx:small_button("×") then
-        chain:delete()
-        if is_selected then
-            if is_nested_rack then
-                local rack_guid = rack:get_guid()
-                state.expanded_nested_chains[rack_guid] = nil
-            else
-                state.expanded_path[2] = nil
-            end
-        end
-        refresh_fx_list()
-    end
-    ctx:pop_style_color()
-
-    -- Column 4: Volume slider
-    ctx:table_set_column_index(3)
-    if mixer then
-        local vol_param = 2 + (chain_idx - 1)  -- Params 2-17 are channel volumes
-        local ok_vol, vol_norm = pcall(function() return mixer:get_param_normalized(vol_param) end)
-        if ok_vol and vol_norm then
-            -- Fixed: Range is -60 to +12 dB (72 dB total), not -24 to +12 (36 dB)
-            local vol_db = -60 + vol_norm * 72
-            local vol_format = vol_db >= 0 and string.format("+%.0f", vol_db) or string.format("%.0f", vol_db)
-            ctx:set_next_item_width(-1)
-            local vol_changed, new_vol_db = ctx:slider_double("##vol_" .. chain_idx, vol_db, -60, 12, vol_format)
-            if vol_changed then
-                -- Fixed: Convert back using correct range
-                local new_norm = (new_vol_db + 60) / 72
-                pcall(function() mixer:set_param_normalized(vol_param, new_norm) end)
-            end
-            if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-                -- Fixed: 0 dB normalized = (0 + 60) / 72 = 60/72 = 0.8333
-                pcall(function() mixer:set_param_normalized(vol_param, (0 + 60) / 72) end)
-            end
-        else
-            ctx:text_disabled("--")
-        end
-    else
-        ctx:text_disabled("--")
-    end
-
-    -- Column 5: Pan slider
-    ctx:table_set_column_index(4)
-    if mixer then
-        local pan_param = 18 + (chain_idx - 1)  -- Params 18-33 are channel pans
-        local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(pan_param) end)
-        if ok_pan and pan_norm then
-            local pan_val = -100 + pan_norm * 200
-            local pan_changed, new_pan = draw_pan_slider(ctx, "##pan_" .. chain_idx, pan_val, 50)
-            if pan_changed then
-                pcall(function() mixer:set_param_normalized(pan_param, (new_pan + 100) / 200) end)
-            end
-        else
-            ctx:text_disabled("C")
-        end
-    else
-        ctx:text_disabled("C")
-    end
-end
+-- draw_chain_row moved to rack_ui module
 
 -- Draw expanded chain column with devices
 local function draw_chain_column(ctx, selected_chain, rack_h)
@@ -1788,16 +919,9 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
     local rack_guid = rack:get_guid()
     local rack_name = get_fx_display_name(rack)
     
-    -- STRICT separation: nested racks use expanded_racks, top-level use expanded_path
-    -- NEVER mix them to avoid conflicts
-    local is_expanded
-    if is_nested then
-        -- Nested rack: ONLY check expanded_racks
-        is_expanded = (state.expanded_racks[rack_guid] == true)
-    else
-        -- Top-level rack: ONLY check expanded_path[1]
-        is_expanded = (state.expanded_path[1] == rack_guid)
-    end
+    -- Use expanded_racks for ALL racks (both top-level and nested)
+    -- This allows multiple top-level racks to be expanded independently
+    local is_expanded = (state.expanded_racks[rack_guid] == true)
 
     -- Get chains from rack (filter out internal mixer)
     local chains = {}
@@ -1821,25 +945,14 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
         -- Use unique button ID that includes nested flag AND guid to avoid conflicts
         local button_id = is_nested and ("rack_toggle_nested_" .. rack_guid) or ("rack_toggle_top_" .. rack_guid)
         if ctx:button(expand_icon .. " " .. rack_name:sub(1, 20) .. "##" .. button_id, -60, 24) then
-            -- STRICT separation: NEVER mix state between nested and top-level
-            if is_nested then
-                -- Nested rack: ONLY modify expanded_racks, NEVER touch expanded_path
-                if is_expanded then
-                    state.expanded_racks[rack_guid] = nil
-                else
-                    state.expanded_racks[rack_guid] = true
-                end
-                -- Ensure we don't accidentally clear top-level rack state
-                -- (expanded_path stays untouched)
+            -- Use expanded_racks for ALL racks (both top-level and nested)
+            -- This allows multiple top-level racks to be expanded independently
+            if is_expanded then
+                state.expanded_racks[rack_guid] = nil
+                -- Clear chain selection when collapsing (works for both top-level and nested)
+                state.expanded_nested_chains[rack_guid] = nil
             else
-                -- Top-level rack: ONLY modify expanded_path, NEVER touch expanded_racks
-                if is_expanded then
-                    state.expanded_path = {}
-                else
-                    state.expanded_path = { rack_guid }
-                end
-                -- Ensure we don't accidentally clear nested rack state
-                -- (expanded_racks stays untouched)
+                state.expanded_racks[rack_guid] = true
             end
             -- Save expansion state when it changes
             state_module.save_expansion_state()
@@ -2143,14 +1256,29 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                         local chain_guid = chain:get_guid()
                         -- Check selection based on whether this is a nested rack
                         -- For nested racks, use the rack's GUID to look up the expanded chain
-                        local is_selected
-                        if is_nested then
-                            local rack_guid = rack:get_guid()
-                            is_selected = (state.expanded_nested_chains[rack_guid] == chain_guid)
-                        else
-                            is_selected = (state.expanded_path[2] == chain_guid)
-                        end
-                        draw_chain_row(ctx, chain, j, rack, mixer, is_selected, is_nested)
+                        -- Check if this chain is selected (works for both top-level and nested)
+                        local rack_guid = rack:get_guid()
+                        local is_selected = (state.expanded_nested_chains[rack_guid] == chain_guid)
+                        rack_ui.draw_chain_row(ctx, chain, j, rack, mixer, is_selected, is_nested, state, get_fx_display_name, {
+                            on_chain_select = function(chain_guid, is_selected, is_nested_rack, rack_guid)
+                                -- Track chain selection (works for both top-level and nested)
+                                if is_selected then
+                                    state.expanded_nested_chains[rack_guid] = nil
+                                else
+                                    state.expanded_nested_chains[rack_guid] = chain_guid
+                                end
+                                state_module.save_expansion_state()
+                            end,
+                            on_add_device_to_chain = add_device_to_chain,
+                            on_reorder_chain = reorder_chain_in_rack,
+                            on_delete_chain = function(chain, is_selected, is_nested_rack, rack_guid)
+                                -- Clear chain selection when deleting (works for both top-level and nested)
+                                if is_selected then
+                                    state.expanded_nested_chains[rack_guid] = nil
+                                end
+                            end,
+                            on_refresh = refresh_fx_list,
+                        })
                         ctx:pop_id()
                     end
 
@@ -2319,8 +1447,10 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
             local rack_data = draw_rack_panel(ctx, fx, avail_height, false)
 
             -- If a chain is selected, show chain column
-            if rack_data.is_expanded and state.expanded_path[2] then
-                local selected_chain_guid = state.expanded_path[2]
+            -- Use the rack's GUID to look up which chain is selected for this specific rack
+            local rack_guid = fx:get_guid()
+            local selected_chain_guid = state.expanded_nested_chains[rack_guid]
+            if rack_data.is_expanded and selected_chain_guid then
                 local selected_chain = nil
                 for _, chain in ipairs(rack_data.chains) do
                     if chain:get_guid() == selected_chain_guid then
@@ -2604,12 +1734,35 @@ local function main()
 
             -- Track change detection
             local track, name = get_selected_track()
+            
+            -- Check if current state.track is still valid (not deleted)
+            local state_track_valid = false
+            if state.track then
+                local ok = pcall(function() 
+                    -- Try to access track info to validate pointer
+                    return state.track:get_info_value("IP_TRACKNUMBER")
+                end)
+                state_track_valid = ok
+                if not ok then
+                    -- Track was deleted, clear all related state
+                    state.track = nil
+                    state.top_level_fx = {}
+                    state.last_fx_count = 0
+                    state.expanded_path = {}
+                    state.expanded_racks = {}
+                    state.expanded_nested_chains = {}
+                    state.selected_fx = nil
+                    clear_multi_select()
+                end
+            end
+            
             local track_changed = (track and state.track and track.pointer ~= state.track.pointer)
                 or (track and not state.track)
                 or (not track and state.track)
             if track_changed then
                 -- Save expansion state for previous track before switching
-                if state.track then
+                -- (save_expansion_state will handle invalid tracks safely)
+                if state_track_valid then
                     state_module.save_expansion_state()
                 end
                 
@@ -2658,9 +1811,14 @@ local function main()
             if ctx:begin_child("DeviceChain", chain_w, 0, imgui.ChildFlags.Border(), chain_flags) then
 
                 -- Filter out modulators from top_level_fx
+                -- Also filter out invalid FX (from deleted tracks)
                 local filtered_fx = {}
                 for _, fx in ipairs(state.top_level_fx) do
-                    if not is_modulator_fx(fx) then
+                    -- Validate FX is still accessible (track may have been deleted)
+                    local ok = pcall(function()
+                        return fx:get_name()
+                    end)
+                    if ok and not is_modulator_fx(fx) then
                         table.insert(filtered_fx, fx)
                     end
                 end
@@ -2688,3 +1846,5 @@ local function main()
 end
 
 main()
+
+
