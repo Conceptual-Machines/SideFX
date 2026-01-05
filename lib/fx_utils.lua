@@ -4,6 +4,7 @@
 -- @author Nomad Monad
 -- @license MIT
 
+local r = reaper
 local naming = require('lib.naming')
 
 local M = {}
@@ -88,23 +89,164 @@ end
 -- Display Name Helpers
 --------------------------------------------------------------------------------
 
---- Get display name for FX (uses renamed_name if set, strips prefixes).
+--- Get display name for FX (checks custom display name first, then strips prefixes).
 -- @param fx TrackFX ReaWrap FX object
 -- @return string Clean display name
 function M.get_display_name(fx)
     if not fx then return "Unknown" end
-
-    -- Try renamed name first
-    local ok, renamed = pcall(function() return fx:get_named_config_param("renamed_name") end)
-    local name
-    if ok and renamed and renamed ~= "" then
-        name = renamed
-    else
-        local ok2, raw_name = pcall(function() return fx:get_name() end)
-        name = ok2 and raw_name or "Unknown"
+    
+    -- Get GUID to check for custom display name
+    local ok_guid, guid = pcall(function() return fx:get_guid() end)
+    if ok_guid and guid then
+        -- Lazy load state module to avoid circular dependency
+        local state_module = require('lib.state')
+        local state = state_module.state
+        if state.display_names[guid] then
+            return state.display_names[guid]
+        end
     end
 
+    -- Fall back to actual FX name (stripped of prefixes)
+    local ok2, raw_name = pcall(function() return fx:get_name() end)
+    local name = ok2 and raw_name or "Unknown"
     return naming.strip_sidefx_prefixes(name)
+end
+
+--- Get display name for chain (shows custom name + [R1_C1] format).
+-- @param chain TrackFX Chain container FX object
+-- @return string Display name with format: "Custom Name [R1_C1]" or just "R1_C1"
+function M.get_chain_display_name(chain)
+    if not chain then return "Unknown" end
+    
+    -- Get internal name to extract R1_C1 identifier
+    local ok_name, raw_name = pcall(function() return chain:get_name() end)
+    if not ok_name or not raw_name then return "Unknown" end
+    
+    -- Extract R1_C1 identifier (before colon if present)
+    local chain_id = raw_name:match("^(R%d+_C%d+)")
+    if not chain_id then
+        -- Fallback: try to extract from any format
+        chain_id = raw_name:match("R%d+_C%d+") or "Chain"
+    end
+    
+    -- Check for custom display name
+    local ok_guid, guid = pcall(function() return chain:get_guid() end)
+    if ok_guid and guid then
+        local state_module = require('lib.state')
+        local state = state_module.state
+        if state.display_names[guid] then
+            -- Show custom name with identifier in brackets
+            return state.display_names[guid] .. " [" .. chain_id .. "]"
+        end
+    end
+    
+    -- No custom name, just show identifier
+    return chain_id
+end
+
+--- Get label name for chain row (shows only custom name, no [R1_C1]).
+-- @param chain TrackFX Chain container FX object
+-- @return string Display name: custom name if set, otherwise "R1_C1" identifier
+function M.get_chain_label_name(chain)
+    if not chain then return "Unknown" end
+    
+    -- Check for custom display name first
+    local ok_guid, guid = pcall(function() return chain:get_guid() end)
+    if ok_guid and guid then
+        local state_module = require('lib.state')
+        local state = state_module.state
+        if state.display_names[guid] then
+            -- Return just the custom name (no identifier)
+            return state.display_names[guid]
+        end
+    end
+    
+    -- No custom name, get identifier from internal name
+    local ok_name, raw_name = pcall(function() return chain:get_name() end)
+    if not ok_name or not raw_name then return "Unknown" end
+    
+    -- Extract R1_C1 identifier (before colon if present)
+    local chain_id = raw_name:match("^(R%d+_C%d+)")
+    if not chain_id then
+        -- Fallback: try to extract from any format
+        chain_id = raw_name:match("R%d+_C%d+") or "Chain"
+    end
+    
+    return chain_id
+end
+
+--- Get rack identifier (R1 format).
+-- @param rack TrackFX Rack container FX object
+-- @return string|nil Rack identifier like "R1" or nil
+function M.get_rack_identifier(rack)
+    if not rack then return nil end
+    local ok_name, raw_name = pcall(function() return rack:get_name() end)
+    if not ok_name or not raw_name then return nil end
+    
+    local rack_id = raw_name:match("^(R%d+)")
+    if not rack_id then
+        rack_id = raw_name:match("R%d+")
+    end
+    return rack_id
+end
+
+--- Get display name for rack header (shows custom name only, identifier shown separately).
+-- @param rack TrackFX Rack container FX object
+-- @return string Display name: custom name if set, otherwise "Rack"
+function M.get_rack_display_name(rack)
+    if not rack then return "Unknown" end
+    
+    -- Check for custom display name
+    local ok_guid, guid = pcall(function() return rack:get_guid() end)
+    if ok_guid and guid then
+        local state_module = require('lib.state')
+        local state = state_module.state
+        if state.display_names[guid] then
+            return state.display_names[guid]
+        end
+    end
+    
+    -- No custom name, return default
+    return "Rack"
+end
+
+--- Get device identifier (R1_C1_D1 or D1 format).
+-- @param device TrackFX Device container FX object
+-- @return string|nil Device identifier like "R1_C1_D1" or "D1" or nil
+function M.get_device_identifier(device)
+    if not device then return nil end
+    local ok_name, raw_name = pcall(function() return device:get_name() end)
+    if not ok_name or not raw_name then return nil end
+    
+    local device_id = raw_name:match("^(R%d+_C%d+_D%d+)")
+    if not device_id then
+        device_id = raw_name:match("^(D%d+)")
+        if not device_id then
+            device_id = raw_name:match("R%d+_C%d+_D%d+") or raw_name:match("D%d+")
+        end
+    end
+    return device_id
+end
+
+--- Get display name for device header (shows custom name only, identifier shown separately).
+-- @param device TrackFX Device container FX object
+-- @return string Display name: custom name if set, otherwise device identifier or "Device"
+function M.get_device_display_name(device)
+    if not device then return "Unknown" end
+    
+    -- Check for custom display name
+    local ok_guid, guid = pcall(function() return device:get_guid() end)
+    if ok_guid and guid then
+        local state_module = require('lib.state')
+        local state = state_module.state
+        if state.display_names[guid] then
+            return state.display_names[guid]
+        end
+    end
+    
+    -- No custom name, try to get identifier as fallback
+    local device_id = M.get_device_identifier(device)
+    return device_id or "Device"
 end
 
 --- Get internal name for FX (with SideFX prefix).

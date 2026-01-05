@@ -40,8 +40,14 @@ M.state = {
     -- Rename state
     renaming_fx = nil,  -- GUID of FX being renamed
     rename_text = "",    -- Current rename text
+    
+    -- Custom display names (SideFX-only, doesn't change REAPER FX names)
+    display_names = {},  -- {[fx_guid] = "custom display name"}
+    
+    -- Save timing
+    last_save_frame = nil,  -- Frame count of last save
 
-    show_debug = false,
+    show_debug = false,  -- Disabled to prevent console spam
 
     -- Plugin browser state
     browser = {
@@ -380,6 +386,72 @@ function M.load_expansion_state()
                     state.expanded_nested_chains[rack_guid] = chain_guid
                 end
             end
+        end
+    end
+end
+
+--- Save display names to project.
+function M.save_display_names()
+    if not state.track then return end
+    
+    -- Safely get track GUID (track may have been deleted)
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then 
+        state.track = nil
+        return 
+    end
+    
+    -- Serialize display_names as guid=name pairs
+    local name_pairs = {}
+    local count = 0
+    for guid, name in pairs(state.display_names) do
+        if name and name ~= "" then
+            -- Escape special characters in name (replace | and = with placeholders)
+            local escaped_name = name:gsub("|", "%%PIPE%%"):gsub("=", "%%EQ%%")
+            table.insert(name_pairs, guid .. "=" .. escaped_name)
+            count = count + 1
+        end
+    end
+    
+    local key = "DisplayNames_" .. track_guid
+    local ok_save, err = pcall(function()
+        if count > 0 then
+            local serialized = table.concat(name_pairs, "|")
+            r.SetProjExtState(0, "SideFX", key, serialized)
+        end
+        -- Don't clear saved data when count is 0 - might be temporary empty state
+        -- Only clear explicitly when needed (e.g., on track deletion)
+    end)
+    
+    if not ok_save then
+        r.ShowConsoleMsg(string.format("SideFX: Error saving display names: %s\n", tostring(err)))
+    end
+end
+
+--- Load display names from project.
+function M.load_display_names()
+    if not state.track then return end
+    
+    local ok_guid, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok_guid or not track_guid then return end
+    
+    local key = "DisplayNames_" .. track_guid
+    local ok, serialized = r.GetProjExtState(0, "SideFX", key)
+    
+    -- ok is the length of the value (0 if not found), serialized is the actual value
+    if ok == 0 or not serialized or serialized == "" then 
+        state.display_names = {}
+        return 
+    end
+    
+    -- Parse serialized data
+    state.display_names = {}
+    for pair in serialized:gmatch("([^|]+)") do
+        local guid, name = pair:match("^([^=]+)=(.+)$")
+        if guid and name then
+            -- Unescape special characters
+            name = name:gsub("%%PIPE%%", "|"):gsub("%%EQ%%", "=")
+            state.display_names[guid] = name
         end
     end
 end

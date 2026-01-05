@@ -226,6 +226,18 @@ end
 
 local function get_display_name(fx)
     if not fx then return "Unknown" end
+    
+    -- Check for custom display name first (SideFX-only renaming)
+    local ok_guid, guid = pcall(function() return fx:get_guid() end)
+    if ok_guid and guid then
+        local state_module = require('lib.state')
+        local state = state_module.state
+        if state.display_names[guid] then
+            return state.display_names[guid]
+        end
+    end
+    
+    -- Fall back to internal name with prefixes stripped
     local name = get_internal_name(fx)
 
     -- Strip SideFX internal prefixes for clean UI display
@@ -363,12 +375,20 @@ function M.draw(ctx, fx, opts)
     local container = opts.container
     local drag_guid = container and container:get_guid() or guid
 
-    local ok2, name = pcall(function() return get_display_name(fx) end)
-    if not ok2 then name = "Unknown" end
-
-    -- Use container name if provided (shows D-prefix)
-    if opts.container_name then
-        name = opts.container_name
+    -- Get device name and identifier separately
+    local fx_utils = require('lib.fx_utils')
+    local name = "Unknown"
+    local device_id = nil
+    if container then
+        -- Get device display name (custom name only) and identifier separately
+        local ok_name, device_name = pcall(function() return fx_utils.get_device_display_name(container) end)
+        if ok_name then name = device_name end
+        local ok_id, id = pcall(function() return fx_utils.get_device_identifier(container) end)
+        if ok_id then device_id = id end
+    else
+        -- No container, use regular display name
+        local ok2, fx_name = pcall(function() return get_display_name(fx) end)
+        if ok2 then name = fx_name end
     end
 
     local ok3, enabled = pcall(function() return fx:get_enabled() end)
@@ -519,61 +539,89 @@ function M.draw(ctx, fx, opts)
                 ctx:end_drag_drop_target()
             end
 
-            -- Device name (double-click to rename)
+            -- Device name (double-click to rename) and identifier
             r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-            local max_name_len = math.floor(content_width / 7)
+            -- Reserve space for identifier (estimate ~20 pixels for "[R1_C1_D1]")
+            local identifier_space = device_id and 20 or 0
+            local max_name_len = math.floor((content_width - identifier_space) / 7)
 
-            if rename_active[state_guid] then
-                -- Rename mode: show input text
+            -- Check if this device/container is being renamed (use SideFX state system)
+            local state_module = require('lib.state')
+            local sidefx_state = state_module.state
+            local ok_container_guid, container_guid_val = pcall(function() return container and container:get_guid() or nil end)
+            local container_guid = (ok_container_guid and container_guid_val) or nil
+            local rename_guid = container_guid or guid
+            local is_renaming = (sidefx_state.renaming_fx == rename_guid)
+            
+            if is_renaming then
+                -- Rename mode: show input text (just the name, identifier shown separately)
                 r.ImGui_SetNextItemWidth(ctx.ctx, content_width - 10)
 
-                -- Focus on first frame
-                if not rename_buffer[state_guid] then
-                    rename_buffer[state_guid] = name
+                -- Initialize rename text if needed (use just the name, not the identifier)
+                if not sidefx_state.rename_text or sidefx_state.rename_text == "" then
+                    sidefx_state.rename_text = name  -- Just the name, no identifier
                     r.ImGui_SetKeyboardFocusHere(ctx.ctx)
                 end
 
-                local changed, new_text = r.ImGui_InputText(ctx.ctx, "##rename_" .. state_guid, rename_buffer[state_guid], r.ImGui_InputTextFlags_EnterReturnsTrue())
-                rename_buffer[state_guid] = new_text
+                local changed, new_text = r.ImGui_InputText(ctx.ctx, "##rename_" .. state_guid, sidefx_state.rename_text, r.ImGui_InputTextFlags_EnterReturnsTrue())
+                sidefx_state.rename_text = new_text
 
                 -- Commit on Enter
                 if changed then
-                    local target = opts.container or fx
-                    rename_fx(target, new_text)
-                    rename_active[state_guid] = nil
-                    rename_buffer[state_guid] = nil
+                    if sidefx_state.rename_text ~= "" then
+                        -- Store custom display name in state (SideFX-only, doesn't change REAPER name)
+                        sidefx_state.display_names[rename_guid] = sidefx_state.rename_text
+                    else
+                        -- Clear custom name if empty
+                        sidefx_state.display_names[rename_guid] = nil
+                    end
+                    state_module.save_display_names()
+                    sidefx_state.renaming_fx = nil
+                    sidefx_state.rename_text = ""
                     interacted = true
                 end
 
                 -- Cancel on Escape or click elsewhere
-                if r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Escape()) or
-                   (not r.ImGui_IsItemActive(ctx.ctx) and not r.ImGui_IsItemFocused(ctx.ctx) and rename_buffer[state_guid]) then
-                    -- Check if we lost focus (clicked elsewhere)
-                    if not r.ImGui_IsItemActive(ctx.ctx) and r.ImGui_IsMouseClicked(ctx.ctx, 0) then
-                        rename_active[state_guid] = nil
-                        rename_buffer[state_guid] = nil
-                    elseif r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Escape()) then
-                        rename_active[state_guid] = nil
-                        rename_buffer[state_guid] = nil
+                if r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Escape()) then
+                    sidefx_state.renaming_fx = nil
+                    sidefx_state.rename_text = ""
+                elseif not r.ImGui_IsItemActive(ctx.ctx) and not r.ImGui_IsItemFocused(ctx.ctx) and r.ImGui_IsMouseClicked(ctx.ctx, 0) then
+                    -- Lost focus - commit if text changed
+                    if sidefx_state.rename_text ~= "" then
+                        sidefx_state.display_names[rename_guid] = sidefx_state.rename_text
+                    else
+                        sidefx_state.display_names[rename_guid] = nil
                     end
+                    state_module.save_display_names()
+                    sidefx_state.renaming_fx = nil
+                    sidefx_state.rename_text = ""
                 end
             else
-                -- Normal mode: show text, double-click to rename
+                -- Normal mode: show text and identifier separately, double-click to rename
                 local display_name = truncate(name, max_name_len)
                 if not enabled then
                     ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
                 end
 
-                -- Selectable for double-click detection
-                if r.ImGui_Selectable(ctx.ctx, display_name .. "##name_" .. state_guid, false, r.ImGui_SelectableFlags_AllowDoubleClick(), content_width - 10, 0) then
+                -- Selectable for double-click detection (name only) - reserve space for identifier
+                local selectable_width = device_id and (content_width - 10 - 20) or (content_width - 10)
+                if r.ImGui_Selectable(ctx.ctx, display_name .. "##name_" .. state_guid, false, r.ImGui_SelectableFlags_AllowDoubleClick(), selectable_width, 0) then
                     if r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
-                        rename_active[state_guid] = true
-                        rename_buffer[state_guid] = name
+                        sidefx_state.renaming_fx = rename_guid
+                        sidefx_state.rename_text = name  -- Just the name, no identifier
                         interacted = true
                     end
                 end
                 if r.ImGui_IsItemHovered(ctx.ctx) then
                     ctx:set_tooltip("Double-click to rename")
+                end
+                
+                -- Show identifier separately (grayed out) - use minimal spacing
+                if device_id then
+                    r.ImGui_SameLine(ctx.ctx, 0, 0)  -- No spacing
+                    ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
+                    r.ImGui_Text(ctx.ctx, " [" .. device_id .. "]")
+                    ctx:pop_style_color()
                 end
 
                 if not enabled then
@@ -1034,6 +1082,15 @@ function M.draw(ctx, fx, opts)
         if ctx:menu_item("Rename...") then
             if opts.on_rename then
                 opts.on_rename(fx)
+            else
+                -- Fallback: use SideFX state system directly
+                local state_module = require('lib.state')
+                local sidefx_state = state_module.state
+                local ok_container_guid, container_guid_val = pcall(function() return container and container:get_guid() or nil end)
+                local container_guid = (ok_container_guid and container_guid_val) or nil
+                local rename_guid = container_guid or guid
+                sidefx_state.renaming_fx = rename_guid
+                sidefx_state.rename_text = name
             end
         end
         ctx:separator()
