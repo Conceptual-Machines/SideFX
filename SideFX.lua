@@ -1804,21 +1804,74 @@ local function main()
             local chain_flags = imgui.WindowFlags.HorizontalScrollbar()
             if ctx:begin_child("DeviceChain", chain_w, 0, imgui.ChildFlags.Border(), chain_flags) then
 
-                -- Filter out modulators from top_level_fx
-                -- Also filter out invalid FX (from deleted tracks)
-                local filtered_fx = {}
-                for _, fx in ipairs(state.top_level_fx) do
-                    -- Validate FX is still accessible (track may have been deleted)
-                    local ok = pcall(function()
-                        return fx:get_name()
-                    end)
-                    if ok and not is_modulator_fx(fx) then
-                        table.insert(filtered_fx, fx)
+                if not state.track then
+                    -- No track selected - show message with red border
+                    local avail_w, avail_h = ctx:get_content_region_avail()
+                    local msg_w = 300
+                    local msg_h = 60
+                    local msg_x = (avail_w - msg_w) / 2
+                    local msg_y = (avail_h - msg_h) / 2
+                    
+                    -- Position using dummy spacing
+                    if msg_y > 0 then
+                        ctx:dummy(0, msg_y)
                     end
-                end
+                    if msg_x > 0 then
+                        ctx:dummy(msg_x, 0)
+                        ctx:same_line()
+                    end
+                    
+                    -- Red border using child window with manual border drawing
+                    ctx:push_style_color(imgui.Col.ChildBg(), 0x2A1A1AFF)  -- Slightly red-tinted background
+                    ctx:push_style_var(imgui.StyleVar.WindowPadding(), 20, 15)
+                    if ctx:begin_child("no_track_msg", msg_w, msg_h, 0) then
+                        -- Get window bounds for border drawing
+                        local window_min_x, window_min_y = r.ImGui_GetWindowPos(ctx.ctx)
+                        local window_max_x = window_min_x + r.ImGui_GetWindowWidth(ctx.ctx)
+                        local window_max_y = window_min_y + r.ImGui_GetWindowHeight(ctx.ctx)
+                        local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                        local border_thickness = 2.0
+                        
+                        -- Draw red border rectangle around the child window
+                        r.ImGui_DrawList_AddRect(draw_list, window_min_x, window_min_y, window_max_x, window_max_y, 0xFF0000FF, 0, 0, border_thickness)
+                        
+                        -- Center the text using available space
+                        local text = "Select a track"
+                        local text_w, text_h = ctx:calc_text_size(text)
+                        local child_w, child_h = ctx:get_content_region_avail()
+                        local text_x = (child_w - text_w) / 2
+                        local text_y = (child_h - text_h) / 2
+                        if text_y > 0 then
+                            ctx:dummy(0, text_y)
+                        end
+                        if text_x > 0 then
+                            ctx:dummy(text_x, 0)
+                            ctx:same_line()
+                        end
+                        ctx:push_style_color(imgui.Col.Text(), 0xFFFFFFFF)
+                        ctx:text(text)
+                        ctx:pop_style_color()
+                    end
+                    ctx:end_child()
+                    ctx:pop_style_var()
+                    ctx:pop_style_color()
+                else
+                    -- Filter out modulators from top_level_fx
+                    -- Also filter out invalid FX (from deleted tracks)
+                    local filtered_fx = {}
+                    for _, fx in ipairs(state.top_level_fx) do
+                        -- Validate FX is still accessible (track may have been deleted)
+                        local ok = pcall(function()
+                            return fx:get_name()
+                        end)
+                        if ok and not is_modulator_fx(fx) then
+                            table.insert(filtered_fx, fx)
+                        end
+                    end
 
-                -- Draw the horizontal device chain
-                draw_device_chain(ctx, filtered_fx, chain_w, avail_h)
+                    -- Draw the horizontal device chain
+                    draw_device_chain(ctx, filtered_fx, chain_w, avail_h)
+                end
 
                 ctx:end_child()
             end
