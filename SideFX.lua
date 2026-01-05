@@ -1207,7 +1207,10 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
             ctx:same_line()
             ctx:push_style_color(imgui.Col.Button(), 0x446688FF)
             if ctx:small_button("+ Chain") then
-                -- TODO: Open plugin selector
+                local chain = rack_module.add_empty_chain_to_rack(rack)
+                if chain then
+                    refresh_fx_list()
+                end
             end
             ctx:pop_style_color()
 
