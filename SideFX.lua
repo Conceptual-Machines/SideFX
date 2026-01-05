@@ -1,6 +1,6 @@
 -- @description SideFX - Smart FX Container Manager
 -- @author Nomad Monad
--- @version 0.5.0
+-- @version 0.1.0
 -- @provides
 --   [nomain] lib/*.lua
 --   [nomain] lib/ui/*.lua
