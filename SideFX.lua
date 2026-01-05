@@ -1,9 +1,12 @@
 -- @description SideFX - Smart FX Container Manager
 -- @author Nomad Monad
--- @version 0.5.0
+-- @version 0.1.0
 -- @provides
 --   [nomain] lib/*.lua
 --   [nomain] lib/ui/*.lua
+-- @depends ReaWrap>=0.7.3
+-- @depends ReaImGui
+-- @depends talagan_EmojImGui
 -- @link https://github.com/Conceptual-Machines/SideFX
 -- @about
 --   # SideFX
