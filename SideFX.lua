@@ -936,7 +936,6 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
     -- Explicitly check if is_nested is true (not just truthy)
     is_nested = (is_nested == true)
     local rack_guid = rack:get_guid()
-    local rack_name = fx_utils.get_rack_display_name(rack)
     
     -- Use expanded_racks for ALL racks (both top-level and nested)
     -- This allows multiple top-level racks to be expanded independently
@@ -959,136 +958,29 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
     local child_id = is_nested and ("rack_nested_" .. rack_guid) or ("rack_" .. rack_guid)
     if ctx:begin_child(child_id, rack_w, rack_h, imgui.ChildFlags.Border()) then
 
-        -- Rack header using table for proper alignment
-        local expand_icon = is_expanded and "▼" or "▶"
-        -- Use unique button ID that includes nested flag AND guid to avoid conflicts
-        local button_id = is_nested and ("rack_toggle_nested_" .. rack_guid) or ("rack_toggle_top_" .. rack_guid)
-        
-        -- Check if rack is being renamed
-        local is_renaming_rack = (state.renaming_fx == rack_guid)
-        
-        -- Use table for layout: Label 70% | Path 10% | ON 10% | X 10%
-        -- Using weights: 7, 1, 1, 1 to achieve 70%, 10%, 10%, 10% distribution
-        local table_flags = imgui.TableFlags.SizingStretchProp()
-        if ctx:begin_table("rack_header_" .. rack_guid, 4, table_flags) then
-            -- Column 0: Rack name (70% - weight 7)
-            ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 7)
-            -- Column 1: Path identifier (10% - weight 1)
-            ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 1)
-            -- Column 2: ON button (10% - weight 1)
-            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
-            -- Column 3: X button (10% - weight 1)
-            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
-            
-            ctx:table_next_row()
-            
-            -- Column 0: Rack name (70%)
-            ctx:table_set_column_index(0)
-            if is_renaming_rack then
-                -- Inline rename input for rack
-                if not state.rename_text or state.rename_text == "" then
-                    state.rename_text = state.display_names[rack_guid] or ""
+        -- Draw rack header using widget
+        rack_ui.draw_rack_header(ctx, rack, is_nested, state, {
+            on_toggle_expand = function(rack_guid, is_expanded)
+                if is_expanded then
+                    state.expanded_racks[rack_guid] = nil
+                    state.expanded_nested_chains[rack_guid] = nil
+                else
+                    state.expanded_racks[rack_guid] = true
                 end
-                
-                ctx:set_next_item_width(-1)
-                
-                -- Set keyboard focus on first frame
-                if not state._rename_focused then
-                    ctx:set_keyboard_focus_here()
-                    state._rename_focused = true
-                end
-                
-                -- Style the input to be visible
-                ctx:push_style_color(imgui.Col.FrameBg(), 0x4A4A4AFF)
-                ctx:push_style_color(imgui.Col.Text(), 0xFFFFFFFF)
-                local changed, new_text = ctx:input_text("##rack_rename" .. rack_guid, state.rename_text, imgui.InputTextFlags.EnterReturnsTrue())
-                ctx:pop_style_color(2)
-                
-                state.rename_text = new_text
-                if changed then
-                    if state.rename_text ~= "" then
-                        state.display_names[rack_guid] = state.rename_text
-                    else
-                        state.display_names[rack_guid] = nil
-                    end
-                    state_module.save_display_names()
-                    state.renaming_fx = nil
-                    state.rename_text = ""
-                    state._rename_focused = nil
-                elseif ctx:is_item_deactivated_after_edit() then
-                    if state.rename_text ~= "" then
-                        state.display_names[rack_guid] = state.rename_text
-                    else
-                        state.display_names[rack_guid] = nil
-                    end
-                    state_module.save_display_names()
-                    state.renaming_fx = nil
-                    state.rename_text = ""
-                    state._rename_focused = nil
-                elseif ctx:is_key_pressed(imgui.Key.Escape()) then
-                    state.renaming_fx = nil
-                    state.rename_text = ""
-                    state._rename_focused = nil
-                end
-            else
-                local button_text = expand_icon .. " " .. rack_name:sub(1, 20)
-                if ctx:button(button_text .. "##" .. button_id, -1, 24) then
-                    -- Use expanded_racks for ALL racks (both top-level and nested)
-                    if is_expanded then
-                        state.expanded_racks[rack_guid] = nil
-                        state.expanded_nested_chains[rack_guid] = nil
-                    else
-                        state.expanded_racks[rack_guid] = true
-                    end
-                    state_module.save_expansion_state()
-                end
-                
-                -- Rack context menu (attached to the button above)
-                if ctx:begin_popup_context_item(button_id) then
-                    if ctx:menu_item("Rename") then
-                        state.renaming_fx = rack_guid
-                        state.rename_text = state.display_names[rack_guid] or ""
-                    end
-                    ctx:separator()
-                    if ctx:menu_item("Dissolve Container") then
-                        dissolve_container(rack)
-                    end
-                    ctx:separator()
-                    if ctx:menu_item("Delete") then
-                        rack:delete()
-                        refresh_fx_list()
-                    end
-                    ctx:end_popup()
-                end
-            end
-            
-            -- Column 1: Path identifier (10%)
-            ctx:table_set_column_index(1)
-            local rack_id = fx_utils.get_rack_identifier(rack)
-            if rack_id then
-                ctx:text_colored(0x888888FF, "[" .. rack_id .. "]")
-            end
-            
-            -- Column 2: ON button (10%)
-            ctx:table_set_column_index(2)
-            local rack_enabled = rack:get_enabled()
-            ctx:push_style_color(imgui.Col.Button(), rack_enabled and 0x44AA44FF or 0xAA4444FF)
-            if ctx:button(rack_enabled and "ON" or "OF", -1, 24) then
-                rack:set_enabled(not rack_enabled)
-            end
-            ctx:pop_style_color()
-
-            -- Column 3: X button (10%)
-            ctx:table_set_column_index(3)
-            ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
-            if ctx:button("×##rack_del", -1, 24) then
+                state_module.save_expansion_state()
+            end,
+            on_rename = function(rack_guid, display_name)
+                state.renaming_fx = rack_guid
+                state.rename_text = display_name or ""
+            end,
+            on_dissolve = function(rack)
+                dissolve_container(rack)
+            end,
+            on_delete = function(rack)
                 rack:delete()
                 refresh_fx_list()
-            end
-            ctx:pop_style_color()
-            
-            ctx:end_table()
-        end
+            end,
+        })
 
         -- Get mixer for controls
         local mixer = get_rack_mixer(rack)
