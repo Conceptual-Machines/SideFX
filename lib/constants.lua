@@ -20,6 +20,11 @@ M.Icons = {
     speaker_high = "1F50A",     -- 🔊
     speaker_muted = "1F507",    -- 🔇
     arrows_counterclockwise = "1F504", -- 🔄
+    circle_filled = "2B24",     -- ⬤ (filled circle)
+    circle_empty = "25EF",      -- ◯ (large circle, more visible)
+    window = "1F5D5",           -- 🗕 (window/UI)
+    computer = "1F4BB",         -- 💻 (computer/screen)
+    desktop = "1F5A5",          -- 🖥 (desktop computer)
 }
 
 --- Get icon text from EmojImGui

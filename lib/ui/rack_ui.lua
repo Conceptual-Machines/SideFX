@@ -11,6 +11,49 @@ local widgets = require('lib.ui.widgets')
 local M = {}
 
 --------------------------------------------------------------------------------
+-- Custom Widgets
+--------------------------------------------------------------------------------
+
+--- Draw an ON/OFF circle indicator with colored background
+-- @param ctx ImGui context
+-- @param label string Label for the button
+-- @param is_on boolean Whether the state is ON
+-- @param width number Button width
+-- @param height number Button height
+-- @param bg_color_on number RGBA color for ON background
+-- @param bg_color_off number RGBA color for OFF background
+-- @return boolean True if clicked
+local function draw_on_off_circle(ctx, label, is_on, width, height, bg_color_on, bg_color_off)
+    -- Get cursor position for drawing
+    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+    local center_x = cursor_x + width / 2
+    local center_y = cursor_y + height / 2
+    local radius = 6  -- Small circle radius
+    
+    -- Invisible button for interaction
+    r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
+    local clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
+    local is_hovered = r.ImGui_IsItemHovered(ctx.ctx)
+    
+    -- Draw background and circle
+    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+    
+    -- Draw background rectangle
+    local bg_color = is_on and bg_color_on or bg_color_off
+    r.ImGui_DrawList_AddRectFilled(draw_list, cursor_x, cursor_y, cursor_x + width, cursor_y + height, bg_color, 0)
+    
+    if is_on then
+        -- Filled circle for ON state
+        r.ImGui_DrawList_AddCircleFilled(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12)
+    else
+        -- Empty circle (outline only) for OFF state
+        r.ImGui_DrawList_AddCircle(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12, 2)
+    end
+    
+    return clicked
+end
+
+--------------------------------------------------------------------------------
 -- Rack Header
 --------------------------------------------------------------------------------
 
@@ -24,6 +67,7 @@ local M = {}
 --   - on_rename: (rack_guid, display_name) -> nil
 --   - on_dissolve: (rack) -> nil
 --   - on_delete: (rack) -> nil
+--   - icon_font: ImGui font for emojis (optional)
 function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
     is_nested = (is_nested == true)
     
@@ -34,6 +78,7 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
     
     local fx_utils = require('lib.fx_utils')
     local state_module = require('lib.state')
+    
     
     local rack_name = fx_utils.get_rack_display_name(rack)
     local is_expanded = (state.expanded_racks[rack_guid] == true)
@@ -147,11 +192,11 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
         ctx:table_set_column_index(2)
         local ok_enabled, rack_enabled = pcall(function() return rack:get_enabled() end)
         rack_enabled = ok_enabled and rack_enabled or false
-        ctx:push_style_color(imgui.Col.Button(), rack_enabled and 0x44AA44FF or 0xAA4444FF)
-        if ctx:button(rack_enabled and "ON" or "OF", -1, 20) then
+        -- Draw custom circle indicator with colored background
+        local avail_w, _ = ctx:get_content_region_avail()
+        if draw_on_off_circle(ctx, "##rack_on_off_" .. rack_guid, rack_enabled, avail_w, 20, 0x44AA44FF, 0xAA4444FF) then
             pcall(function() rack:set_enabled(not rack_enabled) end)
         end
-        ctx:pop_style_color()
 
         -- Column 3: X button (10%)
         ctx:table_set_column_index(3)
@@ -280,6 +325,12 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
             callbacks.on_chain_select(chain_guid, is_selected, is_nested_rack, rack_guid)
         end
         ctx:pop_style_color()
+        
+        -- Check for double-click to rename (after button is drawn)
+        if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
+            local custom_name = state.display_names[chain_guid]
+            callbacks.on_rename_chain(chain_guid, custom_name)
+        end
         
         -- Chain context menu
         if ctx:begin_popup_context_item(chain_btn_id) then

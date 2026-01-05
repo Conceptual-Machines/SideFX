@@ -65,6 +65,89 @@ local rename_buffer = {}    -- guid -> current edit text
 -- Custom Widgets
 --------------------------------------------------------------------------------
 
+--- Draw a UI button icon (window/screen icon)
+-- @param ctx ImGui context
+-- @param label string Label for the button
+-- @param width number Button width
+-- @param height number Button height
+-- @return boolean True if clicked
+local function draw_ui_icon(ctx, label, width, height)
+    -- Invisible button for interaction
+    r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
+    local clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
+    
+    -- Get button bounds for drawing
+    local item_min_x, item_min_y = r.ImGui_GetItemRectMin(ctx.ctx)
+    local item_max_x, item_max_y = r.ImGui_GetItemRectMax(ctx.ctx)
+    
+    -- Draw window/screen icon using DrawList
+    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+    local center_x = (item_min_x + item_max_x) / 2
+    local center_y = (item_min_y + item_max_y) / 2
+    local icon_size = 12
+    local half_size = icon_size / 2
+    
+    -- Draw a simple window icon: rectangle with a line in the middle (like a window)
+    local x1 = center_x - half_size
+    local y1 = center_y - half_size
+    local x2 = center_x + half_size
+    local y2 = center_y + half_size
+    
+    -- Greyish color for the icon
+    local icon_color = 0xAAAAAAFF
+    -- Border color
+    local border_color = 0x666666FF
+    
+    -- Draw border around the button
+    r.ImGui_DrawList_AddRect(draw_list, item_min_x, item_min_y, item_max_x, item_max_y, border_color, 0, 0, 1.0)
+    
+    -- Outer rectangle (window frame) - signature: (draw_list, x1, y1, x2, y2, color, rounding, flags, thickness)
+    r.ImGui_DrawList_AddRect(draw_list, x1, y1, x2, y2, icon_color, 0, 0, 2)
+    -- Inner line (window pane divider)
+    r.ImGui_DrawList_AddLine(draw_list, center_x, y1, center_x, y2, icon_color, 1.5)
+    
+    return clicked
+end
+
+--- Draw an ON/OFF circle indicator with colored background
+-- @param ctx ImGui context
+-- @param label string Label for the button
+-- @param is_on boolean Whether the state is ON
+-- @param width number Button width
+-- @param height number Button height
+-- @param bg_color_on number RGBA color for ON background
+-- @param bg_color_off number RGBA color for OFF background
+-- @return boolean True if clicked
+local function draw_on_off_circle(ctx, label, is_on, width, height, bg_color_on, bg_color_off)
+    -- Get cursor position for drawing
+    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+    local center_x = cursor_x + width / 2
+    local center_y = cursor_y + height / 2
+    local radius = 6  -- Small circle radius
+    
+    -- Invisible button for interaction
+    r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
+    local clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
+    local is_hovered = r.ImGui_IsItemHovered(ctx.ctx)
+    
+    -- Draw background and circle
+    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+    
+    -- Draw background rectangle
+    local bg_color = is_on and (bg_color_on or colors.bypass_on) or (bg_color_off or colors.bypass_off)
+    r.ImGui_DrawList_AddRectFilled(draw_list, cursor_x, cursor_y, cursor_x + width, cursor_y + height, bg_color, 0)
+    
+    if is_on then
+        -- Filled circle for ON state
+        r.ImGui_DrawList_AddCircleFilled(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12)
+    else
+        -- Empty circle (outline only) for OFF state
+        r.ImGui_DrawList_AddCircle(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12, 2)
+    end
+    
+    return clicked
+end
+
 --- Draw a knob control
 -- @param ctx ImGui context
 -- @param label string Label for the knob
@@ -364,6 +447,12 @@ function M.draw(ctx, fx, opts)
     opts = opts or {}
     local cfg = M.config
     local colors = M.colors
+    
+    -- Get icon font for UI button
+    local icon_font = opts.icon_font
+    local constants = require('lib.constants')
+    local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
+    local ui_icon = constants.icon_text(emojimgui, constants.Icons.window)
 
     if not fx then return false end
 
@@ -478,16 +567,53 @@ function M.draw(ctx, fx, opts)
     if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0) then
 
         -- Header row using table for proper alignment
-        if r.ImGui_BeginTable(ctx.ctx, "header_" .. guid, 4, 0) then
-            r.ImGui_TableSetupColumn(ctx.ctx, "drag", r.ImGui_TableColumnFlags_WidthFixed(), 24)
-            r.ImGui_TableSetupColumn(ctx.ctx, "name", r.ImGui_TableColumnFlags_WidthStretch())
-            r.ImGui_TableSetupColumn(ctx.ctx, "close", r.ImGui_TableColumnFlags_WidthFixed(), 20)
-            r.ImGui_TableSetupColumn(ctx.ctx, "collapse", r.ImGui_TableColumnFlags_WidthFixed(), 20)
+        if is_panel_collapsed then
+            -- Collapsed header: collapse button | path
+            if r.ImGui_BeginTable(ctx.ctx, "header_collapsed_" .. guid, 2, 0) then
+                r.ImGui_TableSetupColumn(ctx.ctx, "collapse", r.ImGui_TableColumnFlags_WidthFixed(), 24)
+                r.ImGui_TableSetupColumn(ctx.ctx, "path", r.ImGui_TableColumnFlags_WidthStretch())
+                
+                r.ImGui_TableNextRow(ctx.ctx)
+                
+                -- Collapse button
+                r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+                ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+                if ctx:button("▶##collapse_" .. state_guid, 20, 20) then
+                    panel_collapsed[state_guid] = false
+                    interacted = true
+                end
+                ctx:pop_style_color(3)
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Expand panel")
+                end
+                
+                -- Path identifier
+                r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+                if device_id then
+                    ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
+                    ctx:text("[" .. device_id .. "]")
+                    ctx:pop_style_color()
+                end
+                
+                r.ImGui_EndTable(ctx.ctx)
+            end
+        else
+            -- Expanded header: drag | name (70%) | path (30%) | close | collapse
+            local imgui = require('imgui')
+            local table_flags = imgui.TableFlags.SizingStretchProp()
+            if ctx:begin_table("header_" .. guid, 5, table_flags) then
+                ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
+                ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 7)  -- 70%
+                ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 3)  -- 30%
+                ctx:table_setup_column("close", imgui.TableColumnFlags.WidthFixed(), 20)
+                ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 20)
 
-            r.ImGui_TableNextRow(ctx.ctx)
+                ctx:table_next_row()
 
             -- Drag handle / collapse toggle
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+            ctx:table_set_column_index(0)
             ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
             ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
             ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
@@ -539,11 +665,8 @@ function M.draw(ctx, fx, opts)
                 ctx:end_drag_drop_target()
             end
 
-            -- Device name (double-click to rename) and identifier
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-            -- Reserve space for identifier (estimate ~20 pixels for "[R1_C1_D1]")
-            local identifier_space = device_id and 20 or 0
-            local max_name_len = math.floor((content_width - identifier_space) / 7)
+            -- Device name (double-click to rename)
+            ctx:table_set_column_index(1)
 
             -- Check if this device/container is being renamed (use SideFX state system)
             -- Use FX GUID for renaming since we display the FX name, not the container name
@@ -553,8 +676,8 @@ function M.draw(ctx, fx, opts)
             local is_renaming = (sidefx_state.renaming_fx == rename_guid)
             
             if is_renaming then
-                -- Rename mode: show input text (just the name, identifier shown separately)
-                r.ImGui_SetNextItemWidth(ctx.ctx, content_width - 10)
+                -- Rename mode: show input text (just the name)
+                ctx:set_next_item_width(-1)
 
                 -- Initialize rename text if needed (use just the name, not the identifier)
                 if not sidefx_state.rename_text or sidefx_state.rename_text == "" then
@@ -596,15 +719,14 @@ function M.draw(ctx, fx, opts)
                     sidefx_state.rename_text = ""
                 end
             else
-                -- Normal mode: show text and identifier separately, double-click to rename
-                local display_name = truncate(name, max_name_len)
+                -- Normal mode: show text, double-click to rename
+                local display_name = truncate(name, 50)  -- Reasonable max length
                 if not enabled then
-                    ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
+                    ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
                 end
 
-                -- Selectable for double-click detection (name only) - reserve space for identifier
-                local selectable_width = device_id and (content_width - 10 - 20) or (content_width - 10)
-                if r.ImGui_Selectable(ctx.ctx, display_name .. "##name_" .. state_guid, false, r.ImGui_SelectableFlags_AllowDoubleClick(), selectable_width, 0) then
+                -- Selectable for double-click detection (name only) - use 0 width to fill column
+                if r.ImGui_Selectable(ctx.ctx, display_name .. "##name_" .. state_guid, false, r.ImGui_SelectableFlags_AllowDoubleClick(), 0, 0) then
                     if r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
                         sidefx_state.renaming_fx = rename_guid
                         sidefx_state.rename_text = name  -- Just the name, no identifier
@@ -614,22 +736,22 @@ function M.draw(ctx, fx, opts)
                 if r.ImGui_IsItemHovered(ctx.ctx) then
                     ctx:set_tooltip("Double-click to rename")
                 end
-                
-                -- Show identifier separately (grayed out) - use minimal spacing
-                if device_id then
-                    r.ImGui_SameLine(ctx.ctx, 0, 0)  -- No spacing
-                    ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
-                    r.ImGui_Text(ctx.ctx, " [" .. device_id .. "]")
-                    ctx:pop_style_color()
-                end
 
                 if not enabled then
                     ctx:pop_style_color()
                 end
             end
 
+            -- Path identifier (30%)
+            ctx:table_set_column_index(2)
+            if device_id then
+                ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
+                ctx:text("[" .. device_id .. "]")
+                ctx:pop_style_color()
+            end
+
             -- Close button
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+            ctx:table_set_column_index(3)
             ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
             ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x663333FF)
             if ctx:small_button("×") then
@@ -643,7 +765,7 @@ function M.draw(ctx, fx, opts)
             ctx:pop_style_color(2)
 
             -- Sidebar collapse/expand button (rightmost) - only show when panel is expanded
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 3)
+            ctx:table_set_column_index(4)
             if not is_panel_collapsed then
                 ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
                 ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
@@ -665,49 +787,64 @@ function M.draw(ctx, fx, opts)
                 ctx:pop_style_color(2)
             end
 
-            r.ImGui_EndTable(ctx.ctx)
-        end
+            ctx:end_table()
+            end  -- end expanded header
+        end  -- end if is_panel_collapsed check for header
 
         -- Render collapsed panel content
         if is_panel_collapsed then
             ctx:separator()
 
-            -- UI button (centered)
-            local btn_w = panel_width - cfg.padding * 2
-            if ctx:button("UI", btn_w, 28) then
-                fx:show(3)
-                interacted = true
+            -- Collapsed view table layout
+            -- Row 1: ui | on | x
+            -- Row 2: name
+            if r.ImGui_BeginTable(ctx.ctx, "controls_" .. guid, 3, r.ImGui_TableFlags_SizingStretchSame()) then
+                r.ImGui_TableSetupColumn(ctx.ctx, "ui", r.ImGui_TableColumnFlags_WidthStretch())
+                r.ImGui_TableSetupColumn(ctx.ctx, "on", r.ImGui_TableColumnFlags_WidthStretch())
+                r.ImGui_TableSetupColumn(ctx.ctx, "x", r.ImGui_TableColumnFlags_WidthStretch())
+                
+                r.ImGui_TableNextRow(ctx.ctx)
+                
+                -- UI button
+                r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+                -- Draw custom UI icon (border is drawn inside the function)
+                if draw_ui_icon(ctx, "##ui_" .. state_guid, -1, 24) then
+                    fx:show(3)
+                    interacted = true
+                end
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Open " .. name)
+                end
+                
+                -- ON/OFF toggle
+                r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+                -- Draw custom circle indicator with colored background
+                local avail_w, avail_h = ctx:get_content_region_avail()
+                if draw_on_off_circle(ctx, "##on_off_" .. state_guid, enabled, avail_w, 24, colors.bypass_on, colors.bypass_off) then
+                    fx:set_enabled(not enabled)
+                    interacted = true
+                end
+                
+                -- Close button
+                r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x444444FF)
+                if ctx:button("×", -1, 24) then
+                    if opts.on_delete then
+                        opts.on_delete(fx)
+                    else
+                        fx:delete()
+                    end
+                    interacted = true
+                end
+                ctx:pop_style_color(2)
+                
+                r.ImGui_EndTable(ctx.ctx)
             end
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip("Open " .. name)
-            end
-
-            -- ON/OFF toggle
-            if enabled then
-                ctx:push_style_color(r.ImGui_Col_Button(), colors.bypass_on)
-            else
-                ctx:push_style_color(r.ImGui_Col_Button(), colors.bypass_off)
-            end
-            if ctx:button(enabled and "ON" or "OFF", btn_w, 24) then
-                fx:set_enabled(not enabled)
-                interacted = true
-            end
-            ctx:pop_style_color()
-
-            ctx:spacing()
-            ctx:separator()
-            ctx:spacing()
-
-            -- Wrapped name - split into lines
-            local max_chars_per_line = math.floor((panel_width - cfg.padding * 2) / 8)
-            max_chars_per_line = math.max(8, max_chars_per_line)
-            local remaining = name
+            
+            -- Row 2: name
             ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAAAAFF)
-            while #remaining > 0 do
-                local line = remaining:sub(1, max_chars_per_line)
-                remaining = remaining:sub(max_chars_per_line + 1)
-                ctx:text(line)
-            end
+            ctx:text(name)
             ctx:pop_style_color()
 
             ctx:end_child()  -- end panel
@@ -829,7 +966,8 @@ function M.draw(ctx, fx, opts)
 
                 -- UI button (centered)
                 center_item(btn_w)
-                if ctx:button("UI", btn_w, btn_h) then
+                -- Draw custom UI icon (border is drawn inside the function)
+                if draw_ui_icon(ctx, "##ui_sidebar_" .. state_guid, btn_w, btn_h) then
                     fx:show(3)
                     interacted = true
                 end
@@ -839,16 +977,11 @@ function M.draw(ctx, fx, opts)
 
                 -- ON/OFF toggle (centered)
                 center_item(btn_w)
-                if enabled then
-                    ctx:push_style_color(r.ImGui_Col_Button(), colors.bypass_on)
-                else
-                    ctx:push_style_color(r.ImGui_Col_Button(), colors.bypass_off)
-                end
-                if ctx:button(enabled and "ON" or "OFF", btn_w, btn_h) then
+                -- Draw custom circle indicator with colored background
+                if draw_on_off_circle(ctx, "##on_off_sidebar_" .. state_guid, enabled, btn_w, btn_h, colors.bypass_on, colors.bypass_off) then
                     fx:set_enabled(not enabled)
                     interacted = true
                 end
-                ctx:pop_style_color()
 
                 ctx:spacing()
                 ctx:separator()

@@ -855,6 +855,7 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                                 avail_height = chain_content_h - 20,
                                 utility = dev_utility,
                                 container = dev,
+                                icon_font = icon_font,
                                 on_delete = function()
                                     dev:delete()
                                     refresh_fx_list()
@@ -960,6 +961,7 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
 
         -- Draw rack header using widget
         rack_ui.draw_rack_header(ctx, rack, is_nested, state, {
+            icon_font = icon_font,
             on_toggle_expand = function(rack_guid, is_expanded)
                 if is_expanded then
                     state.expanded_racks[rack_guid] = nil
@@ -1463,6 +1465,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                     utility = utility,  -- Paired SideFX_Utility for gain/pan
                     container = container,  -- Pass container reference
                     container_name = container and container:get_name() or nil,
+                    icon_font = icon_font,
                     on_delete = function(fx_to_delete)
                         if container then
                             -- Delete the whole D-container
