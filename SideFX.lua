@@ -1212,7 +1212,7 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                 -- Chains table
                 if ctx:begin_table("chains_table", 5, imgui.TableFlags.SizingStretchProp()) then
                     ctx:table_setup_column("name", imgui.TableColumnFlags.WidthFixed(), 80)
-                    ctx:table_setup_column("enable", imgui.TableColumnFlags.WidthFixed(), 28)
+                    ctx:table_setup_column("enable", imgui.TableColumnFlags.WidthFixed(), 24)
                     ctx:table_setup_column("delete", imgui.TableColumnFlags.WidthFixed(), 24)
                     ctx:table_setup_column("volume", imgui.TableColumnFlags.WidthStretch(), 1)
                     ctx:table_setup_column("pan", imgui.TableColumnFlags.WidthFixed(), 60)

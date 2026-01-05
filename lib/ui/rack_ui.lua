@@ -389,22 +389,18 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
         end
     end
 
-    -- Column 2: Enable button
+    -- Column 2: Enable button (circle icon) - same size as X button
     ctx:table_set_column_index(1)
-    if chain_enabled then
-        ctx:push_style_color(imgui.Col.Button(), 0x44AA44FF)
-    else
-        ctx:push_style_color(imgui.Col.Button(), 0xAA4444FF)
-    end
-    if ctx:small_button(chain_enabled and "ON" or "OF") then
+    local bg_color_on = 0x44AA44FF  -- Green for ON
+    local bg_color_off = 0xAA4444FF  -- Red for OFF
+    if draw_on_off_circle(ctx, "##chain_on_off_" .. chain_guid, chain_enabled, 24, 20, bg_color_on, bg_color_off) then
         pcall(function() chain:set_enabled(not chain_enabled) end)
     end
-    ctx:pop_style_color()
 
-    -- Column 3: Delete button
+    -- Column 3: Delete button (same size as ON button)
     ctx:table_set_column_index(2)
     ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
-    if ctx:small_button("×") then
+    if ctx:button("×", 24, 20) then
         chain:delete()
         local rack_guid = rack:get_guid()
         callbacks.on_delete_chain(chain, is_selected, is_nested_rack, rack_guid)
