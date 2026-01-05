@@ -254,7 +254,8 @@ local draw_fader = widgets.draw_fader
 local function add_rack_to_track(position)
     local rack = rack_module.add_rack_to_track(position)
     if rack then
-        state.expanded_path = { rack:get_guid() }
+        -- Use expanded_racks for top-level racks (consistent with nested racks)
+        state.expanded_racks[rack:get_guid()] = true
         refresh_fx_list()
     end
     return rack
@@ -272,14 +273,11 @@ local function add_chain_to_rack(rack, plugin)
         local chain_guid = chain:get_guid()
         if chain_guid then
             -- Force the chain to be expanded/selected so user can see it
-            if is_nested and rack_guid then
-                -- Nested rack: ensure rack is expanded and chain is selected
+            if rack_guid then
+                -- Ensure rack is expanded (works for both top-level and nested)
                 state.expanded_racks[rack_guid] = true
+                -- Track which chain is selected (works for both top-level and nested)
                 state.expanded_nested_chains[rack_guid] = chain_guid
-            elseif rack_guid then
-                -- Top-level rack: ensure rack is expanded and chain is selected
-                state.expanded_path[1] = rack_guid
-                state.expanded_path[2] = chain_guid
             end
             state_module.save_expansion_state()
         end
@@ -308,14 +306,11 @@ local function add_nested_rack_to_rack(parent_rack)
             
             -- Also select the chain that contains the nested rack
             if chain_guid then
-                if is_parent_nested and parent_rack_guid then
-                    -- Parent is nested: use expanded_nested_chains
+                if parent_rack_guid then
+                    -- Ensure parent rack is expanded (works for both top-level and nested)
                     state.expanded_racks[parent_rack_guid] = true
+                    -- Track which chain is selected (works for both top-level and nested)
                     state.expanded_nested_chains[parent_rack_guid] = chain_guid
-                elseif parent_rack_guid then
-                    -- Top-level parent rack: ensure it's expanded and chain is selected
-                    state.expanded_path[1] = parent_rack_guid
-                    state.expanded_path[2] = chain_guid
                 end
             end
             state_module.save_expansion_state()
@@ -345,14 +340,11 @@ local function add_device_to_chain(chain, plugin)
     local device = rack_module.add_device_to_chain(chain, plugin)
     if device then
         -- Force the chain to be expanded/selected so user can see the device that was just added
-        if is_nested and rack_guid then
-            -- Nested rack: ensure rack is expanded and chain is selected
+        if rack_guid then
+            -- Ensure rack is expanded (works for both top-level and nested)
             state.expanded_racks[rack_guid] = true
+            -- Track which chain is selected (works for both top-level and nested)
             state.expanded_nested_chains[rack_guid] = chain_guid
-        elseif rack_guid then
-            -- Top-level rack: ensure rack is expanded and chain is selected
-            state.expanded_path[1] = rack_guid
-            state.expanded_path[2] = chain_guid
         end
         state_module.save_expansion_state()
         refresh_fx_list()
@@ -382,7 +374,8 @@ local renumber_chains_in_rack = rack_module.renumber_chains_in_rack
 local function add_to_new_container(fx_list)
     local container = container_module.add_to_new_container(fx_list)
     if container then
-        state.expanded_path = { container:get_guid() }
+        -- Use expanded_racks for containers (consistent with racks)
+        state.expanded_racks[container:get_guid()] = true
         refresh_fx_list()
     end
     return container
@@ -722,169 +715,7 @@ local rack_panel = nil    -- Lazy loaded
 -- Rack Drawing Helpers (extracted from draw_device_chain)
 --------------------------------------------------------------------------------
 
--- Draw a single chain row in the chains table
-local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_nested_rack)
-    -- Explicitly check if is_nested_rack is true (not just truthy)
-    is_nested_rack = (is_nested_rack == true)
-    local ok_name, chain_raw_name = pcall(function() return chain:get_name() end)
-    local chain_name = ok_name and get_fx_display_name(chain) or "Unknown"
-    local ok_en, chain_enabled = pcall(function() return chain:get_enabled() end)
-    chain_enabled = ok_en and chain_enabled or false
-    local chain_guid = chain:get_guid()
-
-    -- Column 1: Chain name button
-    ctx:table_set_column_index(0)
-
-    -- Check if dragging for visual feedback
-    local has_plugin_drag = ctx:get_drag_drop_payload("PLUGIN_ADD")
-    local has_chain_drag = ctx:get_drag_drop_payload("CHAIN_REORDER")
-
-    local row_color = chain_enabled and 0x3A4A5AFF or 0x2A2A35FF
-    if is_selected then
-        row_color = 0x5588AAFF
-    elseif has_plugin_drag then
-        row_color = 0x4488AA88  -- Blue tint when plugin dragging
-    elseif has_chain_drag then
-        row_color = 0x44AA4488  -- Green tint when chain dragging
-    end
-
-    ctx:push_style_color(imgui.Col.Button(), row_color)
-    if ctx:button(chain_name .. "##chain_btn", -1, 20) then
-        if is_nested_rack then
-            -- Nested rack chain: use expanded_nested_chains keyed by rack GUID
-            -- This allows multiple nested racks to each have their own expanded chain
-            local rack_guid = rack:get_guid()
-            if is_selected then
-                state.expanded_nested_chains[rack_guid] = nil
-            else
-                state.expanded_nested_chains[rack_guid] = chain_guid
-            end
-        else
-            -- Top-level rack chain: use expanded_path[2] as before
-            if is_selected then
-                state.expanded_path[2] = nil
-            else
-                state.expanded_path[2] = chain_guid
-            end
-        end
-        -- Save expansion state when it changes
-        state_module.save_expansion_state()
-    end
-    ctx:pop_style_color()
-
-    -- Make the button a drag-drop target (must be called right after the button)
-    if ctx:begin_drag_drop_target() then
-        -- Handle plugin drop onto chain
-        local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
-        if accepted_plugin and plugin_name then
-            local plugin = { full_name = plugin_name, name = plugin_name }
-            add_device_to_chain(chain, plugin)
-        end
-        ctx:end_drag_drop_target()
-    end
-
-    -- Drag source for chain reordering
-    if ctx:begin_drag_drop_source() then
-        ctx:set_drag_drop_payload("CHAIN_REORDER", chain_guid)
-        ctx:text("Moving: " .. chain_name)
-        ctx:end_drag_drop_source()
-    end
-
-    -- Drop target for chain reordering (on the rest of the row)
-    if ctx:begin_drag_drop_target() then
-        -- Handle chain reorder
-        local accepted_chain, dragged_guid = ctx:accept_drag_drop_payload("CHAIN_REORDER")
-        if accepted_chain and dragged_guid then
-            reorder_chain_in_rack(rack, dragged_guid, chain_guid)
-        end
-        ctx:end_drag_drop_target()
-    end
-
-    -- Tooltip
-    if ctx:is_item_hovered() then
-        if has_plugin_drag then
-            ctx:set_tooltip("Drop to add FX to " .. chain_name)
-        elseif has_chain_drag then
-            ctx:set_tooltip("Drop to reorder chain")
-        else
-            ctx:set_tooltip("Click to " .. (is_selected and "collapse" or "expand"))
-        end
-    end
-
-    -- Column 2: Enable button
-    ctx:table_set_column_index(1)
-    if chain_enabled then
-        ctx:push_style_color(imgui.Col.Button(), 0x44AA44FF)
-    else
-        ctx:push_style_color(imgui.Col.Button(), 0xAA4444FF)
-    end
-    if ctx:small_button(chain_enabled and "ON" or "OF") then
-        pcall(function() chain:set_enabled(not chain_enabled) end)
-    end
-    ctx:pop_style_color()
-
-    -- Column 3: Delete button
-    ctx:table_set_column_index(2)
-    ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
-    if ctx:small_button("×") then
-        chain:delete()
-        if is_selected then
-            if is_nested_rack then
-                local rack_guid = rack:get_guid()
-                state.expanded_nested_chains[rack_guid] = nil
-            else
-                state.expanded_path[2] = nil
-            end
-        end
-        refresh_fx_list()
-    end
-    ctx:pop_style_color()
-
-    -- Column 4: Volume slider
-    ctx:table_set_column_index(3)
-    if mixer then
-        local vol_param = 2 + (chain_idx - 1)  -- Params 2-17 are channel volumes
-        local ok_vol, vol_norm = pcall(function() return mixer:get_param_normalized(vol_param) end)
-        if ok_vol and vol_norm then
-            -- Fixed: Range is -60 to +12 dB (72 dB total), not -24 to +12 (36 dB)
-            local vol_db = -60 + vol_norm * 72
-            local vol_format = vol_db >= 0 and string.format("+%.0f", vol_db) or string.format("%.0f", vol_db)
-            ctx:set_next_item_width(-1)
-            local vol_changed, new_vol_db = ctx:slider_double("##vol_" .. chain_idx, vol_db, -60, 12, vol_format)
-            if vol_changed then
-                -- Fixed: Convert back using correct range
-                local new_norm = (new_vol_db + 60) / 72
-                pcall(function() mixer:set_param_normalized(vol_param, new_norm) end)
-            end
-            if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-                -- Fixed: 0 dB normalized = (0 + 60) / 72 = 60/72 = 0.8333
-                pcall(function() mixer:set_param_normalized(vol_param, (0 + 60) / 72) end)
-            end
-        else
-            ctx:text_disabled("--")
-        end
-    else
-        ctx:text_disabled("--")
-    end
-
-    -- Column 5: Pan slider
-    ctx:table_set_column_index(4)
-    if mixer then
-        local pan_param = 18 + (chain_idx - 1)  -- Params 18-33 are channel pans
-        local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(pan_param) end)
-        if ok_pan and pan_norm then
-            local pan_val = -100 + pan_norm * 200
-            local pan_changed, new_pan = draw_pan_slider(ctx, "##pan_" .. chain_idx, pan_val, 50)
-            if pan_changed then
-                pcall(function() mixer:set_param_normalized(pan_param, (new_pan + 100) / 200) end)
-            end
-        else
-            ctx:text_disabled("C")
-        end
-    else
-        ctx:text_disabled("C")
-    end
-end
+-- draw_chain_row moved to rack_ui module
 
 -- Draw expanded chain column with devices
 local function draw_chain_column(ctx, selected_chain, rack_h)
@@ -1085,16 +916,9 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
     local rack_guid = rack:get_guid()
     local rack_name = get_fx_display_name(rack)
     
-    -- STRICT separation: nested racks use expanded_racks, top-level use expanded_path
-    -- NEVER mix them to avoid conflicts
-    local is_expanded
-    if is_nested then
-        -- Nested rack: ONLY check expanded_racks
-        is_expanded = (state.expanded_racks[rack_guid] == true)
-    else
-        -- Top-level rack: ONLY check expanded_path[1]
-        is_expanded = (state.expanded_path[1] == rack_guid)
-    end
+    -- Use expanded_racks for ALL racks (both top-level and nested)
+    -- This allows multiple top-level racks to be expanded independently
+    local is_expanded = (state.expanded_racks[rack_guid] == true)
 
     -- Get chains from rack (filter out internal mixer)
     local chains = {}
@@ -1118,25 +942,14 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
         -- Use unique button ID that includes nested flag AND guid to avoid conflicts
         local button_id = is_nested and ("rack_toggle_nested_" .. rack_guid) or ("rack_toggle_top_" .. rack_guid)
         if ctx:button(expand_icon .. " " .. rack_name:sub(1, 20) .. "##" .. button_id, -60, 24) then
-            -- STRICT separation: NEVER mix state between nested and top-level
-            if is_nested then
-                -- Nested rack: ONLY modify expanded_racks, NEVER touch expanded_path
-                if is_expanded then
-                    state.expanded_racks[rack_guid] = nil
-                else
-                    state.expanded_racks[rack_guid] = true
-                end
-                -- Ensure we don't accidentally clear top-level rack state
-                -- (expanded_path stays untouched)
+            -- Use expanded_racks for ALL racks (both top-level and nested)
+            -- This allows multiple top-level racks to be expanded independently
+            if is_expanded then
+                state.expanded_racks[rack_guid] = nil
+                -- Clear chain selection when collapsing (works for both top-level and nested)
+                state.expanded_nested_chains[rack_guid] = nil
             else
-                -- Top-level rack: ONLY modify expanded_path, NEVER touch expanded_racks
-                if is_expanded then
-                    state.expanded_path = {}
-                else
-                    state.expanded_path = { rack_guid }
-                end
-                -- Ensure we don't accidentally clear nested rack state
-                -- (expanded_racks stays untouched)
+                state.expanded_racks[rack_guid] = true
             end
             -- Save expansion state when it changes
             state_module.save_expansion_state()
@@ -1440,39 +1253,25 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                         local chain_guid = chain:get_guid()
                         -- Check selection based on whether this is a nested rack
                         -- For nested racks, use the rack's GUID to look up the expanded chain
-                        local is_selected
-                        if is_nested then
-                            local rack_guid = rack:get_guid()
-                            is_selected = (state.expanded_nested_chains[rack_guid] == chain_guid)
-                        else
-                            is_selected = (state.expanded_path[2] == chain_guid)
-                        end
+                        -- Check if this chain is selected (works for both top-level and nested)
+                        local rack_guid = rack:get_guid()
+                        local is_selected = (state.expanded_nested_chains[rack_guid] == chain_guid)
                         rack_ui.draw_chain_row(ctx, chain, j, rack, mixer, is_selected, is_nested, state, get_fx_display_name, {
                             on_chain_select = function(chain_guid, is_selected, is_nested_rack, rack_guid)
-                                if is_nested_rack then
-                                    if is_selected then
-                                        state.expanded_nested_chains[rack_guid] = nil
-                                    else
-                                        state.expanded_nested_chains[rack_guid] = chain_guid
-                                    end
+                                -- Track chain selection (works for both top-level and nested)
+                                if is_selected then
+                                    state.expanded_nested_chains[rack_guid] = nil
                                 else
-                                    if is_selected then
-                                        state.expanded_path[2] = nil
-                                    else
-                                        state.expanded_path[2] = chain_guid
-                                    end
+                                    state.expanded_nested_chains[rack_guid] = chain_guid
                                 end
                                 state_module.save_expansion_state()
                             end,
                             on_add_device_to_chain = add_device_to_chain,
                             on_reorder_chain = reorder_chain_in_rack,
                             on_delete_chain = function(chain, is_selected, is_nested_rack, rack_guid)
+                                -- Clear chain selection when deleting (works for both top-level and nested)
                                 if is_selected then
-                                    if is_nested_rack then
-                                        state.expanded_nested_chains[rack_guid] = nil
-                                    else
-                                        state.expanded_path[2] = nil
-                                    end
+                                    state.expanded_nested_chains[rack_guid] = nil
                                 end
                             end,
                             on_refresh = refresh_fx_list,
@@ -1645,8 +1444,10 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
             local rack_data = draw_rack_panel(ctx, fx, avail_height, false)
 
             -- If a chain is selected, show chain column
-            if rack_data.is_expanded and state.expanded_path[2] then
-                local selected_chain_guid = state.expanded_path[2]
+            -- Use the rack's GUID to look up which chain is selected for this specific rack
+            local rack_guid = fx:get_guid()
+            local selected_chain_guid = state.expanded_nested_chains[rack_guid]
+            if rack_data.is_expanded and selected_chain_guid then
                 local selected_chain = nil
                 for _, chain in ipairs(rack_data.chains) do
                     if chain:get_guid() == selected_chain_guid then
@@ -1930,12 +1731,35 @@ local function main()
 
             -- Track change detection
             local track, name = get_selected_track()
+            
+            -- Check if current state.track is still valid (not deleted)
+            local state_track_valid = false
+            if state.track then
+                local ok = pcall(function() 
+                    -- Try to access track info to validate pointer
+                    return state.track:get_info_value("IP_TRACKNUMBER")
+                end)
+                state_track_valid = ok
+                if not ok then
+                    -- Track was deleted, clear all related state
+                    state.track = nil
+                    state.top_level_fx = {}
+                    state.last_fx_count = 0
+                    state.expanded_path = {}
+                    state.expanded_racks = {}
+                    state.expanded_nested_chains = {}
+                    state.selected_fx = nil
+                    clear_multi_select()
+                end
+            end
+            
             local track_changed = (track and state.track and track.pointer ~= state.track.pointer)
                 or (track and not state.track)
                 or (not track and state.track)
             if track_changed then
                 -- Save expansion state for previous track before switching
-                if state.track then
+                -- (save_expansion_state will handle invalid tracks safely)
+                if state_track_valid then
                     state_module.save_expansion_state()
                 end
                 
@@ -1984,9 +1808,14 @@ local function main()
             if ctx:begin_child("DeviceChain", chain_w, 0, imgui.ChildFlags.Border(), chain_flags) then
 
                 -- Filter out modulators from top_level_fx
+                -- Also filter out invalid FX (from deleted tracks)
                 local filtered_fx = {}
                 for _, fx in ipairs(state.top_level_fx) do
-                    if not is_modulator_fx(fx) then
+                    -- Validate FX is still accessible (track may have been deleted)
+                    local ok = pcall(function()
+                        return fx:get_name()
+                    end)
+                    if ok and not is_modulator_fx(fx) then
                         table.insert(filtered_fx, fx)
                     end
                 end
@@ -2014,3 +1843,5 @@ local function main()
 end
 
 main()
+
+
