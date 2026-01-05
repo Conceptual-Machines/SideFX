@@ -73,12 +73,14 @@ function M.is_device_name(name)
     return name:match("^D%d") ~= nil
 end
 
---- Check if a name indicates a chain container (R{n}_C{n} pattern).
+--- Check if a name indicates a chain container (R{n}_C{n} pattern, but not device).
 -- @param name string FX name to check
 -- @return boolean
 function M.is_chain_name(name)
     if not name then return false end
-    return name:match("^R%d+_C%d+") ~= nil
+    -- Must start with R{n}_C{n} but NOT have _D{n} after
+    return name:match("^R%d+_C%d+$") ~= nil or
+           (name:match("^R%d+_C%d+:") ~= nil and not name:match("^R%d+_C%d+_D%d+"))
 end
 
 --- Check if a name indicates a rack container (R{n}: but not a chain).
@@ -102,7 +104,7 @@ end
 -- @return boolean
 function M.is_mixer_name(name)
     if not name then return false end
-    return name:match("^_R%d+_M$") ~= nil 
+    return name:match("^_R%d+_M$") ~= nil
         or (name:find("SideFX") ~= nil and name:find("Mixer") ~= nil)
 end
 
@@ -111,9 +113,9 @@ end
 -- @return boolean
 function M.is_utility_name(name)
     if not name then return false end
-    return name:find("SideFX_Utility") ~= nil 
+    return name:find("SideFX_Utility") ~= nil
         or name:find("SideFX Utility") ~= nil
-        or name:match("^D%d+_Util$") ~= nil 
+        or name:match("^D%d+_Util$") ~= nil
         or name:match("_Util$") ~= nil
 end
 
@@ -158,13 +160,13 @@ function M.parse_chain_index(name)
 end
 
 --- Parse full hierarchy from name.
--- @param name string Name to parse (e.g., "R1_C2_D3: ReaComp")
+-- @param name string Name to parse (e.g., "R1_C2_D3: ReaComp" or "R1_C2")
 -- @return table {rack_idx, chain_idx, device_idx, fx_name}
 function M.parse_hierarchy(name)
     if not name then return {} end
-    
+
     local result = {}
-    
+
     -- Try R{n}_C{m}_D{p}: pattern first
     local r, c, d, fx = name:match("^R(%d+)_C(%d+)_D(%d+):%s*(.*)$")
     if r then
@@ -174,8 +176,8 @@ function M.parse_hierarchy(name)
         result.fx_name = fx
         return result
     end
-    
-    -- Try R{n}_C{m}: pattern
+
+    -- Try R{n}_C{m}: pattern (with colon and fx name)
     r, c, fx = name:match("^R(%d+)_C(%d+):%s*(.*)$")
     if r then
         result.rack_idx = tonumber(r)
@@ -183,7 +185,15 @@ function M.parse_hierarchy(name)
         result.fx_name = fx
         return result
     end
-    
+
+    -- Try R{n}_C{m} pattern (bare chain name without colon)
+    r, c = name:match("^R(%d+)_C(%d+)$")
+    if r then
+        result.rack_idx = tonumber(r)
+        result.chain_idx = tonumber(c)
+        return result
+    end
+
     -- Try R{n}: pattern
     r, fx = name:match("^R(%d+):%s*(.*)$")
     if r then
@@ -191,7 +201,7 @@ function M.parse_hierarchy(name)
         result.fx_name = fx
         return result
     end
-    
+
     -- Try D{n}: pattern
     d, fx = name:match("^D(%d+):%s*(.*)$")
     if d then
@@ -199,7 +209,7 @@ function M.parse_hierarchy(name)
         result.fx_name = fx
         return result
     end
-    
+
     return result
 end
 
@@ -297,4 +307,3 @@ function M.truncate(str, max_len)
 end
 
 return M
-

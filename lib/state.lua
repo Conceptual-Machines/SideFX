@@ -4,6 +4,7 @@
 -- @author Nomad Monad
 -- @license MIT
 
+local r = reaper
 local Project = require('project')
 
 local M = {}
@@ -22,6 +23,13 @@ M.state = {
 
     -- Column navigation: list of expanded container GUIDs (breadcrumb trail)
     expanded_path = {},  -- e.g. {container1_guid, container2_guid, ...}
+    
+    -- Expanded racks: set of rack GUIDs that are expanded (for nested racks)
+    expanded_racks = {},  -- {[rack_guid] = true}
+    
+    -- Expanded chains in nested racks: track which chain is expanded per nested rack
+    -- Keyed by rack GUID to avoid conflicts between multiple nested racks
+    expanded_nested_chains = {},  -- {[rack_guid] = chain_guid}
 
     -- Selected FX for detail panel
     selected_fx = nil,
@@ -226,6 +234,118 @@ end
 -- @param guid string FX GUID
 function M.add_to_multi_select(guid)
     state.multi_select[guid] = true
+end
+
+--------------------------------------------------------------------------------
+-- State Persistence
+--------------------------------------------------------------------------------
+
+--- Save expansion state to project.
+function M.save_expansion_state()
+    if not state.track then return end
+    
+    local track_guid = state.track:get_guid()
+    if not track_guid then return end
+    
+    -- Serialize expansion state
+    local data = {
+        expanded_path = state.expanded_path,
+        expanded_racks = state.expanded_racks,
+        expanded_nested_chains = state.expanded_nested_chains,
+    }
+    
+    -- Convert to JSON-like string (simple serialization)
+    local function serialize_table(t, indent)
+        indent = indent or 0
+        local spaces = string.rep(" ", indent)
+        local result = {}
+        if type(t) == "table" then
+            table.insert(result, "{\n")
+            for k, v in pairs(t) do
+                local key_str = type(k) == "string" and ('"' .. k .. '"') or tostring(k)
+                if type(v) == "table" then
+                    table.insert(result, spaces .. "  " .. key_str .. " = ")
+                    table.insert(result, serialize_table(v, indent + 2))
+                    table.insert(result, ",\n")
+                else
+                    local val_str = type(v) == "string" and ('"' .. v .. '"') or tostring(v)
+                    table.insert(result, spaces .. "  " .. key_str .. " = " .. val_str .. ",\n")
+                end
+            end
+            table.insert(result, spaces .. "}")
+            return table.concat(result)
+        else
+            return tostring(t)
+        end
+    end
+    
+    -- Use a simpler approach: serialize as key-value pairs
+    local parts = {}
+    -- Save expanded_path as comma-separated GUIDs
+    if #state.expanded_path > 0 then
+        table.insert(parts, "expanded_path:" .. table.concat(state.expanded_path, ","))
+    end
+    -- Save expanded_racks as comma-separated GUIDs
+    local rack_guids = {}
+    for guid in pairs(state.expanded_racks) do
+        table.insert(rack_guids, guid)
+    end
+    if #rack_guids > 0 then
+        table.insert(parts, "expanded_racks:" .. table.concat(rack_guids, ","))
+    end
+    -- Save expanded_nested_chains as rack_guid:chain_guid pairs
+    local chain_pairs = {}
+    for rack_guid, chain_guid in pairs(state.expanded_nested_chains) do
+        table.insert(chain_pairs, rack_guid .. "=" .. chain_guid)
+    end
+    if #chain_pairs > 0 then
+        table.insert(parts, "expanded_nested_chains:" .. table.concat(chain_pairs, ","))
+    end
+    
+    local serialized = table.concat(parts, "|")
+    if serialized ~= "" then
+        r.SetProjExtState(0, "SideFX", "Expansion_" .. track_guid, serialized)
+    end
+end
+
+--- Load expansion state from project.
+function M.load_expansion_state()
+    if not state.track then return end
+    
+    local track_guid = state.track:get_guid()
+    if not track_guid then return end
+    
+    local ok, serialized = r.GetProjExtState(0, "SideFX", "Expansion_" .. track_guid)
+    if not ok or not serialized or serialized == "" then return end
+    
+    -- Parse serialized data
+    local parts = {}
+    for part in serialized:gmatch("([^|]+)") do
+        table.insert(parts, part)
+    end
+    
+    for _, part in ipairs(parts) do
+        local key, value = part:match("^([^:]+):(.+)$")
+        if key == "expanded_path" then
+            state.expanded_path = {}
+            for guid in value:gmatch("([^,]+)") do
+                table.insert(state.expanded_path, guid)
+            end
+        elseif key == "expanded_racks" then
+            state.expanded_racks = {}
+            for guid in value:gmatch("([^,]+)") do
+                state.expanded_racks[guid] = true
+            end
+        elseif key == "expanded_nested_chains" then
+            state.expanded_nested_chains = {}
+            for pair in value:gmatch("([^,]+)") do
+                local rack_guid, chain_guid = pair:match("^([^=]+)=(.+)$")
+                if rack_guid and chain_guid then
+                    state.expanded_nested_chains[rack_guid] = chain_guid
+                end
+            end
+        end
+    end
 end
 
 return M

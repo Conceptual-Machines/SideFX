@@ -160,7 +160,38 @@ end
 
 function TrackFX:add_fx_to_container(fx, position)
     self._data.children = self._data.children or {}
-    table.insert(self._data.children, fx._data)
+    
+    -- Remove from track level if present
+    if self.track._data.fx_chain then
+        for i, fx_data in ipairs(self.track._data.fx_chain) do
+            if fx_data == fx._data then
+                table.remove(self.track._data.fx_chain, i)
+                break
+            end
+        end
+    end
+    
+    -- Remove from old parent if present
+    if fx._data.parent then
+        local old_parent_children = fx._data.parent.children or {}
+        for i, child in ipairs(old_parent_children) do
+            if child == fx._data then
+                table.remove(old_parent_children, i)
+                break
+            end
+        end
+    end
+    
+    -- Set new parent
+    fx._data.parent = self._data
+    
+    -- Insert at position or append
+    if position and position >= 0 and position <= #self._data.children then
+        table.insert(self._data.children, position + 1, fx._data)
+    else
+        table.insert(self._data.children, fx._data)
+    end
+    
     return true
 end
 
@@ -169,6 +200,24 @@ function TrackFX:move_to_container(container, position)
 end
 
 function TrackFX:move_out_of_container(position)
+    -- Remove from parent's children list
+    if self._data.parent then
+        local parent_children = self._data.parent.children or {}
+        for i, child in ipairs(parent_children) do
+            if child == self._data then
+                table.remove(parent_children, i)
+                break
+            end
+        end
+        -- Add to track level
+        if not self.track._data.fx_chain then
+            self.track._data.fx_chain = {}
+        end
+        table.insert(self.track._data.fx_chain, self._data)
+        -- Clear parent reference
+        self._data.parent = nil
+        return true
+    end
     return true
 end
 
@@ -228,21 +277,41 @@ function Track:iter_track_fx_chain()
 end
 
 function Track:find_fx_by_guid(guid)
+    -- Recursive search helper
+    local function search_recursive(fx_data, depth)
+        if depth > 50 then return nil end  -- Prevent infinite recursion
+        
+        if fx_data.guid == guid then
+            return fx_data
+        end
+        
+        -- Search in children
+        if fx_data.children then
+            for _, child_data in ipairs(fx_data.children) do
+                local found = search_recursive(child_data, depth + 1)
+                if found then return found end
+            end
+        end
+        
+        return nil
+    end
+    
+    -- Search in track-level FX chain
     if self._data.fx_chain then
         for idx, fx_data in ipairs(self._data.fx_chain) do
-            if fx_data.guid == guid then
-                return TrackFX:new(self, idx - 1, fx_data)
-            end
-            -- Also search in children (containers)
-            if fx_data.children then
-                for child_idx, child_data in ipairs(fx_data.children) do
-                    if child_data.guid == guid then
-                        return TrackFX:new(self, child_data.pointer or child_idx, child_data)
-                    end
+            local found = search_recursive(fx_data, 0)
+            if found then
+                -- Calculate approximate pointer based on depth and position
+                local pointer = idx - 1
+                if found ~= fx_data then
+                    -- It's nested, use a unique pointer
+                    pointer = (idx - 1) * 1000 + (found._nested_index or 0)
                 end
+                return TrackFX:new(self, pointer, found)
             end
         end
     end
+    
     return nil
 end
 
