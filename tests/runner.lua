@@ -55,6 +55,8 @@ local test_modules = {
     "unit.test_naming",
     "unit.test_patterns",
     "unit.test_rack",
+    "unit.test_rack_recursive",
+    "unit.test_state",
 }
 
 --------------------------------------------------------------------------------

@@ -1,0 +1,24 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Lua
+      uses: leafo/gh-actions-lua@v9
+      with:
+        lua-version: '5.4'
+    
+    - name: Run unit tests
+      working-directory: ./SideFX
+      run: lua tests/runner.lua
+

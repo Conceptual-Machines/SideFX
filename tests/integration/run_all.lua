@@ -66,6 +66,40 @@ total_passed = total_passed + results.passed
 total_failed = total_failed + results.failed
 r.ShowConsoleMsg("\n")
 
+-- Reset for next test suite
+assert.reset()
+
+-- Run edge case tests
+r.ShowConsoleMsg("Running: Edge Case Tests\n")
+r.ShowConsoleMsg("----------------------------------------\n")
+ok, err = pcall(function()
+    local test_edge_cases = dofile(script_path .. "test_edge_cases.lua")
+end)
+if not ok then
+    r.ShowConsoleMsg("ERROR loading edge case tests: " .. tostring(err) .. "\n")
+end
+results = assert.get_results()
+total_passed = total_passed + results.passed
+total_failed = total_failed + results.failed
+r.ShowConsoleMsg("\n")
+
+-- Reset for next test suite
+assert.reset()
+
+-- Run state management tests
+r.ShowConsoleMsg("Running: State Management Tests\n")
+r.ShowConsoleMsg("----------------------------------------\n")
+ok, err = pcall(function()
+    local test_state_management = dofile(script_path .. "test_state_management.lua")
+end)
+if not ok then
+    r.ShowConsoleMsg("ERROR loading state management tests: " .. tostring(err) .. "\n")
+end
+results = assert.get_results()
+total_passed = total_passed + results.passed
+total_failed = total_failed + results.failed
+r.ShowConsoleMsg("\n")
+
 -- Final summary
 r.ShowConsoleMsg("========================================\n")
 r.ShowConsoleMsg(string.format("Total Results: %d passed, %d failed\n", total_passed, total_failed))

@@ -146,25 +146,13 @@ function M.add_rack(parent_rack, position)
 
     -- If parent is a rack, wrap in chain and add to parent
     if parent_rack and fx_utils.is_rack_container(parent_rack) then
-        -- Get GUID and name before re-finding (these are stable)
+        -- Get GUID and name
         local parent_guid = parent_rack:get_guid()
         local parent_name = parent_rack:get_name()
         local parent_idx = naming.parse_rack_index(parent_name) or 1
         
-        -- Re-find parent rack by GUID FIRST (most reliable, works even if nested)
-        -- We need to re-find before checking parent, because the original reference might be stale
-        -- and get_parent_container() only works on fresh references
-        if parent_guid then
-            parent_rack = state.track:find_fx_by_guid(parent_guid)
-        end
-
-        -- Verify we found a valid rack container (use fx_utils which is more reliable)
-        if not parent_rack or not fx_utils.is_rack_container(parent_rack) then
-            -- Fallback: try to find by name pattern
-            local parent_name_pattern = "^R" .. parent_idx .. ":"
-            parent_rack = find_fx_by_name_pattern(parent_name_pattern)
-        end
-
+        -- Re-find parent rack to ensure fresh reference
+        parent_rack = state.track:find_fx_by_guid(parent_guid)
         if not parent_rack or not fx_utils.is_rack_container(parent_rack) then
             r.ShowConsoleMsg("SideFX: Could not find valid parent rack R" .. parent_idx .. "\n")
             r.PreventUIRefresh(-1)
@@ -172,20 +160,15 @@ function M.add_rack(parent_rack, position)
             return nil
         end
 
-        -- NOW check parent after re-finding (parent relationship should be correct)
-        local parent_rack_parent = parent_rack:get_parent_container()
-        local parent_rack_parent_guid = parent_rack_parent and parent_rack_parent:get_guid() or nil
-
-        r.ShowConsoleMsg(string.format("SideFX: [add_rack] Initial check - parent_name=%s, parent_has_parent=%s\n",
-            parent_name, tostring(parent_rack_parent ~= nil)))
-
-        -- Create the rack container (position not used for nested racks)
+        -- Create the nested rack
         local rack = create_rack_container(rack_idx, nil)
         if not rack then
             r.PreventUIRefresh(-1)
             r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
             return nil
         end
+
+        local rack_guid = rack:get_guid()
 
         -- Count existing chains to determine chain index
         local chain_count = fx_utils.count_chains_in_rack(parent_rack)
@@ -204,385 +187,99 @@ function M.add_rack(parent_rack, position)
 
         -- Create chain container to hold the nested rack
         local chain = state.track:add_fx_by_name("Container", false, -1)
-        if chain and chain.pointer >= 0 then
-            chain:set_named_config_param("renamed_name", chain_name)
-            chain:add_fx_to_container(rack, 0)
+        if not chain or chain.pointer < 0 then
+            rack:delete()
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
+            return nil
+        end
+        
+        chain:set_named_config_param("renamed_name", chain_name)
+        chain:add_fx_to_container(rack, 0)
 
-            local chain_guid = chain:get_guid()
-            local rack_guid = rack:get_guid()
+        local chain_guid = chain:get_guid()
 
-            r.ShowConsoleMsg(string.format("SideFX: [add_rack] Starting - parent_idx=%d, rack_idx=%d, chain_name=%s\n", parent_idx, rack_idx, chain_name))
-            r.ShowConsoleMsg(string.format("SideFX: [add_rack] parent_guid=%s, chain_guid=%s, rack_guid=%s\n", tostring(parent_guid), tostring(chain_guid), tostring(rack_guid)))
-            r.ShowConsoleMsg(string.format("SideFX: [add_rack] parent_rack_parent_guid=%s (from initial check)\n", tostring(parent_rack_parent_guid)))
+        -- Re-find parent rack
+        parent_rack = state.track:find_fx_by_guid(parent_guid)
+        if not parent_rack then
+            r.ShowConsoleMsg("SideFX: Lost parent rack\n")
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
+            return nil
+        end
 
-            -- Check if parent rack is itself nested (inside another container)
-            -- Use the parent_rack_parent_guid we got BEFORE re-finding
-            local parent_rack_pos = 0
-            local needs_pop = false
-            local chain_parent_rack_guid_stored = nil  -- For two-step put-back when rack is in chain
-            local chain_pos_in_rack_stored = 0
-
-            if parent_rack_parent_guid then
-                -- Re-find the parent container to get fresh reference
-                parent_rack_parent = state.track:find_fx_by_guid(parent_rack_parent_guid)
-                r.ShowConsoleMsg(string.format("SideFX: [add_rack] Re-found parent container: %s\n", tostring(parent_rack_parent ~= nil)))
+        -- Find mixer position in parent rack
+        local mixer_pos = 0
+        local pos = 0
+        for child in parent_rack:iter_container_children() do
+            local ok, name = pcall(function() return child:get_name() end)
+            if ok and name and (name:match("^_") or name:find("Mixer")) then
+                mixer_pos = pos
+                break
             end
+            pos = pos + 1
+        end
 
-            if parent_rack_parent then
-                -- Parent rack is nested - need to pop it out first (like add_device_to_chain does)
-                needs_pop = true
-                r.ShowConsoleMsg(string.format("SideFX: [add_rack] Parent rack R%d is nested, will pop out\n", parent_idx))
+        -- Add chain to parent rack using ReaWrap's fixed add_fx_to_container
+        -- (handles nested racks automatically with pop-out-put-back)
+        chain = state.track:find_fx_by_guid(chain_guid)
+        parent_rack = state.track:find_fx_by_guid(parent_guid)
+        
+        if not chain or not parent_rack then
+            r.ShowConsoleMsg("SideFX: Lost chain or parent rack\n")
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
+            return nil
+        end
+        
+        local add_success = parent_rack:add_fx_to_container(chain, mixer_pos)
+        if not add_success then
+            r.ShowConsoleMsg("SideFX: Failed to add chain to parent rack R" .. parent_idx .. "\n")
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
+            return nil
+        end
 
-                -- Check if parent is inside a chain (which is inside a rack)
-                local parent_is_in_chain = fx_utils.is_chain_container(parent_rack_parent)
-                r.ShowConsoleMsg(string.format("SideFX: [add_rack] Parent container is chain: %s\n", tostring(parent_is_in_chain)))
+        -- Re-find parent rack after add (pointer may have changed if rack was nested)
+        parent_rack = state.track:find_fx_by_guid(parent_guid)
 
-                -- Remember parent rack's position in its container
-                local pos = 0
-                for child in parent_rack_parent:iter_container_children() do
-                    if child:get_guid() == parent_guid then
-                        parent_rack_pos = pos
-                        break
-                    end
-                    pos = pos + 1
-                end
-                r.ShowConsoleMsg(string.format("SideFX: [add_rack] Parent rack position in container: %d\n", parent_rack_pos))
-
-                -- If parent is in a chain, we need to move the chain out first, then the rack
-                if parent_is_in_chain then
-                    local chain_guid_before = parent_rack_parent:get_guid()
-                    local chain_parent = parent_rack_parent:get_parent_container()
-                    local chain_parent_rack_guid = chain_parent and chain_parent:get_guid() or nil
-                    local chain_pos_in_rack = 0
-
-                    if chain_parent then
-                        pos = 0
-                        for child in chain_parent:iter_container_children() do
-                            if child:get_guid() == chain_guid_before then
-                                chain_pos_in_rack = pos
-                                break
-                            end
-                            pos = pos + 1
-                        end
-                        r.ShowConsoleMsg(string.format("SideFX: [add_rack] Chain is at position %d in rack\n", chain_pos_in_rack))
-
-                        -- Re-find the chain before moving (reference might be stale)
-                        parent_rack_parent = state.track:find_fx_by_guid(chain_guid_before)
-                        if not parent_rack_parent then
-                            r.ShowConsoleMsg("SideFX: Failed to re-find chain before move\n")
-                            if chain then chain:delete() end
-                            if rack then rack:delete() end
-                            r.PreventUIRefresh(-1)
-                            r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
-                            return nil
-                        end
-
-                        -- Verify chain is valid before calling move_out_of_container
-                        local chain_is_cont = false
-                        local chain_has_parent = false
-                        pcall(function()
-                            chain_is_cont = parent_rack_parent:is_container()
-                            local cp = parent_rack_parent:get_parent_container()
-                            chain_has_parent = (cp ~= nil)
-                        end)
-                        r.ShowConsoleMsg(string.format("SideFX: [add_rack] Chain before move - is_container=%s, has_parent=%s\n", 
-                            tostring(chain_is_cont), tostring(chain_has_parent)))
-
-                        -- Move chain out first
-                        r.ShowConsoleMsg("SideFX: [add_rack] Moving chain out first...\n")
-                        local chain_pop_success = nil
-                        local ok, result = pcall(function() 
-                            return parent_rack_parent:move_out_of_container()
-                        end)
-                        if ok then
-                            chain_pop_success = result
-                        else
-                            r.ShowConsoleMsg(string.format("SideFX: [add_rack] Error calling move_out_of_container: %s\n", tostring(result)))
-                        end
-                        r.ShowConsoleMsg(string.format("SideFX: [add_rack] Chain move_out_of_container() returned: %s\n", tostring(chain_pop_success)))
-                        if not chain_pop_success then
-                            r.ShowConsoleMsg("SideFX: Failed to move chain out\n")
-                            if chain then chain:delete() end
-                            if rack then rack:delete() end
-                            r.PreventUIRefresh(-1)
-                            r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
-                            return nil
-                        end
-                        r.PreventUIRefresh(-1)
-                        r.PreventUIRefresh(1)
-                        parent_rack_parent = state.track:find_fx_by_guid(chain_guid_before)
-                        parent_rack = state.track:find_fx_by_guid(parent_guid)
-                    end
-
-                    -- Now move rack out of chain
-                    r.ShowConsoleMsg("SideFX: [add_rack] Moving rack out of chain...\n")
-                    local pop_success = parent_rack:move_out_of_container()
-                    r.ShowConsoleMsg(string.format("SideFX: [add_rack] Rack move_out_of_container() returned: %s\n", tostring(pop_success)))
-
-                    if not pop_success then
-                        r.ShowConsoleMsg("SideFX: Failed to move rack out of chain\n")
-                        if chain then chain:delete() end
-                        if rack then rack:delete() end
-                        r.PreventUIRefresh(-1)
-                        r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
-                        return nil
-                    end
-
-                    -- Store chain info for putting back (rack goes back into chain, chain goes back into its rack)
-                    parent_rack_parent_guid = chain_guid_before  -- Rack's parent is the chain
-                    -- parent_rack_pos already set above (rack's position in chain)
-                    -- Store chain's parent info separately for two-step put-back
-                    chain_parent_rack_guid_stored = chain_parent_rack_guid
-                    chain_pos_in_rack_stored = chain_pos_in_rack
-                else
-                    -- Pop parent rack out to track level directly
-                    r.ShowConsoleMsg("SideFX: [add_rack] Calling move_out_of_container()\n")
-                    local pop_success = parent_rack:move_out_of_container()
-                    r.ShowConsoleMsg(string.format("SideFX: [add_rack] move_out_of_container() returned: %s\n", tostring(pop_success)))
-
-                    if not pop_success then
-                        r.ShowConsoleMsg("SideFX: Failed to move rack out of container\n")
-                        if chain then chain:delete() end
-                        if rack then rack:delete() end
-                        r.PreventUIRefresh(-1)
-                        r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
-                        return nil
-                    end
-                end
-
-                -- Refresh and re-find
-                r.PreventUIRefresh(-1)
-                r.PreventUIRefresh(1)
-                r.ShowConsoleMsg("SideFX: [add_rack] Re-finding after pop...\n")
-
-                parent_rack = state.track:find_fx_by_guid(parent_guid)
-                chain = state.track:find_fx_by_guid(chain_guid)
-                rack = state.track:find_fx_by_guid(rack_guid)
-
-                r.ShowConsoleMsg(string.format("SideFX: [add_rack] After pop - parent_rack=%s, chain=%s, rack=%s\n",
-                    tostring(parent_rack ~= nil), tostring(chain ~= nil), tostring(rack ~= nil)))
-
-                if not parent_rack or not chain or not rack then
-                    r.ShowConsoleMsg("SideFX: Failed to pop parent rack R" .. parent_idx .. " out\n")
-                    if chain then chain:delete() end
-                    if rack then rack:delete() end
-                    r.PreventUIRefresh(-1)
-                    r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
-                    return nil
-                end
-
-                -- Verify parent rack is now at track level (no parent)
-                local still_has_parent = parent_rack:get_parent_container()
-                r.ShowConsoleMsg(string.format("SideFX: [add_rack] Parent rack still_has_parent after pop: %s\n", tostring(still_has_parent ~= nil)))
-                if still_has_parent then
-                    r.ShowConsoleMsg("SideFX: Parent rack R" .. parent_idx .. " still has parent after pop\n")
-                    if chain then chain:delete() end
-                    if rack then rack:delete() end
-                    r.PreventUIRefresh(-1)
-                    r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
-                    return nil
-                end
-            else
-                r.ShowConsoleMsg(string.format("SideFX: [add_rack] Parent rack R%d is at track level, no pop needed\n", parent_idx))
+        -- Set up routing for the chain
+        local chain_inside = nil
+        for child in parent_rack:iter_container_children() do
+            local ok, name = pcall(function() return child:get_name() end)
+            if ok and name == chain_name then
+                chain_inside = child
+                break
             end
+        end
 
-            -- Find mixer position in parent rack (after pop if needed)
-            r.ShowConsoleMsg("SideFX: [add_rack] Finding mixer position...\n")
-            local mixer_pos = 0
-            local pos = 0
-            local child_count = 0
-            for child in parent_rack:iter_container_children() do
-                child_count = child_count + 1
-                local ok, name = pcall(function() return child:get_name() end)
-                if ok and name and (name:match("^_") or name:find("Mixer")) then
-                    mixer_pos = pos
-                    r.ShowConsoleMsg(string.format("SideFX: [add_rack] Found mixer at position %d (name=%s)\n", pos, name))
-                    break
-                end
-                pos = pos + 1
-            end
-            r.ShowConsoleMsg(string.format("SideFX: [add_rack] Parent rack has %d children, mixer_pos=%d\n", child_count, mixer_pos))
+        if chain_inside then
+            chain_inside:set_container_channels(64)
 
-            -- Verify chain has no parent (is at track level)
-            local chain_parent = chain:get_parent_container()
-            r.ShowConsoleMsg(string.format("SideFX: [add_rack] Chain has parent: %s\n", tostring(chain_parent ~= nil)))
-            if chain_parent then
-                r.ShowConsoleMsg("SideFX: Chain already has parent before add\n")
-                if chain_guid then
-                    local orphan_chain = state.track:find_fx_by_guid(chain_guid)
-                    if orphan_chain then orphan_chain:delete() end
-                end
-                if rack_guid then
-                    local orphan_rack = state.track:find_fx_by_guid(rack_guid)
-                    if orphan_rack then orphan_rack:delete() end
-                end
-                r.PreventUIRefresh(-1)
-                r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
-                return nil
-            end
+            -- Set output channel routing
+            local out_channel = chain_idx * 2
+            local left_bits = math.floor(2 ^ out_channel)
+            local right_bits = math.floor(2 ^ (out_channel + 1))
 
-            -- Get parent rack info before adding
-            local parent_name_before = ""
-            local parent_is_cont_before = false
-            pcall(function()
-                parent_name_before = parent_rack:get_name() or ""
-                parent_is_cont_before = parent_rack:is_container()
-            end)
-            r.ShowConsoleMsg(string.format("SideFX: [add_rack] Before add - parent_name=%s, parent_is_container=%s\n", parent_name_before, tostring(parent_is_cont_before)))
+            chain_inside:set_pin_mappings(1, 0, left_bits, 0)
+            chain_inside:set_pin_mappings(1, 1, right_bits, 0)
+        end
 
-            -- Add chain to parent rack (now at track level if it was nested)
-            r.ShowConsoleMsg(string.format("SideFX: [add_rack] Calling add_fx_to_container(chain, %d)...\n", mixer_pos))
-            local add_success = parent_rack:add_fx_to_container(chain, mixer_pos)
-            r.ShowConsoleMsg(string.format("SideFX: [add_rack] add_fx_to_container returned: %s\n", tostring(add_success)))
-            if not add_success then
-                -- Get detailed diagnostic info
-                r.ShowConsoleMsg("SideFX: [add_rack] add_fx_to_container FAILED, gathering diagnostics...\n")
-                local parent_is_cont = false
-                local parent_name_check = ""
-                local parent_guid_check = ""
-                local chain_has_parent_after = false
-                local chain_parent_guid = ""
+        -- Set parent rack mixer volume for this chain to 0dB
+        local parent_mixer = fx_utils.get_rack_mixer(parent_rack)
+        if parent_mixer then
+            local vol_param = M.get_mixer_chain_volume_param(chain_idx)
+            local normalized_0db = 60 / 72  -- 0.833...
+            parent_mixer:set_param_normalized(vol_param, normalized_0db)
 
-                pcall(function()
-                    parent_is_cont = parent_rack:is_container()
-                    local ok, name = pcall(function() return parent_rack:get_name() end)
-                    if ok then parent_name_check = name or "" end
-                    parent_guid_check = parent_rack:get_guid() or ""
-                end)
-
-                pcall(function()
-                    local cp = chain:get_parent_container()
-                    chain_has_parent_after = (cp ~= nil)
-                    if cp then chain_parent_guid = cp:get_guid() or "" end
-                end)
-
-                r.ShowConsoleMsg(string.format("SideFX: Failed to add chain to parent rack R%d\n", parent_idx))
-                r.ShowConsoleMsg(string.format("  parent_name=%s\n", parent_name_check))
-                r.ShowConsoleMsg(string.format("  parent_guid=%s\n", parent_guid_check))
-                r.ShowConsoleMsg(string.format("  parent_is_container=%s\n", tostring(parent_is_cont)))
-                r.ShowConsoleMsg(string.format("  chain_guid=%s\n", tostring(chain_guid)))
-                r.ShowConsoleMsg(string.format("  chain_has_parent=%s\n", tostring(chain_has_parent_after)))
-                r.ShowConsoleMsg(string.format("  chain_parent_guid=%s\n", chain_parent_guid))
-                r.ShowConsoleMsg(string.format("  mixer_pos=%d\n", mixer_pos))
-                -- Clean up
-                if chain_guid then
-                    local orphan_chain = state.track:find_fx_by_guid(chain_guid)
-                    if orphan_chain then orphan_chain:delete() end
-                end
-                if rack_guid then
-                    local orphan_rack = state.track:find_fx_by_guid(rack_guid)
-                    if orphan_rack then orphan_rack:delete() end
-                end
-                r.PreventUIRefresh(-1)
-                r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
-                return nil
-            end
-
-            -- Put parent rack back if we popped it out (like add_device_to_chain does)
-            if needs_pop and parent_rack_parent_guid then
-                r.ShowConsoleMsg("SideFX: [add_rack] Putting parent rack back into container...\n")
-                -- Re-find everything after add
-                chain = state.track:find_fx_by_guid(chain_guid)
-                parent_rack = state.track:find_fx_by_guid(parent_guid)
-                local fresh_parent_container = state.track:find_fx_by_guid(parent_rack_parent_guid)
-
-                r.ShowConsoleMsg(string.format("SideFX: [add_rack] Re-found - chain=%s, parent_rack=%s, parent_container=%s\n",
-                    tostring(chain ~= nil), tostring(parent_rack ~= nil), tostring(fresh_parent_container ~= nil)))
-
-                if fresh_parent_container and parent_rack then
-                    -- Step 1: Put rack back into chain
-                    r.ShowConsoleMsg(string.format("SideFX: [add_rack] Step 1: Putting rack back into chain at position %d\n", parent_rack_pos))
-                    local put_back_success = fresh_parent_container:add_fx_to_container(parent_rack, parent_rack_pos)
-                    r.ShowConsoleMsg(string.format("SideFX: [add_rack] put_back returned: %s\n", tostring(put_back_success)))
-
-                    if not put_back_success then
-                        r.ShowConsoleMsg("SideFX: Failed to put rack back into chain\n")
-                    end
-
-                    -- Step 2: If chain was also popped, put chain back into its rack
-                    if chain_parent_rack_guid_stored then
-                        r.PreventUIRefresh(-1)
-                        r.PreventUIRefresh(1)
-                        fresh_parent_container = state.track:find_fx_by_guid(parent_rack_parent_guid)  -- Re-find chain
-                        local chain_parent_rack = state.track:find_fx_by_guid(chain_parent_rack_guid_stored)
-
-                        if chain_parent_rack and fresh_parent_container then
-                            r.ShowConsoleMsg(string.format("SideFX: [add_rack] Step 2: Putting chain back into rack at position %d\n", chain_pos_in_rack_stored))
-                            local chain_put_back_success = chain_parent_rack:add_fx_to_container(fresh_parent_container, chain_pos_in_rack_stored)
-                            r.ShowConsoleMsg(string.format("SideFX: [add_rack] chain put_back returned: %s\n", tostring(chain_put_back_success)))
-
-                            if not chain_put_back_success then
-                                r.ShowConsoleMsg("SideFX: Failed to put chain back into rack\n")
-                            end
-                        end
-                    end
-
-                    -- Refresh and re-find after move back
-                    r.PreventUIRefresh(-1)
-                    r.PreventUIRefresh(1)
-                    parent_rack = state.track:find_fx_by_guid(parent_guid)
-                    chain = state.track:find_fx_by_guid(chain_guid)
-                    r.ShowConsoleMsg(string.format("SideFX: [add_rack] After put_back - parent_rack=%s, chain=%s\n",
-                        tostring(parent_rack ~= nil), tostring(chain ~= nil)))
-                else
-                    r.ShowConsoleMsg("SideFX: [add_rack] WARNING - Could not put parent rack back!\n")
-                end
-            end
-
-            -- Set up routing for the chain
-            local chain_inside = nil
-            if chain_guid then
-                chain_inside = state.track:find_fx_by_guid(chain_guid)
-            end
-            if not chain_inside and parent_rack then
-                for child in parent_rack:iter_container_children() do
-                    local ok, name = pcall(function() return child:get_name() end)
-                    if ok and name == chain_name then
-                        chain_inside = child
-                        break
-                    end
-                end
-            end
-
-            if not chain_inside then
-                r.ShowConsoleMsg("SideFX: Warning - Chain " .. chain_name .. " not found in parent rack R" .. parent_idx .. " after adding\n")
-                -- Try to find it by GUID as fallback
-                local chain_guid = chain:get_guid()
-                if chain_guid then
-                    chain_inside = state.track:find_fx_by_guid(chain_guid)
-                end
-            end
-
-            if chain_inside then
-                chain_inside:set_container_channels(64)
-
-                -- Set output channel routing
-                local out_channel = chain_idx * 2
-                local left_bits = math.floor(2 ^ out_channel)
-                local right_bits = math.floor(2 ^ (out_channel + 1))
-
-                chain_inside:set_pin_mappings(1, 0, left_bits, 0)
-                chain_inside:set_pin_mappings(1, 1, right_bits, 0)
-            else
-                r.ShowConsoleMsg("SideFX: Error - Could not set up routing for chain " .. chain_name .. "\n")
-            end
-
-            -- Set parent rack mixer volume for this chain to 0dB
-            local parent_mixer = fx_utils.get_rack_mixer(parent_rack)
-            if parent_mixer then
-                local vol_param = M.get_mixer_chain_volume_param(chain_idx)
-                local normalized_0db = 60 / 72  -- 0.833...
-                parent_mixer:set_param_normalized(vol_param, normalized_0db)
-
-                local pan_param = M.get_mixer_chain_pan_param(chain_idx)
-                parent_mixer:set_param_normalized(pan_param, 0.5)
-            end
+            local pan_param = M.get_mixer_chain_pan_param(chain_idx)
+            parent_mixer:set_param_normalized(pan_param, 0.5)
         end
 
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Rack", -1)
 
-        -- Re-find the rack after it's been moved (reference is stale)
+        -- Re-find the rack to return
         local rack_name_pattern = "^R" .. rack_idx .. ":"
         return find_fx_by_name_pattern(rack_name_pattern)
     else
@@ -649,88 +346,6 @@ function M.add_chain_to_rack(rack, plugin)
     
     -- Re-save GUID in case rack changed (should be same, but be safe)
     rack_guid = rack:get_guid()
-
-    -- Check if rack is nested (inside a chain)
-    local rack_parent = rack:get_parent_container()
-    local rack_parent_guid = rack_parent and rack_parent:get_guid() or nil
-    local needs_pop = false
-    local rack_pos_in_parent = 0
-    local parent_is_chain = false
-
-    if rack_parent then
-        -- Rack is nested - need to pop it out first (like add_device_to_chain does)
-        needs_pop = true
-        parent_is_chain = fx_utils.is_chain_container(rack_parent)
-        
-        r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] Rack is nested, popping out...\n"))
-        
-        -- Remember rack's position in its container
-        local pos = 0
-        for child in rack_parent:iter_container_children() do
-            if child:get_guid() == rack_guid then
-                rack_pos_in_parent = pos
-                break
-            end
-            pos = pos + 1
-        end
-
-        -- Pop rack out to track level (may need multiple moves if deeply nested)
-        local pop_success = true
-        local depth = 0
-        local max_depth = 10  -- Safety limit
-        while rack:get_parent_container() and depth < max_depth do
-            pop_success = rack:move_out_of_container()
-            if not pop_success then
-                r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] move_out_of_container failed at depth %d\n", depth))
-                break
-            end
-            r.PreventUIRefresh(-1)
-            r.PreventUIRefresh(1)
-            rack = state.track:find_fx_by_guid(rack_guid)
-            if not rack then
-                r.ShowConsoleMsg("SideFX: [add_chain_to_rack] Lost rack during pop\n")
-                pop_success = false
-                break
-            end
-            depth = depth + 1
-        end
-        
-        r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] Moved rack out %d levels\n", depth))
-        
-        if not pop_success or not rack then
-            r.ShowConsoleMsg("SideFX: Failed to pop rack out\n")
-            r.PreventUIRefresh(-1)
-            r.Undo_EndBlock("SideFX: Add Chain to Rack (failed)", -1)
-            return nil
-        end
-        
-        -- Verify rack is at track level and is a container
-        local rack_has_parent = rack:get_parent_container() ~= nil
-        local rack_is_cont = rack:is_container()
-        local rack_child_count = rack:get_container_child_count()
-        r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] After pop - has_parent=%s, is_container=%s, child_count=%d\n",
-            tostring(rack_has_parent), tostring(rack_is_cont), rack_child_count))
-        
-        if rack_has_parent then
-            r.ShowConsoleMsg("SideFX: [add_chain_to_rack] WARNING: Rack still has parent after pop!\n")
-            r.PreventUIRefresh(-1)
-            r.Undo_EndBlock("SideFX: Add Chain to Rack (failed)", -1)
-            return nil
-        end
-        
-        if not rack_is_cont then
-            r.ShowConsoleMsg("SideFX: [add_chain_to_rack] WARNING: Rack is not a container after pop!\n")
-            r.PreventUIRefresh(-1)
-            r.Undo_EndBlock("SideFX: Add Chain to Rack (failed)", -1)
-            return nil
-        end
-        
-        r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] Rack popped out successfully\n"))
-    else
-        r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] Rack is at track level, no pop needed\n"))
-    end
-
-    -- Get rack name again (in case it changed)
     rack_name = rack:get_name()
     local rack_prefix = rack_name:match("^(R%d+)") or "R1"
 
@@ -795,6 +410,22 @@ function M.add_chain_to_rack(rack, plugin)
         chain:set_named_config_param("renamed_name", chain_name)
         chain:add_fx_to_container(device, 0)
 
+        -- Force UI refresh before re-finding to ensure fresh pointers
+        r.PreventUIRefresh(-1)
+        r.PreventUIRefresh(1)
+        
+        -- Re-find rack to ensure fresh reference (may have become stale)
+        rack = state.track:find_fx_by_guid(rack_guid)
+        if not rack then
+            r.ShowConsoleMsg("SideFX: [add_chain_to_rack] Lost rack before add\n")
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Chain to Rack (failed)", -1)
+            return nil
+        end
+        
+        r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] After re-find: pointer=0x%X, is_container=%s\n",
+            rack.pointer, tostring(rack:is_container())))
+        
         -- Find mixer position
         local mixer_pos = 0
         local pos = 0
@@ -807,24 +438,28 @@ function M.add_chain_to_rack(rack, plugin)
             pos = pos + 1
         end
         
-        -- Verify rack state before adding
-        local rack_child_count_before = rack:get_container_child_count()
-        r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] Before add - rack_child_count=%d, mixer_pos=%d\n",
-            rack_child_count_before, mixer_pos))
-
+        -- Add chain to rack using ReaWrap's fixed add_fx_to_container
+        -- (now handles nested racks automatically)
+        r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] Adding chain to rack\n"))
+        r.ShowConsoleMsg(string.format("  Rack: guid=%s, pointer=0x%X, is_container=%s, has_parent=%s\n",
+            rack_guid:sub(1,8), rack.pointer, tostring(rack:is_container()), tostring(rack:get_parent_container() ~= nil)))
+        r.ShowConsoleMsg(string.format("  Chain: pointer=0x%X, is_container=%s, has_parent=%s\n",
+            chain.pointer, tostring(chain:is_container()), tostring(chain:get_parent_container() ~= nil)))
+        r.ShowConsoleMsg(string.format("  Mixer position: %d\n", mixer_pos))
+        
         local add_success = rack:add_fx_to_container(chain, mixer_pos)
         r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] add_fx_to_container returned: %s\n", tostring(add_success)))
         
         if not add_success then
-            local rack_child_count_after = rack:get_container_child_count()
-            r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] After failed add - rack_child_count=%d (was %d)\n",
-                rack_child_count_after, rack_child_count_before))
-        end
-        
-        if not add_success then
             r.ShowConsoleMsg("SideFX: [add_chain_to_rack] Failed to add chain to rack\n")
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Chain to Rack (failed)", -1)
+            return nil
         end
 
+        -- Re-find rack and chain after add (pointers may have changed if rack was nested)
+        rack = state.track:find_fx_by_guid(rack_guid)
+        
         -- Re-find chain inside rack
         for child in rack:iter_container_children() do
             local ok, name = pcall(function() return child:get_name() end)
@@ -847,43 +482,15 @@ function M.add_chain_to_rack(rack, plugin)
         end
 
         -- Set mixer volume for this chain to 0dB
-        -- Mixer slider range: -60 to +12 dB (72 dB range)
-        -- Normalized 0dB = (0 - (-60)) / (12 - (-60)) = 60/72 = 0.833...
         local mixer = fx_utils.get_rack_mixer(rack)
         if mixer then
             local vol_param = M.get_mixer_chain_volume_param(chain_idx)
             local normalized_0db = 60 / 72  -- 0.833...
             mixer:set_param_normalized(vol_param, normalized_0db)
 
-        -- Also set pan to center (normalized 0.5)
-        local pan_param = M.get_mixer_chain_pan_param(chain_idx)
-        mixer:set_param_normalized(pan_param, 0.5)
-    end
-end
-
-    -- Put rack back if we popped it out (like add_device_to_chain does)
-    if needs_pop and rack_parent_guid then
-        r.ShowConsoleMsg("SideFX: [add_chain_to_rack] Putting rack back into container...\n")
-        -- Re-find everything after add
-        rack = state.track:find_fx_by_guid(rack_guid)
-        local fresh_parent_container = state.track:find_fx_by_guid(rack_parent_guid)
-        
-        if fresh_parent_container and rack then
-            local put_back_success = fresh_parent_container:add_fx_to_container(rack, rack_pos_in_parent)
-            r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] put_back returned: %s\n", tostring(put_back_success)))
-            
-            -- Refresh and re-find after move back
-            r.PreventUIRefresh(-1)
-            r.PreventUIRefresh(1)
-            rack = state.track:find_fx_by_guid(rack_guid)
-            
-            if rack then
-                -- Verify chain count after put back
-                local chain_count_after = fx_utils.count_chains_in_rack(rack)
-                r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] Chain count after put_back: %d\n", chain_count_after))
-            end
-        else
-            r.ShowConsoleMsg("SideFX: [add_chain_to_rack] Failed to re-find rack or parent container\n")
+            -- Also set pan to center (normalized 0.5)
+            local pan_param = M.get_mixer_chain_pan_param(chain_idx)
+            mixer:set_param_normalized(pan_param, 0.5)
         end
     end
 
@@ -984,46 +591,33 @@ function M.add_device_to_chain(chain, plugin)
         end
     end
 
-    -- Move device into chain
+    -- Move device into chain using ReaWrap's fixed add_fx_to_container
+    -- (now handles nested containers properly)
     local device_guid = device:get_guid()
     local fresh_chain = state.track:find_fx_by_guid(chain_guid)
 
     if not fresh_chain then
+        if device then device:delete() end
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Device to Chain (chain lost)", -1)
         return nil
     end
 
-    local rack = fresh_chain:get_parent_container()
-    if rack then
-        -- Chain is nested - move it OUT to track level first
-        local rack_guid = rack:get_guid()
+    device = state.track:find_fx_by_guid(device_guid)
+    if not device then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Device to Chain (device lost)", -1)
+        return nil
+    end
 
-        local chain_pos_in_rack = 0
-        for child in rack:iter_container_children() do
-            if child:get_guid() == chain_guid then break end
-            chain_pos_in_rack = chain_pos_in_rack + 1
-        end
-
-        fresh_chain:move_out_of_container()
-        fresh_chain = state.track:find_fx_by_guid(chain_guid)
-        device = state.track:find_fx_by_guid(device_guid)
-
-        if fresh_chain and device then
-            local insert_pos = fresh_chain:get_container_child_count()
-            fresh_chain:add_fx_to_container(device, insert_pos)
-
-            fresh_chain = state.track:find_fx_by_guid(chain_guid)
-            local fresh_rack = state.track:find_fx_by_guid(rack_guid)
-
-            if fresh_chain and fresh_rack then
-                fresh_rack:add_fx_to_container(fresh_chain, chain_pos_in_rack)
-            end
-        end
-    else
-        -- Chain is top-level
-        local insert_pos = fresh_chain:get_container_child_count()
-        fresh_chain:add_fx_to_container(device, insert_pos)
+    local insert_pos = fresh_chain:get_container_child_count()
+    local success = fresh_chain:add_fx_to_container(device, insert_pos)
+    
+    if not success then
+        if device then device:delete() end
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Device to Chain (failed)", -1)
+        return nil
     end
 
     r.PreventUIRefresh(-1)
@@ -1034,6 +628,77 @@ function M.add_device_to_chain(chain, plugin)
         return state.track:find_fx_by_guid(device_guid)
     end
     return device
+end
+
+--- Add a rack (R-container) to an existing chain.
+-- Creates a new empty rack and adds it to the chain.
+-- @param chain TrackFX Chain container
+-- @return TrackFX|nil Rack container or nil on failure
+function M.add_rack_to_chain(chain)
+    if not state.track or not chain then return nil end
+    if not fx_utils.is_chain_container(chain) then return nil end
+
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+
+    -- Get chain GUID and name
+    local chain_guid = chain:get_guid()
+    if not chain_guid then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Rack to Chain (failed)", -1)
+        return nil
+    end
+
+    local chain_name = chain:get_name()
+
+    -- Get next rack index
+    local rack_idx = fx_utils.get_next_rack_index(state.track)
+
+    -- Create rack container with mixer at track level
+    local rack = create_rack_container(rack_idx, nil)
+    if not rack then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Rack to Chain (failed)", -1)
+        return nil
+    end
+
+    local rack_guid = rack:get_guid()
+
+    -- Re-find chain to ensure fresh reference
+    chain = state.track:find_fx_by_guid(chain_guid)
+    if not chain or not fx_utils.is_chain_container(chain) then
+        if rack then rack:delete() end
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Rack to Chain (chain lost)", -1)
+        return nil
+    end
+
+    -- Re-find rack
+    rack = state.track:find_fx_by_guid(rack_guid)
+    if not rack then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Rack to Chain (rack lost)", -1)
+        return nil
+    end
+
+    -- Add rack to chain using ReaWrap's fixed add_fx_to_container
+    -- (which now handles nested containers properly via pop-out-put-back)
+    local success = chain:add_fx_to_container(rack, nil)
+    if not success then
+        if rack then rack:delete() end
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Rack to Chain (failed)", -1)
+        return nil
+    end
+
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Add Rack to Chain", -1)
+
+    -- Re-find the rack after it's been moved (reference is stale)
+    if rack_guid then
+        return state.track:find_fx_by_guid(rack_guid)
+    end
+    return rack
 end
 
 --------------------------------------------------------------------------------
