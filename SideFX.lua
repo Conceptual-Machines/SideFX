@@ -542,8 +542,9 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
                     state.rename_text = new_text
                     -- If Enter was pressed (EnterReturnsTrue flag), save and finish
                     if state.rename_text ~= "" then
-                        -- Save renamed name
-                        fx:set_named_config_param("renamed_name", state.rename_text)
+                    -- Store custom display name in state (SideFX-only, doesn't change REAPER name)
+                    state.display_names[guid] = state.rename_text
+                    state_module.save_display_names()
                     end
                     state.renaming_fx = nil
                     state.rename_text = ""
@@ -551,8 +552,9 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
                 -- Check if item was deactivated after edit (clicked away)
                 if ctx:is_item_deactivated_after_edit() then
                     if state.rename_text ~= "" then
-                        -- Save renamed name
-                        fx:set_named_config_param("renamed_name", state.rename_text)
+                    -- Store custom display name in state (SideFX-only, doesn't change REAPER name)
+                    state.display_names[guid] = state.rename_text
+                    state_module.save_display_names()
                     end
                     state.renaming_fx = nil
                     state.rename_text = ""
@@ -723,7 +725,13 @@ local rack_panel = nil    -- Lazy loaded
 -- Draw expanded chain column with devices
 local function draw_chain_column(ctx, selected_chain, rack_h)
     local selected_chain_guid = selected_chain:get_guid()
-    local chain_display_name = get_fx_display_name(selected_chain)
+    -- Get chain name and identifier separately
+    local chain_name = fx_utils.get_chain_label_name(selected_chain)
+    local chain_id = nil
+    local ok_name, raw_name = pcall(function() return selected_chain:get_name() end)
+    if ok_name and raw_name then
+        chain_id = raw_name:match("^(R%d+_C%d+)") or raw_name:match("R%d+_C%d+")
+    end
 
     -- Get devices from chain
     local devices = {}
@@ -754,7 +762,11 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
             ctx:table_set_column_index(0)
             ctx:text_colored(0xAAAAAAFF, "Chain:")
             ctx:same_line()
-            ctx:text(chain_display_name)
+            ctx:text(chain_name)
+            if chain_id then
+                ctx:same_line()
+                ctx:text_colored(0x888888FF, " [" .. chain_id .. "]")
+            end
             ctx:separator()
 
             -- Row 2: Content
@@ -797,7 +809,7 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                 ctx:begin_group()
 
                 for k, dev in ipairs(devices) do
-                    local dev_name = get_fx_display_name(dev)
+                    local dev_name = fx_utils.get_device_display_name(dev)
                     local dev_enabled = dev:get_enabled()
 
                     -- Arrow connector between items
@@ -821,7 +833,8 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                         if rack_data.is_expanded and nested_chain_guid then
                             local nested_chain = nil
                             for _, chain in ipairs(rack_data.chains) do
-                                if chain:get_guid() == nested_chain_guid then
+                                local ok_guid, chain_guid = pcall(function() return chain:get_guid() end)
+                                if ok_guid and chain_guid and chain_guid == nested_chain_guid then
                                     nested_chain = chain
                                     break
                                 end
@@ -845,6 +858,12 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                                 on_delete = function()
                                     dev:delete()
                                     refresh_fx_list()
+                                end,
+                                on_rename = function(fx)
+                                    -- Rename the container (dev), not the main FX
+                                    local dev_guid = dev:get_guid()
+                                    state.renaming_fx = dev_guid
+                                    state.rename_text = get_fx_display_name(dev)
                                 end,
                                 on_plugin_drop = function(plugin_name, insert_before_idx)
                                     local plugin = { full_name = plugin_name, name = plugin_name }
@@ -917,7 +936,7 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
     -- Explicitly check if is_nested is true (not just truthy)
     is_nested = (is_nested == true)
     local rack_guid = rack:get_guid()
-    local rack_name = get_fx_display_name(rack)
+    local rack_name = fx_utils.get_rack_display_name(rack)
     
     -- Use expanded_racks for ALL racks (both top-level and nested)
     -- This allows multiple top-level racks to be expanded independently
@@ -940,39 +959,136 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
     local child_id = is_nested and ("rack_nested_" .. rack_guid) or ("rack_" .. rack_guid)
     if ctx:begin_child(child_id, rack_w, rack_h, imgui.ChildFlags.Border()) then
 
-        -- Rack header
+        -- Rack header using table for proper alignment
         local expand_icon = is_expanded and "▼" or "▶"
         -- Use unique button ID that includes nested flag AND guid to avoid conflicts
         local button_id = is_nested and ("rack_toggle_nested_" .. rack_guid) or ("rack_toggle_top_" .. rack_guid)
-        if ctx:button(expand_icon .. " " .. rack_name:sub(1, 20) .. "##" .. button_id, -60, 24) then
-            -- Use expanded_racks for ALL racks (both top-level and nested)
-            -- This allows multiple top-level racks to be expanded independently
-            if is_expanded then
-                state.expanded_racks[rack_guid] = nil
-                -- Clear chain selection when collapsing (works for both top-level and nested)
-                state.expanded_nested_chains[rack_guid] = nil
+        
+        -- Check if rack is being renamed
+        local is_renaming_rack = (state.renaming_fx == rack_guid)
+        
+        -- Use table for layout: Label 70% | Path 10% | ON 10% | X 10%
+        -- Using weights: 7, 1, 1, 1 to achieve 70%, 10%, 10%, 10% distribution
+        local table_flags = imgui.TableFlags.SizingStretchProp()
+        if ctx:begin_table("rack_header_" .. rack_guid, 4, table_flags) then
+            -- Column 0: Rack name (70% - weight 7)
+            ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 7)
+            -- Column 1: Path identifier (10% - weight 1)
+            ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 1)
+            -- Column 2: ON button (10% - weight 1)
+            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
+            -- Column 3: X button (10% - weight 1)
+            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
+            
+            ctx:table_next_row()
+            
+            -- Column 0: Rack name (70%)
+            ctx:table_set_column_index(0)
+            if is_renaming_rack then
+                -- Inline rename input for rack
+                if not state.rename_text or state.rename_text == "" then
+                    state.rename_text = state.display_names[rack_guid] or ""
+                end
+                
+                ctx:set_next_item_width(-1)
+                
+                -- Set keyboard focus on first frame
+                if not state._rename_focused then
+                    ctx:set_keyboard_focus_here()
+                    state._rename_focused = true
+                end
+                
+                -- Style the input to be visible
+                ctx:push_style_color(imgui.Col.FrameBg(), 0x4A4A4AFF)
+                ctx:push_style_color(imgui.Col.Text(), 0xFFFFFFFF)
+                local changed, new_text = ctx:input_text("##rack_rename" .. rack_guid, state.rename_text, imgui.InputTextFlags.EnterReturnsTrue())
+                ctx:pop_style_color(2)
+                
+                state.rename_text = new_text
+                if changed then
+                    if state.rename_text ~= "" then
+                        state.display_names[rack_guid] = state.rename_text
+                    else
+                        state.display_names[rack_guid] = nil
+                    end
+                    state_module.save_display_names()
+                    state.renaming_fx = nil
+                    state.rename_text = ""
+                    state._rename_focused = nil
+                elseif ctx:is_item_deactivated_after_edit() then
+                    if state.rename_text ~= "" then
+                        state.display_names[rack_guid] = state.rename_text
+                    else
+                        state.display_names[rack_guid] = nil
+                    end
+                    state_module.save_display_names()
+                    state.renaming_fx = nil
+                    state.rename_text = ""
+                    state._rename_focused = nil
+                elseif ctx:is_key_pressed(imgui.Key.Escape()) then
+                    state.renaming_fx = nil
+                    state.rename_text = ""
+                    state._rename_focused = nil
+                end
             else
-                state.expanded_racks[rack_guid] = true
+                local button_text = expand_icon .. " " .. rack_name:sub(1, 20)
+                if ctx:button(button_text .. "##" .. button_id, -1, 24) then
+                    -- Use expanded_racks for ALL racks (both top-level and nested)
+                    if is_expanded then
+                        state.expanded_racks[rack_guid] = nil
+                        state.expanded_nested_chains[rack_guid] = nil
+                    else
+                        state.expanded_racks[rack_guid] = true
+                    end
+                    state_module.save_expansion_state()
+                end
+                
+                -- Rack context menu (attached to the button above)
+                if ctx:begin_popup_context_item(button_id) then
+                    if ctx:menu_item("Rename") then
+                        state.renaming_fx = rack_guid
+                        state.rename_text = state.display_names[rack_guid] or ""
+                    end
+                    ctx:separator()
+                    if ctx:menu_item("Dissolve Container") then
+                        dissolve_container(rack)
+                    end
+                    ctx:separator()
+                    if ctx:menu_item("Delete") then
+                        rack:delete()
+                        refresh_fx_list()
+                    end
+                    ctx:end_popup()
+                end
             end
-            -- Save expansion state when it changes
-            state_module.save_expansion_state()
-        end
+            
+            -- Column 1: Path identifier (10%)
+            ctx:table_set_column_index(1)
+            local rack_id = fx_utils.get_rack_identifier(rack)
+            if rack_id then
+                ctx:text_colored(0x888888FF, "[" .. rack_id .. "]")
+            end
+            
+            -- Column 2: ON button (10%)
+            ctx:table_set_column_index(2)
+            local rack_enabled = rack:get_enabled()
+            ctx:push_style_color(imgui.Col.Button(), rack_enabled and 0x44AA44FF or 0xAA4444FF)
+            if ctx:button(rack_enabled and "ON" or "OF", -1, 24) then
+                rack:set_enabled(not rack_enabled)
+            end
+            ctx:pop_style_color()
 
-        ctx:same_line()
-        local rack_enabled = rack:get_enabled()
-        ctx:push_style_color(imgui.Col.Button(), rack_enabled and 0x44AA44FF or 0xAA4444FF)
-        if ctx:small_button(rack_enabled and "ON" or "OF") then
-            rack:set_enabled(not rack_enabled)
+            -- Column 3: X button (10%)
+            ctx:table_set_column_index(3)
+            ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
+            if ctx:button("×##rack_del", -1, 24) then
+                rack:delete()
+                refresh_fx_list()
+            end
+            ctx:pop_style_color()
+            
+            ctx:end_table()
         end
-        ctx:pop_style_color()
-
-        ctx:same_line()
-        ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
-        if ctx:small_button("×##rack_del") then
-            rack:delete()
-            refresh_fx_list()
-        end
-        ctx:pop_style_color()
 
         -- Get mixer for controls
         local mixer = get_rack_mixer(rack)
@@ -1253,11 +1369,16 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                     for j, chain in ipairs(chains) do
                         ctx:table_next_row()
                         ctx:push_id("chain_" .. j)
-                        local chain_guid = chain:get_guid()
+                        local ok_guid, chain_guid = pcall(function() return chain:get_guid() end)
+                        if not ok_guid or not chain_guid then
+                            -- Chain has been deleted, skip this row
+                            ctx:pop_id()
+                            goto continue_chain
+                        end
                         -- Check selection based on whether this is a nested rack
                         -- For nested racks, use the rack's GUID to look up the expanded chain
                         -- Check if this chain is selected (works for both top-level and nested)
-                        local rack_guid = rack:get_guid()
+                            local rack_guid = rack:get_guid()
                         local is_selected = (state.expanded_nested_chains[rack_guid] == chain_guid)
                         rack_ui.draw_chain_row(ctx, chain, j, rack, mixer, is_selected, is_nested, state, get_fx_display_name, {
                             on_chain_select = function(chain_guid, is_selected, is_nested_rack, rack_guid)
@@ -1271,6 +1392,10 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                             end,
                             on_add_device_to_chain = add_device_to_chain,
                             on_reorder_chain = reorder_chain_in_rack,
+                            on_rename_chain = function(chain_guid, custom_name)
+                                state.renaming_fx = chain_guid
+                                state.rename_text = custom_name or ""
+                            end,
                             on_delete_chain = function(chain, is_selected, is_nested_rack, rack_guid)
                                 -- Clear chain selection when deleting (works for both top-level and nested)
                                 if is_selected then
@@ -1280,6 +1405,7 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                             on_refresh = refresh_fx_list,
                         })
                         ctx:pop_id()
+                        ::continue_chain::
                     end
 
                     ctx:end_table()
@@ -1453,7 +1579,8 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
             if rack_data.is_expanded and selected_chain_guid then
                 local selected_chain = nil
                 for _, chain in ipairs(rack_data.chains) do
-                    if chain:get_guid() == selected_chain_guid then
+                    local ok_guid, chain_guid = pcall(function() return chain:get_guid() end)
+                    if ok_guid and chain_guid and chain_guid == selected_chain_guid then
                         selected_chain = chain
                         break
                     end
@@ -1676,9 +1803,10 @@ local function main()
     refresh_fx_list()
     scan_plugins()
     
-    -- Load expansion state for current track
+    -- Load expansion state and display names for current track
     if state.track then
         state_module.load_expansion_state()
+        state_module.load_display_names()
     end
 
     Window.run({
@@ -1688,9 +1816,10 @@ local function main()
         dockable = true,
         
         on_close = function(self)
-            -- Save expansion state when window closes
+            -- Save expansion state and display names when window closes
             if state.track then
                 state_module.save_expansion_state()
+                state_module.save_display_names()
             end
         end,
 
@@ -1764,20 +1893,23 @@ local function main()
                 -- (save_expansion_state will handle invalid tracks safely)
                 if state_track_valid then
                     state_module.save_expansion_state()
+                    state_module.save_display_names()
                 end
                 
                 state.track, state.track_name = track, name
                 state.expanded_path = {}
                 state.expanded_racks = {}
                 state.expanded_nested_chains = {}
+                state.display_names = {}  -- Clear display names for new track
                 state.selected_fx = nil
                 clear_multi_select()
                 refresh_fx_list()
                 
                 -- Load expansion state for new track
-                if state.track then
-                    state_module.load_expansion_state()
-                end
+            if state.track then
+                state_module.load_expansion_state()
+                state_module.load_display_names()
+            end
             else
                 -- Check for external FX changes (e.g. user deleted FX in REAPER)
                 check_fx_changes()
@@ -1840,6 +1972,22 @@ local function main()
             -- Pop default font if we pushed it
             if default_font then
                 ctx:pop_font()
+            end
+            
+            -- Periodically save state (every 60 frames ~= 1 second at 60fps)
+            -- Only save if there are actual display names to avoid clearing saved data
+            if state.track and (not state.last_save_frame or (ctx.frame_count - state.last_save_frame) > 60) then
+                state_module.save_expansion_state()
+                -- Only save display names if there are any (don't clear saved data)
+                local has_display_names = false
+                for _ in pairs(state.display_names) do
+                    has_display_names = true
+                    break
+                end
+                if has_display_names then
+                    state_module.save_display_names()
+                end
+                state.last_save_frame = ctx.frame_count
             end
         end,
     })
