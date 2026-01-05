@@ -1028,8 +1028,8 @@ function M.draw(ctx, fx, opts)
                             ctx:text(mix_text)
                             ctx:pop_style_color()
 
-                            -- Smaller knob (40px instead of 60px)
-                            local mix_knob_size = 40
+                            -- Smaller knob (30px)
+                            local mix_knob_size = 30
                             r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - mix_knob_size) / 2)
                             local mix_changed, new_mix = draw_knob(ctx, "##mix_knob", mix_val, mix_knob_size)
                             if mix_changed then
@@ -1053,14 +1053,25 @@ function M.draw(ctx, fx, opts)
                         -- Delta column
                         ctx:table_set_column_index(1)
                         if has_delta then
-                            -- "Delta" label (centered)
+                            -- "Delta" label (centered horizontally)
                             local delta_text = "Delta"
                             local delta_text_w = r.ImGui_CalcTextSize(ctx.ctx, delta_text)
+                            local col_start_x = r.ImGui_GetCursorPosX(ctx.ctx)
                             local col_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
-                            r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - delta_text_w) / 2)
+                            r.ImGui_SetCursorPosX(ctx.ctx, col_start_x + (col_w - delta_text_w) / 2)
                             ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAACCFF)
                             ctx:text(delta_text)
                             ctx:pop_style_color()
+                            
+                            -- Center button vertically with mix knob
+                            -- Mix column: label (~20px) + spacing (~5px) + knob (30px) + spacing (~5px) + value (~20px) = ~80px total
+                            -- Knob center is at: label (20px) + spacing (5px) + knob_radius (15px) = ~40px from top
+                            -- Delta column: label (~20px) + button (18px) = ~38px minimum
+                            -- To center button with knob: button center should be at ~40px
+                            -- Button center is 9px from button top, so button top should be at 40 - 9 = 31px
+                            -- After label (~20px), we need 31 - 20 = 11px spacing
+                            ctx:spacing()  -- Small spacing after label
+                            r.ImGui_Dummy(ctx.ctx, 0, 6)  -- Additional spacing to align with knob center
 
                             local delta_on = delta_val > 0.5
                             if delta_on then
@@ -1069,10 +1080,12 @@ function M.draw(ctx, fx, opts)
                                 ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
                             end
 
-                            -- Delta button (centered)
+                            -- Delta button (centered horizontally)
                             local delta_btn_w = 36
-                            r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - delta_btn_w) / 2)
-                            if ctx:button(delta_on and "∆" or "—", delta_btn_w, 18) then
+                            local delta_btn_h = 18
+                            local col_w_btn = r.ImGui_GetContentRegionAvail(ctx.ctx)
+                            r.ImGui_SetCursorPosX(ctx.ctx, col_start_x + (col_w_btn - delta_btn_w) / 2)
+                            if ctx:button(delta_on and "∆" or "—", delta_btn_w, delta_btn_h) then
                                 pcall(function() fx:set_param_normalized(delta_idx, delta_on and 0 or 1) end)
                                 interacted = true
                             end
