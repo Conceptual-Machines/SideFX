@@ -454,20 +454,99 @@ local function add_rack_to_track(position)
 end
 
 local function add_chain_to_rack(rack, plugin)
+    -- Get rack info before adding chain (while reference is still valid)
+    local rack_guid = rack:get_guid()
+    local rack_parent = rack:get_parent_container()
+    local is_nested = (rack_parent ~= nil)
+    
     local chain = rack_module.add_chain_to_rack(rack, plugin)
-    if chain then refresh_fx_list() end
+    if chain then
+        -- Get chain GUID (stable identifier)
+        local chain_guid = chain:get_guid()
+        if chain_guid then
+            -- Force the chain to be expanded/selected so user can see it
+            if is_nested and rack_guid then
+                -- Nested rack: ensure rack is expanded and chain is selected
+                state.expanded_racks[rack_guid] = true
+                state.expanded_nested_chains[rack_guid] = chain_guid
+            elseif rack_guid then
+                -- Top-level rack: ensure rack is expanded and chain is selected
+                state.expanded_path[1] = rack_guid
+                state.expanded_path[2] = chain_guid
+            end
+        end
+        refresh_fx_list()
+    end
     return chain
 end
 
 local function add_nested_rack_to_rack(parent_rack)
+    -- Get parent rack info before adding nested rack
+    local parent_rack_guid = parent_rack:get_guid()
+    local parent_rack_parent = parent_rack:get_parent_container()
+    local is_parent_nested = (parent_rack_parent ~= nil)
+    
     local nested_rack = rack_module.add_nested_rack_to_rack(parent_rack)
-    if nested_rack then refresh_fx_list() end
+    if nested_rack then
+        -- Get nested rack GUID (stable identifier)
+        local nested_rack_guid = nested_rack:get_guid()
+        if nested_rack_guid then
+            -- Find the chain that contains this nested rack
+            local chain_container = nested_rack:get_parent_container()
+            local chain_guid = chain_container and chain_container:get_guid()
+            
+            -- Force the nested rack to be expanded so user can see it
+            state.expanded_racks[nested_rack_guid] = true
+            
+            -- Also select the chain that contains the nested rack
+            if chain_guid then
+                if is_parent_nested and parent_rack_guid then
+                    -- Parent is nested: use expanded_nested_chains
+                    state.expanded_racks[parent_rack_guid] = true
+                    state.expanded_nested_chains[parent_rack_guid] = chain_guid
+                elseif parent_rack_guid then
+                    -- Top-level parent rack: ensure it's expanded and chain is selected
+                    state.expanded_path[1] = parent_rack_guid
+                    state.expanded_path[2] = chain_guid
+                end
+            end
+        end
+        refresh_fx_list()
+    end
     return nested_rack
 end
 
 local function add_device_to_chain(chain, plugin)
+    -- Get chain GUID before adding device (GUIDs are stable)
+    local chain_guid = chain:get_guid()
+    if not chain_guid then
+        return nil
+    end
+    
+    -- Determine expansion state BEFORE adding device (while chain reference is still valid)
+    local parent_rack = chain:get_parent_container()
+    local is_nested = false
+    local rack_guid = nil
+    if parent_rack then
+        rack_guid = parent_rack:get_guid()
+        local rack_parent = parent_rack:get_parent_container()
+        is_nested = (rack_parent ~= nil)
+    end
+    
     local device = rack_module.add_device_to_chain(chain, plugin)
-    if device then refresh_fx_list() end
+    if device then
+        -- Force the chain to be expanded/selected so user can see the device that was just added
+        if is_nested and rack_guid then
+            -- Nested rack: ensure rack is expanded and chain is selected
+            state.expanded_racks[rack_guid] = true
+            state.expanded_nested_chains[rack_guid] = chain_guid
+        elseif rack_guid then
+            -- Top-level rack: ensure rack is expanded and chain is selected
+            state.expanded_path[1] = rack_guid
+            state.expanded_path[2] = chain_guid
+        end
+        refresh_fx_list()
+    end
     return device
 end
 
@@ -1388,6 +1467,17 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, i
     end
     ctx:pop_style_color()
 
+    -- Make the button a drag-drop target (must be called right after the button)
+    if ctx:begin_drag_drop_target() then
+        -- Handle plugin drop onto chain
+        local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+        if accepted_plugin and plugin_name then
+            local plugin = { full_name = plugin_name, name = plugin_name }
+            add_device_to_chain(chain, plugin)
+        end
+        ctx:end_drag_drop_target()
+    end
+
     -- Drag source for chain reordering
     if ctx:begin_drag_drop_source() then
         ctx:set_drag_drop_payload("CHAIN_REORDER", chain_guid)
@@ -1395,18 +1485,12 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, i
         ctx:end_drag_drop_source()
     end
 
-    -- Drop target for chain reordering AND plugin adding
+    -- Drop target for chain reordering (on the rest of the row)
     if ctx:begin_drag_drop_target() then
         -- Handle chain reorder
         local accepted_chain, dragged_guid = ctx:accept_drag_drop_payload("CHAIN_REORDER")
         if accepted_chain and dragged_guid then
             reorder_chain_in_rack(rack, dragged_guid, chain_guid)
-        end
-        -- Handle plugin drop onto chain
-        local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
-        if accepted_plugin and plugin_name then
-            local plugin = { full_name = plugin_name, name = plugin_name }
-            add_device_to_chain(chain, plugin)
         end
         ctx:end_drag_drop_target()
     end
@@ -1558,6 +1642,7 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                 if ctx:begin_drag_drop_target() then
                     local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
                     if accepted and plugin_name then
+                        r.ShowConsoleMsg(string.format("SideFX: Empty chain drag-drop accepted: plugin=%s\n", plugin_name))
                         local plugin = { full_name = plugin_name, name = plugin_name }
                         add_device_to_chain(selected_chain, plugin)
                     end
