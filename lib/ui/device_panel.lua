@@ -5,6 +5,7 @@
 -- @license MIT
 
 local r = reaper
+local widgets = require('lib.ui.widgets')
 
 local M = {}
 
@@ -1106,69 +1107,177 @@ function M.draw(ctx, fx, opts)
                     local ok_g, gain_val = pcall(function() return utility:get_param_normalized(0) end)
                     local ok_p, pan_val = pcall(function() return utility:get_param_normalized(1) end)
 
-                    if ok_g then
-                        gain_val = gain_val or 0.5
-                        local gain_db = (gain_val - 0.5) * 48
-
-                        ctx:spacing()
-
-                        -- Center "Gain" label
-                        local gain_text = "Gain"
-                        local gain_text_w = r.ImGui_CalcTextSize(ctx.ctx, gain_text)
-                        center_item(gain_text_w)
-                        ctx:push_style_color(r.ImGui_Col_Text(), 0xAACC88FF)
-                        ctx:text(gain_text)
-                        ctx:pop_style_color()
-
-                        -- Center the fader
-                        center_item(cfg.fader_width)
-                        local gain_format = gain_db >= 0 and "+%.0f" or "%.0f"
-                        local gain_changed, new_gain_db = draw_fader(ctx, "##gain_fader", gain_db, -24, 24, cfg.fader_width, cfg.fader_height, gain_format)
-                        if gain_changed then
-                            local new_norm = (new_gain_db + 24) / 48
-                            pcall(function() utility:set_param_normalized(0, new_norm) end)
-                            interacted = true
-                        end
-                        if r.ImGui_IsItemHovered(ctx.ctx) then
-                            ctx:set_tooltip(string.format("Gain: %+.1f dB", gain_db))
-                        end
-                    end
-
+                    -- Pan slider first (above fader)
                     if ok_p then
                         pan_val = pan_val or 0.5
                         local pan_pct = (pan_val - 0.5) * 200
 
                         ctx:spacing()
 
-                        -- Center "Pan" label
-                        local pan_text = "Pan"
-                        local pan_text_w = r.ImGui_CalcTextSize(ctx.ctx, pan_text)
-                        center_item(pan_text_w)
-                        ctx:push_style_color(r.ImGui_Col_Text(), 0xCCAA88FF)
-                        ctx:text(pan_text)
-                        ctx:pop_style_color()
-
-                        local pan_str
-                        if pan_pct < -1 then
-                            pan_str = string.format("%.0fL", -pan_pct)
-                        elseif pan_pct > 1 then
-                            pan_str = string.format("%.0fR", pan_pct)
-                        else
-                            pan_str = "C"
-                        end
-
-                        -- Center the pan slider (narrower)
-                        center_item(btn_w)
-                        ctx:set_next_item_width(btn_w)
-                        local pan_changed, new_pan_pct = ctx:slider_double("##pan", pan_pct, -100, 100, pan_str)
+                        -- Use collapsed rack pan slider (with label underneath)
+                        local avail_w, _ = ctx:get_content_region_avail()
+                        local pan_w = math.min(avail_w - 4, 80)
+                        local pan_offset = math.max(0, (avail_w - pan_w) / 2)
+                        ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + pan_offset)
+                        local pan_changed, new_pan = widgets.draw_pan_slider(ctx, "##utility_pan", pan_pct, pan_w)
                         if pan_changed then
-                            local new_norm = (new_pan_pct / 200) + 0.5
+                            local new_norm = (new_pan + 100) / 200
                             pcall(function() utility:set_param_normalized(1, new_norm) end)
                             interacted = true
                         end
-                        if r.ImGui_IsItemHovered(ctx.ctx) then
-                            ctx:set_tooltip("Pan: " .. pan_str)
+                    end
+
+                    if ok_g then
+                        gain_val = gain_val or 0.5
+                        local gain_norm = gain_val
+                        local gain_db = (gain_val - 0.5) * 48
+
+                        ctx:spacing()
+
+                        -- Fader with meter and scale (same as collapsed rack)
+                        local fader_w = 32
+                        local meter_w = 12
+                        local scale_w = 20
+                        
+                        -- Calculate fader height (accounting for pan slider above)
+                        local _, remaining_h = ctx:get_content_region_avail()
+                        local fader_h = remaining_h - 22  -- Leave room for dB label
+                        fader_h = math.max(50, fader_h)  -- Minimum 50px, but can extend
+                        
+                        local avail_w, _ = ctx:get_content_region_avail()
+                        local total_w = scale_w + fader_w + meter_w + 4
+                        local offset_x = math.max(0, (avail_w - total_w) / 2)
+                        
+                        ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + offset_x)
+                        
+                        local screen_x, screen_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+                        local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                        
+                        local scale_x = screen_x
+                        local fader_x = screen_x + scale_w + 2
+                        local meter_x = fader_x + fader_w + 2
+                        
+                        -- dB scale
+                        local db_marks = {24, 12, 0, -12, -24}
+                        for _, db in ipairs(db_marks) do
+                            local mark_norm = (db + 24) / 48
+                            local mark_y = screen_y + fader_h - (fader_h * mark_norm)
+                            r.ImGui_DrawList_AddLine(draw_list, scale_x + scale_w - 6, mark_y, scale_x + scale_w, mark_y, 0x666666FF, 1)
+                            if db == 0 or db == -12 or db == 12 or db == 24 then
+                                local label = db == 0 and "0" or tostring(db)
+                                r.ImGui_DrawList_AddText(draw_list, scale_x, mark_y - 5, 0x888888FF, label)
+                            end
                         end
+                        
+                        -- Fader background
+                        r.ImGui_DrawList_AddRectFilled(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x1A1A1AFF, 3)
+                        -- Fader fill
+                        local fill_h = fader_h * gain_norm
+                        if fill_h > 2 then
+                            local fill_top = screen_y + fader_h - fill_h
+                            r.ImGui_DrawList_AddRectFilled(draw_list, fader_x + 2, fill_top, fader_x + fader_w - 2, screen_y + fader_h - 2, 0x5588AACC, 2)
+                        end
+                        -- Fader border
+                        r.ImGui_DrawList_AddRect(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x555555FF, 3)
+                        -- 0dB line (at center since range is -24 to +24)
+                        local zero_db_norm = 24 / 48
+                        local zero_y = screen_y + fader_h - (fader_h * zero_db_norm)
+                        r.ImGui_DrawList_AddLine(draw_list, fader_x, zero_y, fader_x + fader_w, zero_y, 0xFFFFFF44, 1)
+                        
+                        -- Stereo meters
+                        local meter_l_x = meter_x
+                        local meter_r_x = meter_x + meter_w / 2 + 1
+                        local half_meter_w = meter_w / 2 - 1
+                        r.ImGui_DrawList_AddRectFilled(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
+                        r.ImGui_DrawList_AddRectFilled(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
+                        
+                        -- Get track for meters (if available)
+                        local state_module = require('lib.state')
+                        local sidefx_state = state_module.state
+                        if sidefx_state.track and sidefx_state.track.pointer then
+                            local peak_l = r.Track_GetPeakInfo(sidefx_state.track.pointer, 0)
+                            local peak_r = r.Track_GetPeakInfo(sidefx_state.track.pointer, 1)
+                            local function draw_meter_bar(x, w, peak)
+                                if peak > 0 then
+                                    local peak_db = 20 * math.log(peak, 10)
+                                    peak_db = math.max(-60, math.min(24, peak_db))
+                                    local peak_norm = (peak_db + 60) / 84
+                                    local meter_fill_h = fader_h * peak_norm
+                                    if meter_fill_h > 1 then
+                                        local meter_top = screen_y + fader_h - meter_fill_h
+                                        local meter_color
+                                        if peak_db > 0 then meter_color = 0xFF4444FF
+                                        elseif peak_db > -6 then meter_color = 0xFFAA44FF
+                                        elseif peak_db > -18 then meter_color = 0x44FF44FF
+                                        else meter_color = 0x44AA44FF end
+                                        r.ImGui_DrawList_AddRectFilled(draw_list, x, meter_top, x + w, screen_y + fader_h - 1, meter_color, 0)
+                                    end
+                                end
+                            end
+                            draw_meter_bar(meter_l_x + 1, half_meter_w - 1, peak_l)
+                            draw_meter_bar(meter_r_x + 1, half_meter_w - 1, peak_r)
+                        end
+                        
+                        r.ImGui_DrawList_AddRect(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
+                        r.ImGui_DrawList_AddRect(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
+                        
+                        -- Invisible slider for fader interaction
+                        r.ImGui_SetCursorScreenPos(ctx.ctx, fader_x, screen_y)
+                        local imgui = require('imgui')
+                        ctx:push_style_color(imgui.Col.FrameBg(), 0x00000000)
+                        ctx:push_style_color(imgui.Col.FrameBgHovered(), 0x00000000)
+                        ctx:push_style_color(imgui.Col.FrameBgActive(), 0x00000000)
+                        ctx:push_style_color(imgui.Col.SliderGrab(), 0xAAAAAAFF)
+                        ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
+                        local gain_changed, new_gain_db = ctx:v_slider_double("##gain_fader_v", fader_w, fader_h, gain_db, -24, 24, "")
+                        if gain_changed then
+                            local new_norm = (new_gain_db + 24) / 48
+                            pcall(function() utility:set_param_normalized(0, new_norm) end)
+                            interacted = true
+                        end
+                        if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
+                            pcall(function() utility:set_param_normalized(0, 0.5) end)  -- Reset to 0dB
+                            interacted = true
+                        end
+                        ctx:pop_style_color(5)
+                        
+                        -- dB label below fader (with double-click editing)
+                        local label_h = 16
+                        local label_y = screen_y + fader_h + 2
+                        local label_x = fader_x
+                        r.ImGui_DrawList_AddRectFilled(draw_list, label_x, label_y, label_x + fader_w, label_y + label_h, 0x222222FF, 2)
+                        local db_label = gain_db >= 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db)
+                        local text_w = r.ImGui_CalcTextSize(ctx.ctx, db_label)
+                        r.ImGui_DrawList_AddText(draw_list, label_x + (fader_w - text_w) / 2, label_y + 1, 0xCCCCCCFF, db_label)
+                        
+                        -- Invisible button for dB label (for double-click editing)
+                        r.ImGui_SetCursorScreenPos(ctx.ctx, label_x, label_y)
+                        ctx:invisible_button("##gain_db_label", fader_w, label_h)
+                        
+                        -- Double-click on dB label to edit value
+                        if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
+                            ctx:open_popup("##gain_edit_popup")
+                        end
+                        
+                        -- Edit popup for gain
+                        if ctx:begin_popup("##gain_edit_popup") then
+                            local imgui = require('imgui')
+                            ctx:set_next_item_width(60)
+                            ctx:set_keyboard_focus_here()
+                            local input_changed, input_val = ctx:input_double("##gain_input", gain_db, 0, 0, "%.1f")
+                            if input_changed then
+                                local new_norm = (math.max(-24, math.min(24, input_val)) + 24) / 48
+                                pcall(function() utility:set_param_normalized(0, new_norm) end)
+                                interacted = true
+                            end
+                            if ctx:is_key_pressed(imgui.Key.Enter()) or ctx:is_key_pressed(imgui.Key.Escape()) then
+                                ctx:close_current_popup()
+                            end
+                            ctx:end_popup()
+                        end
+                        
+                        -- Advance cursor past fader
+                        r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, label_y + label_h)
                     end
 
                     -- Phase Invert controls
