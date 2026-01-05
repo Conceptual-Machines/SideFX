@@ -474,6 +474,7 @@ local function add_chain_to_rack(rack, plugin)
                 state.expanded_path[1] = rack_guid
                 state.expanded_path[2] = chain_guid
             end
+            state_module.save_expansion_state()
         end
         refresh_fx_list()
     end
@@ -510,6 +511,7 @@ local function add_nested_rack_to_rack(parent_rack)
                     state.expanded_path[2] = chain_guid
                 end
             end
+            state_module.save_expansion_state()
         end
         refresh_fx_list()
     end
@@ -545,6 +547,7 @@ local function add_device_to_chain(chain, plugin)
             state.expanded_path[1] = rack_guid
             state.expanded_path[2] = chain_guid
         end
+        state_module.save_expansion_state()
         refresh_fx_list()
     end
     return device
@@ -1464,6 +1467,8 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, i
                 state.expanded_path[2] = chain_guid
             end
         end
+        -- Save expansion state when it changes
+        state_module.save_expansion_state()
     end
     ctx:pop_style_color()
 
@@ -1833,6 +1838,8 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                 -- Ensure we don't accidentally clear nested rack state
                 -- (expanded_racks stays untouched)
             end
+            -- Save expansion state when it changes
+            state_module.save_expansion_state()
         end
 
         ctx:same_line()
@@ -2535,12 +2542,24 @@ local function main()
     state.track, state.track_name = get_selected_track()
     refresh_fx_list()
     scan_plugins()
+    
+    -- Load expansion state for current track
+    if state.track then
+        state_module.load_expansion_state()
+    end
 
     Window.run({
         title = "SideFX",
         width = 1400,
         height = 800,
         dockable = true,
+        
+        on_close = function(self)
+            -- Save expansion state when window closes
+            if state.track then
+                state_module.save_expansion_state()
+            end
+        end,
 
         on_draw = function(self, ctx)
             reaper_theme:apply(ctx)
@@ -2586,11 +2605,23 @@ local function main()
                 or (track and not state.track)
                 or (not track and state.track)
             if track_changed then
+                -- Save expansion state for previous track before switching
+                if state.track then
+                    state_module.save_expansion_state()
+                end
+                
                 state.track, state.track_name = track, name
                 state.expanded_path = {}
+                state.expanded_racks = {}
+                state.expanded_nested_chains = {}
                 state.selected_fx = nil
                 clear_multi_select()
                 refresh_fx_list()
+                
+                -- Load expansion state for new track
+                if state.track then
+                    state_module.load_expansion_state()
+                end
             else
                 -- Check for external FX changes (e.g. user deleted FX in REAPER)
                 check_fx_changes()
