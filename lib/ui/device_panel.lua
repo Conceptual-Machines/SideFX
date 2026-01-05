@@ -600,15 +600,17 @@ function M.draw(ctx, fx, opts)
                 r.ImGui_EndTable(ctx.ctx)
             end
         else
-            -- Expanded header: drag | name (70%) | path (30%) | close | collapse
+            -- Expanded header: drag | name (50%) | path (15%) | ui | on | x | collapse (buttons fixed width)
             local imgui = require('imgui')
             local table_flags = imgui.TableFlags.SizingStretchProp()
-            if ctx:begin_table("header_" .. guid, 5, table_flags) then
+            if ctx:begin_table("header_" .. guid, 7, table_flags) then
                 ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
-                ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 7)  -- 70%
-                ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 3)  -- 30%
-                ctx:table_setup_column("close", imgui.TableColumnFlags.WidthFixed(), 20)
-                ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 20)
+                ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 50)  -- 50%
+                ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 15)  -- 15%
+                ctx:table_setup_column("ui", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
+                ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
+                ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
+                ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
 
                 ctx:table_next_row()
 
@@ -742,7 +744,7 @@ function M.draw(ctx, fx, opts)
                 end
             end
 
-            -- Path identifier (30%)
+            -- Path identifier (15%)
             ctx:table_set_column_index(2)
             if device_id then
                 ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
@@ -750,11 +752,27 @@ function M.draw(ctx, fx, opts)
                 ctx:pop_style_color()
             end
 
-            -- Close button
+            -- UI button
             ctx:table_set_column_index(3)
-            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x663333FF)
-            if ctx:small_button("×") then
+            if draw_ui_icon(ctx, "##ui_header_" .. state_guid, 24, 20) then
+                fx:show(3)
+                interacted = true
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Open native FX window")
+            end
+
+            -- ON/OFF toggle
+            ctx:table_set_column_index(4)
+            if draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, 24, 20, colors.bypass_on, colors.bypass_off) then
+                fx:set_enabled(not enabled)
+                interacted = true
+            end
+
+            -- Close button
+            ctx:table_set_column_index(5)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x664444FF)
+            if ctx:button("×", 24, 20) then
                 if opts.on_delete then
                     opts.on_delete(fx)
                 else
@@ -762,22 +780,22 @@ function M.draw(ctx, fx, opts)
                 end
                 interacted = true
             end
-            ctx:pop_style_color(2)
+            ctx:pop_style_color()
 
             -- Sidebar collapse/expand button (rightmost) - only show when panel is expanded
-            ctx:table_set_column_index(4)
+            ctx:table_set_column_index(6)
             if not is_panel_collapsed then
                 ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
                 ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
                 if is_sidebar_collapsed then
-                    if ctx:small_button("▶") then
+                    if ctx:button("▶##sidebar_" .. state_guid, 24, 20) then
                         sidebar_collapsed[state_guid] = false
                     end
                     if r.ImGui_IsItemHovered(ctx.ctx) then
                         ctx:set_tooltip("Expand sidebar")
                     end
                 else
-                    if ctx:small_button("◀") then
+                    if ctx:button("◀##sidebar_" .. state_guid, 24, 20) then
                         sidebar_collapsed[state_guid] = true
                     end
                     if r.ImGui_IsItemHovered(ctx.ctx) then
@@ -962,57 +980,67 @@ function M.draw(ctx, fx, opts)
             else
                 -- Expanded sidebar
                 local ctrl_w = cfg.sidebar_width - cfg.padding * 2  -- Full width controls
-                local btn_w = 70  -- Narrower buttons
+                local btn_w = 70  -- Narrower buttons (for pan slider)
 
-                -- UI button (centered)
-                center_item(btn_w)
-                -- Draw custom UI icon (border is drawn inside the function)
-                if draw_ui_icon(ctx, "##ui_sidebar_" .. state_guid, btn_w, btn_h) then
-                    fx:show(3)
-                    interacted = true
-                end
-                if ctx:is_item_hovered() then
-                    ctx:set_tooltip("Open native FX window")
-                end
-
-                -- ON/OFF toggle (centered)
-                center_item(btn_w)
-                -- Draw custom circle indicator with colored background
-                if draw_on_off_circle(ctx, "##on_off_sidebar_" .. state_guid, enabled, btn_w, btn_h, colors.bypass_on, colors.bypass_off) then
-                    fx:set_enabled(not enabled)
-                    interacted = true
-                end
-
-                ctx:spacing()
-                ctx:separator()
-
-                -- Container Mix control (parallel dry/wet blend) - only if we have a container
+                -- Mix and Delta on the same line using a table with bottom border
                 local container = opts.container
+                local has_mix = false
+                local mix_val, mix_idx
                 if container then
-                    local ok_mix, mix_idx = pcall(function() return container:get_param_from_ident(":wet") end)
+                    local ok_mix
+                    ok_mix, mix_idx = pcall(function() return container:get_param_from_ident(":wet") end)
                     if ok_mix and mix_idx and mix_idx >= 0 then
-                        local ok_mv, mix_val = pcall(function() return container:get_param_normalized(mix_idx) end)
-                        if ok_mv and mix_val then
-                            -- Center "Mix" label
+                        local ok_mv
+                        ok_mv, mix_val = pcall(function() return container:get_param_normalized(mix_idx) end)
+                        has_mix = ok_mv and mix_val
+                    end
+                end
+
+                local has_delta = false
+                local delta_val, delta_idx
+                local ok_delta
+                ok_delta, delta_idx = pcall(function() return fx:get_param_from_ident(":delta") end)
+                if ok_delta and delta_idx and delta_idx >= 0 then
+                    local ok_dv
+                    ok_dv, delta_val = pcall(function() return fx:get_param_normalized(delta_idx) end)
+                    has_delta = ok_dv and delta_val
+                end
+
+                -- Only show table if we have mix or delta
+                if has_mix or has_delta then
+                    local imgui = require('imgui')
+                    local table_flags = imgui.TableFlags.BordersH()
+                    if ctx:begin_table("mix_delta_" .. state_guid, 2, table_flags) then
+                        ctx:table_setup_column("mix", imgui.TableColumnFlags.WidthStretch())
+                        ctx:table_setup_column("delta", imgui.TableColumnFlags.WidthStretch())
+                        
+                        ctx:table_next_row()
+                        
+                        -- Mix column
+                        ctx:table_set_column_index(0)
+                        if has_mix then
+                            -- "Mix" label (centered)
                             local mix_text = "Mix"
                             local mix_text_w = r.ImGui_CalcTextSize(ctx.ctx, mix_text)
-                            center_item(mix_text_w)
+                            local col_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
+                            r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - mix_text_w) / 2)
                             ctx:push_style_color(r.ImGui_Col_Text(), 0xCC88FFFF)  -- Purple for container
                             ctx:text(mix_text)
                             ctx:pop_style_color()
 
-                            -- Center the knob
-                            center_item(cfg.knob_size)
-                            local mix_changed, new_mix = draw_knob(ctx, "##mix_knob", mix_val, cfg.knob_size)
+                            -- Smaller knob (40px instead of 60px)
+                            local mix_knob_size = 40
+                            r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - mix_knob_size) / 2)
+                            local mix_changed, new_mix = draw_knob(ctx, "##mix_knob", mix_val, mix_knob_size)
                             if mix_changed then
                                 pcall(function() container:set_param_normalized(mix_idx, new_mix) end)
                                 interacted = true
                             end
 
-                            -- Center value below knob
+                            -- Value below knob (centered)
                             local mix_val_text = string.format("%.0f%%", mix_val * 100)
                             local mix_val_text_w = r.ImGui_CalcTextSize(ctx.ctx, mix_val_text)
-                            center_item(mix_val_text_w)
+                            r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - mix_val_text_w) / 2)
                             ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAAAAFF)
                             ctx:text(mix_val_text)
                             ctx:pop_style_color()
@@ -1020,49 +1048,42 @@ function M.draw(ctx, fx, opts)
                             if r.ImGui_IsItemHovered(ctx.ctx) then
                                 ctx:set_tooltip(string.format("Device Mix: %.0f%% (parallel blend)", mix_val * 100))
                             end
-
-                            ctx:spacing()
                         end
-                    end
-                end
+                        
+                        -- Delta column
+                        ctx:table_set_column_index(1)
+                        if has_delta then
+                            -- "Delta" label (centered)
+                            local delta_text = "Delta"
+                            local delta_text_w = r.ImGui_CalcTextSize(ctx.ctx, delta_text)
+                            local col_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
+                            r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - delta_text_w) / 2)
+                            ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAACCFF)
+                            ctx:text(delta_text)
+                            ctx:pop_style_color()
 
-                -- Internal FX Wet/Dry is hidden (set to 100% internally)
-                -- Container Mix control above serves as the main parallel blend
+                            local delta_on = delta_val > 0.5
+                            if delta_on then
+                                ctx:push_style_color(r.ImGui_Col_Button(), 0x6666CCFF)
+                            else
+                                ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
+                            end
 
-                -- Delta Solo control
-                local ok_delta, delta_idx = pcall(function() return fx:get_param_from_ident(":delta") end)
-                if ok_delta and delta_idx and delta_idx >= 0 then
-                    local ok_dv, delta_val = pcall(function() return fx:get_param_normalized(delta_idx) end)
-                    if ok_dv and delta_val then
-                        ctx:spacing()
+                            -- Delta button (centered)
+                            local delta_btn_w = 36
+                            r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - delta_btn_w) / 2)
+                            if ctx:button(delta_on and "∆" or "—", delta_btn_w, 18) then
+                                pcall(function() fx:set_param_normalized(delta_idx, delta_on and 0 or 1) end)
+                                interacted = true
+                            end
+                            ctx:pop_style_color()
 
-                        -- Center "Delta" label
-                        local delta_text = "Delta"
-                        local delta_text_w = r.ImGui_CalcTextSize(ctx.ctx, delta_text)
-                        center_item(delta_text_w)
-                        ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAACCFF)
-                        ctx:text(delta_text)
-                        ctx:pop_style_color()
-
-                        local delta_on = delta_val > 0.5
-                        if delta_on then
-                            ctx:push_style_color(r.ImGui_Col_Button(), 0x6666CCFF)
-                        else
-                            ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
+                            if r.ImGui_IsItemHovered(ctx.ctx) then
+                                ctx:set_tooltip(delta_on and "Delta Solo: ON (wet - dry)" or "Delta Solo: OFF")
+                            end
                         end
-
-                        -- Center delta button
-                        local delta_btn_w = 36
-                        center_item(delta_btn_w)
-                        if ctx:button(delta_on and "∆" or "—", delta_btn_w, 18) then
-                            pcall(function() fx:set_param_normalized(delta_idx, delta_on and 0 or 1) end)
-                            interacted = true
-                        end
-                        ctx:pop_style_color()
-
-                        if r.ImGui_IsItemHovered(ctx.ctx) then
-                            ctx:set_tooltip(delta_on and "Delta Solo: ON (wet - dry)" or "Delta Solo: OFF")
-                        end
+                        
+                        ctx:end_table()
                     end
                 end
 
