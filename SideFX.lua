@@ -757,15 +757,22 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
         -- Use table layout so header width matches content width
         local table_flags = imgui.TableFlags.SizingStretchSame()
         if ctx:begin_table("chain_table_" .. selected_chain_guid, 1, table_flags) then
-            -- Row 1: Header
-            ctx:table_next_row()
+            -- Row 1: Header (smaller)
+            ctx:table_next_row(0, 20)  -- Smaller row height (20px instead of default)
             ctx:table_set_column_index(0)
+            -- Use smaller font for header
+            if default_font then
+                ctx:push_font(default_font, 12)  -- 12px instead of 14px
+            end
             ctx:text_colored(0xAAAAAAFF, "Chain:")
             ctx:same_line()
             ctx:text(chain_name)
             if chain_id then
                 ctx:same_line()
                 ctx:text_colored(0x888888FF, " [" .. chain_id .. "]")
+            end
+            if default_font then
+                ctx:pop_font()
             end
             ctx:separator()
 
@@ -1022,7 +1029,7 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                 local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
                 if ok_gain and gain_norm then
                     local gain_db = -24 + gain_norm * 36
-                    local gain_format = gain_db >= 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db)
+                    local gain_format = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db))
                     
                     local avail_w, _ = ctx:get_content_region_avail()
                     local total_w = scale_w + fader_w + meter_w + 4
@@ -1164,7 +1171,7 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                     local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
                     if ok_gain and gain_norm then
                         local gain_db = -24 + gain_norm * 36
-                        local gain_format = gain_db >= 0 and string.format("+%.1f", gain_db) or string.format("%.1f", gain_db)
+                        local gain_format = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.1f", gain_db) or string.format("%.1f", gain_db))
                         ctx:set_next_item_width(-1)
                         local gain_changed, new_gain_db = ctx:slider_double("##master_gain", gain_db, -24, 12, gain_format)
                         if gain_changed then

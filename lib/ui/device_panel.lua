@@ -1246,7 +1246,7 @@ function M.draw(ctx, fx, opts)
                         local label_y = screen_y + fader_h + 2
                         local label_x = fader_x
                         r.ImGui_DrawList_AddRectFilled(draw_list, label_x, label_y, label_x + fader_w, label_y + label_h, 0x222222FF, 2)
-                        local db_label = gain_db >= 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db)
+                        local db_label = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db))
                         local text_w = r.ImGui_CalcTextSize(ctx.ctx, db_label)
                         r.ImGui_DrawList_AddText(draw_list, label_x + (fader_w - text_w) / 2, label_y + 1, 0xCCCCCCFF, db_label)
                         

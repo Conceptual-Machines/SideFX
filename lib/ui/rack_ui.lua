@@ -416,7 +416,7 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
         if ok_vol and vol_norm then
             -- Fixed: Range is -60 to +12 dB (72 dB total), not -24 to +12 (36 dB)
             local vol_db = -60 + vol_norm * 72
-            local vol_format = vol_db >= 0 and string.format("+%.0f", vol_db) or string.format("%.0f", vol_db)
+            local vol_format = (math.abs(vol_db) < 0.1) and "0" or (vol_db > 0 and string.format("+%.0f", vol_db) or string.format("%.0f", vol_db))
             ctx:set_next_item_width(-1)
             local vol_changed, new_vol_db = ctx:slider_double("##vol_" .. chain_idx, vol_db, -60, 12, vol_format)
             if vol_changed then
