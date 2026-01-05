@@ -100,6 +100,7 @@ local fx_detail_panel = require('lib.ui.fx_detail_panel')
 local modulator_panel = require('lib.ui.modulator_panel')
 local toolbar = require('lib.ui.toolbar')
 local drag_drop = require('lib.ui.drag_drop')
+local rack_ui = require('lib.ui.rack_ui')
 
 --------------------------------------------------------------------------------
 -- Icons (using OpenMoji font)
@@ -1446,7 +1447,36 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                         else
                             is_selected = (state.expanded_path[2] == chain_guid)
                         end
-                        draw_chain_row(ctx, chain, j, rack, mixer, is_selected, is_nested)
+                        rack_ui.draw_chain_row(ctx, chain, j, rack, mixer, is_selected, is_nested, state, get_fx_display_name, {
+                            on_chain_select = function(chain_guid, is_selected, is_nested_rack, rack_guid)
+                                if is_nested_rack then
+                                    if is_selected then
+                                        state.expanded_nested_chains[rack_guid] = nil
+                                    else
+                                        state.expanded_nested_chains[rack_guid] = chain_guid
+                                    end
+                                else
+                                    if is_selected then
+                                        state.expanded_path[2] = nil
+                                    else
+                                        state.expanded_path[2] = chain_guid
+                                    end
+                                end
+                                state_module.save_expansion_state()
+                            end,
+                            on_add_device_to_chain = add_device_to_chain,
+                            on_reorder_chain = reorder_chain_in_rack,
+                            on_delete_chain = function(chain, is_selected, is_nested_rack, rack_guid)
+                                if is_selected then
+                                    if is_nested_rack then
+                                        state.expanded_nested_chains[rack_guid] = nil
+                                    else
+                                        state.expanded_path[2] = nil
+                                    end
+                                end
+                            end,
+                            on_refresh = refresh_fx_list,
+                        })
                         ctx:pop_id()
                     end
 
