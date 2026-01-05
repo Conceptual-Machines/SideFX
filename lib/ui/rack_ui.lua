@@ -43,18 +43,24 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
     -- Check if rack is being renamed
     local is_renaming_rack = (state.renaming_fx == rack_guid)
     
-    -- Use table for layout: Equal 25% per column (collapse | path | ON | X)
-    -- Using equal weights: 1, 1, 1, 1 to achieve 25%, 25%, 25%, 25% distribution
+    -- Use table for layout with different widths based on expansion state
+    -- Collapsed: 25% | 25% | 25% | 25% (icon only)
+    -- Expanded: 70% | 10% | 10% | 10% (full name)
     local table_flags = imgui.TableFlags.SizingStretchProp()
     if ctx:begin_table("rack_header_" .. rack_guid, 4, table_flags) then
-        -- Column 0: Collapse button (25% - weight 1)
-        ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthStretch(), 1)
-        -- Column 1: Path identifier (25% - weight 1)
-        ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 1)
-        -- Column 2: ON button (25% - weight 1)
-        ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
-        -- Column 3: X button (25% - weight 1)
-        ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
+        if is_expanded then
+            -- Expanded: name gets 70%, others get 10% each
+            ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 7)
+            ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 1)
+            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
+            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
+        else
+            -- Collapsed: equal 25% per column
+            ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthStretch(), 1)
+            ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 1)
+            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
+            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
+        end
         
         ctx:table_next_row()
         
