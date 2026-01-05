@@ -4,6 +4,9 @@
 -- @provides
 --   [nomain] lib/*.lua
 --   [nomain] lib/ui/*.lua
+-- @depends ReaWrap>=0.7.3
+-- @depends ReaImGui
+-- @depends talagan_EmojImGui
 -- @link https://github.com/Conceptual-Machines/SideFX
 -- @about
 --   # SideFX
