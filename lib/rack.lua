@@ -270,10 +270,25 @@ function M.add_rack(parent_rack, position)
         if parent_mixer then
             local vol_param = M.get_mixer_chain_volume_param(chain_idx)
             local normalized_0db = 60 / 72  -- 0.833...
+            
+            -- Debug: log before setting
+            local vol_before = parent_mixer:get_param_normalized(vol_param)
+            local vol_before_db = vol_before * 72 - 60
+            r.ShowConsoleMsg(string.format("SideFX: [add_rack] Setting parent chain %d volume: before=%.1f dB (normalized %.6f), setting to 0 dB (normalized %.6f), param=%d\n",
+                chain_idx, vol_before_db, vol_before, normalized_0db, vol_param))
+            
             parent_mixer:set_param_normalized(vol_param, normalized_0db)
+
+            -- Debug: verify after setting
+            local vol_after = parent_mixer:get_param_normalized(vol_param)
+            local vol_after_db = vol_after * 72 - 60
+            r.ShowConsoleMsg(string.format("SideFX: [add_rack] After set: %.1f dB (normalized %.6f)\n",
+                vol_after_db, vol_after))
 
             local pan_param = M.get_mixer_chain_pan_param(chain_idx)
             parent_mixer:set_param_normalized(pan_param, 0.5)
+        else
+            r.ShowConsoleMsg("SideFX: [add_rack] WARNING: Parent mixer not found!\n")
         end
 
         r.PreventUIRefresh(-1)
@@ -486,11 +501,42 @@ function M.add_chain_to_rack(rack, plugin)
         if mixer then
             local vol_param = M.get_mixer_chain_volume_param(chain_idx)
             local normalized_0db = 60 / 72  -- 0.833...
+            
+            -- Debug: check actual parameter value (not normalized)
+            local vol_actual_before, vol_min, vol_max = mixer:get_param(vol_param)
+            r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] Param %d actual value: %.6f (range: %.1f to %.1f)\n",
+                vol_param, vol_actual_before, vol_min or -60, vol_max or 12))
+            
+            -- Debug: log before setting
+            local vol_before = mixer:get_param_normalized(vol_param)
+            local vol_before_db = vol_before * 72 - 60
+            r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] Setting chain %d volume: before=%.1f dB (normalized %.6f), setting to 0 dB (normalized %.6f), param=%d\n",
+                chain_idx, vol_before_db, vol_before, normalized_0db, vol_param))
+            
             mixer:set_param_normalized(vol_param, normalized_0db)
+
+            -- Debug: verify after setting (both normalized and actual)
+            local vol_after = mixer:get_param_normalized(vol_param)
+            local vol_after_db = vol_after * 72 - 60
+            local vol_actual_after, _, _ = mixer:get_param(vol_param)
+            r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] After set: %.1f dB (normalized %.6f, actual %.6f)\n",
+                vol_after_db, vol_after, vol_actual_after))
+            
+            -- Debug: also check what the UI might be reading - check all chain volume params
+            for i = 1, 3 do
+                local test_param = M.get_mixer_chain_volume_param(i)
+                local test_norm = mixer:get_param_normalized(test_param)
+                local test_db = test_norm * 72 - 60
+                local test_actual, _, _ = mixer:get_param(test_param)
+                r.ShowConsoleMsg(string.format("SideFX: [add_chain_to_rack] Chain %d param %d: %.1f dB (norm %.6f, actual %.6f)\n",
+                    i, test_param, test_db, test_norm, test_actual))
+            end
 
             -- Also set pan to center (normalized 0.5)
             local pan_param = M.get_mixer_chain_pan_param(chain_idx)
             mixer:set_param_normalized(pan_param, 0.5)
+        else
+            r.ShowConsoleMsg("SideFX: [add_chain_to_rack] WARNING: Mixer not found for rack!\n")
         end
     end
 

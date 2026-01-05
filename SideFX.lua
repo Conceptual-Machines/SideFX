@@ -1457,16 +1457,19 @@ local function draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, i
         local vol_param = 2 + (chain_idx - 1)  -- Params 2-17 are channel volumes
         local ok_vol, vol_norm = pcall(function() return mixer:get_param_normalized(vol_param) end)
         if ok_vol and vol_norm then
-            local vol_db = -24 + vol_norm * 36
+            -- Fixed: Range is -60 to +12 dB (72 dB total), not -24 to +12 (36 dB)
+            local vol_db = -60 + vol_norm * 72
             local vol_format = vol_db >= 0 and string.format("+%.0f", vol_db) or string.format("%.0f", vol_db)
             ctx:set_next_item_width(-1)
-            local vol_changed, new_vol_db = ctx:slider_double("##vol_" .. chain_idx, vol_db, -24, 12, vol_format)
+            local vol_changed, new_vol_db = ctx:slider_double("##vol_" .. chain_idx, vol_db, -60, 12, vol_format)
             if vol_changed then
-                local new_norm = (new_vol_db + 24) / 36
+                -- Fixed: Convert back using correct range
+                local new_norm = (new_vol_db + 60) / 72
                 pcall(function() mixer:set_param_normalized(vol_param, new_norm) end)
             end
             if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-                pcall(function() mixer:set_param_normalized(vol_param, (0 + 24) / 36) end)
+                -- Fixed: 0 dB normalized = (0 + 60) / 72 = 60/72 = 0.8333
+                pcall(function() mixer:set_param_normalized(vol_param, (0 + 60) / 72) end)
             end
         else
             ctx:text_disabled("--")
