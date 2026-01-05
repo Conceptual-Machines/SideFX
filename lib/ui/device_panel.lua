@@ -380,9 +380,9 @@ function M.draw(ctx, fx, opts)
     local name = "Unknown"
     local device_id = nil
     if container then
-        -- Get device display name (custom name only) and identifier separately
-        local ok_name, device_name = pcall(function() return fx_utils.get_device_display_name(container) end)
-        if ok_name then name = device_name end
+        -- Get actual FX name (plugin name, not hierarchical) and identifier separately
+        local ok_name, fx_name = pcall(function() return fx_utils.get_display_name(fx) end)
+        if ok_name then name = fx_name end
         local ok_id, id = pcall(function() return fx_utils.get_device_identifier(container) end)
         if ok_id then device_id = id end
     else
@@ -546,11 +546,10 @@ function M.draw(ctx, fx, opts)
             local max_name_len = math.floor((content_width - identifier_space) / 7)
 
             -- Check if this device/container is being renamed (use SideFX state system)
+            -- Use FX GUID for renaming since we display the FX name, not the container name
             local state_module = require('lib.state')
             local sidefx_state = state_module.state
-            local ok_container_guid, container_guid_val = pcall(function() return container and container:get_guid() or nil end)
-            local container_guid = (ok_container_guid and container_guid_val) or nil
-            local rename_guid = container_guid or guid
+            local rename_guid = guid  -- Use FX GUID for renaming
             local is_renaming = (sidefx_state.renaming_fx == rename_guid)
             
             if is_renaming then
@@ -1084,12 +1083,10 @@ function M.draw(ctx, fx, opts)
                 opts.on_rename(fx)
             else
                 -- Fallback: use SideFX state system directly
+                -- Use FX GUID for renaming since we display the FX name
                 local state_module = require('lib.state')
                 local sidefx_state = state_module.state
-                local ok_container_guid, container_guid_val = pcall(function() return container and container:get_guid() or nil end)
-                local container_guid = (ok_container_guid and container_guid_val) or nil
-                local rename_guid = container_guid or guid
-                sidefx_state.renaming_fx = rename_guid
+                sidefx_state.renaming_fx = guid  -- Use FX GUID
                 sidefx_state.rename_text = name
             end
         end
