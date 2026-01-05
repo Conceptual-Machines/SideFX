@@ -13,6 +13,14 @@ local mock_reawrap = require("mock.reawrap")
 local Track = mock_reawrap.Track
 local TrackFX = mock_reawrap.TrackFX
 
+-- Mock REAPER API
+reaper = {
+    Undo_BeginBlock = function() end,
+    Undo_EndBlock = function(desc, flags) end,
+    PreventUIRefresh = function(state) end,
+    ShowConsoleMsg = function(msg) print(msg) end,
+}
+
 -- Mock state module
 package.loaded['lib.state'] = {
     state = {
@@ -40,6 +48,16 @@ package.loaded['lib.fx_utils'] = {
         end
         return count
     end,
+    count_chains_in_rack = function(rack)
+        local count = 0
+        for child in rack:iter_container_children() do
+            local ok, name = pcall(function() return child:get_name() end)
+            if ok and name and not name:match("^_") and not name:match("Mixer") then
+                count = count + 1
+            end
+        end
+        return count
+    end,
     get_next_rack_index = function(track)
         local max_idx = 0
         for entry in track:iter_all_fx_flat() do
@@ -53,6 +71,33 @@ package.loaded['lib.fx_utils'] = {
             end
         end
         return max_idx + 1
+    end,
+    get_device_main_fx = function(device)
+        for child in device:iter_container_children() do
+            local ok, name = pcall(function() return child:get_name() end)
+            if ok and name and name:match("_FX:") then
+                return child
+            end
+        end
+        return nil
+    end,
+    get_device_utility = function(device)
+        for child in device:iter_container_children() do
+            local ok, name = pcall(function() return child:get_name() end)
+            if ok and name and name:match("_Util") then
+                return child
+            end
+        end
+        return nil
+    end,
+    get_rack_mixer = function(rack)
+        for child in rack:iter_container_children() do
+            local ok, name = pcall(function() return child:get_name() end)
+            if ok and name and (name:match("^_") and name:match("_M$")) then
+                return child
+            end
+        end
+        return nil
     end,
 }
 
@@ -73,6 +118,18 @@ package.loaded['lib.naming'] = {
         end
         return {}
     end,
+    build_rack_name = function(rack_idx, display_name)
+        if display_name then
+            return string.format("R%d: %s", rack_idx, display_name)
+        end
+        return string.format("R%d: Rack", rack_idx)
+    end,
+    build_chain_name = function(rack_idx, chain_idx)
+        return string.format("R%d_C%d", rack_idx, chain_idx)
+    end,
+    build_mixer_name = function(rack_idx)
+        return string.format("_R%d_M", rack_idx)
+    end,
     build_chain_device_name = function(rack_idx, chain_idx, device_idx, fx_name)
         return string.format("R%d_C%d_D%d: %s", rack_idx, chain_idx, device_idx, fx_name)
     end,
@@ -91,13 +148,7 @@ package.loaded['lib.naming'] = {
     end,
 }
 
--- Mock rack module constants
-package.loaded['lib.rack'] = {
-    MIXER_JSFX = "JS:SideFX/SideFX_Mixer",
-    UTILITY_JSFX = "JS:SideFX/SideFX_Utility",
-}
-
--- Now require the rack module
+-- Load the real rack module (it will use our mocked dependencies)
 local rack_module = require("lib.rack")
 
 local M = {}
@@ -228,7 +279,8 @@ local function test_build_container_path_simple()
                     if child:get_guid() == guid then break end
                     pos = pos + 1
                 end
-                table.insert(path, 1, {
+                -- Append to path (not prepend) to maintain child-to-parent order
+                table.insert(path, {
                     guid = guid,
                     parent_guid = parent:get_guid(),
                     position = pos
@@ -256,6 +308,13 @@ local function test_build_container_path_deep()
     local rack1 = create_rack("R1: Outer Rack")
     local chain1 = create_chain("R1_C1", rack1)
     local rack2 = create_rack("R2: Inner Rack")
+    -- Remove rack2 from track level since it will be nested
+    for i, fx_data in ipairs(test_track._data.fx_chain) do
+        if fx_data == rack2._data then
+            table.remove(test_track._data.fx_chain, i)
+            break
+        end
+    end
     -- Manually set rack2 as child of chain1
     rack2._data.parent = chain1._data
     chain1._data.children = chain1._data.children or {}
@@ -274,7 +333,8 @@ local function test_build_container_path_deep()
                     if child:get_guid() == guid then break end
                     pos = pos + 1
                 end
-                table.insert(path, 1, {
+                -- Append to path (not prepend) to maintain child-to-parent order
+                table.insert(path, {
                     guid = guid,
                     parent_guid = parent:get_guid(),
                     position = pos
@@ -401,6 +461,13 @@ local function test_deep_nesting_preservation()
     local rack1 = create_rack("R1: Level 1 Rack")
     local chain1 = create_chain("R1_C1", rack1)
     local rack2 = create_rack("R2: Level 2 Rack")
+    -- Remove rack2 from track level since it will be nested
+    for i, fx_data in ipairs(test_track._data.fx_chain) do
+        if fx_data == rack2._data then
+            table.remove(test_track._data.fx_chain, i)
+            break
+        end
+    end
     rack2._data.parent = chain1._data
     chain1._data.children = {rack2._data}
     local chain2 = create_chain("R2_C1", rack2)

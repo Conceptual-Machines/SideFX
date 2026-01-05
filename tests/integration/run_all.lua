@@ -100,6 +100,23 @@ total_passed = total_passed + results.passed
 total_failed = total_failed + results.failed
 r.ShowConsoleMsg("\n")
 
+-- Reset for next test suite
+assert.reset()
+
+-- Run deeply nested tests
+r.ShowConsoleMsg("Running: Deeply Nested Rack Tests\n")
+r.ShowConsoleMsg("----------------------------------------\n")
+ok, err = pcall(function()
+    local test_deeply_nested = dofile(script_path .. "test_deeply_nested.lua")
+end)
+if not ok then
+    r.ShowConsoleMsg("ERROR loading deeply nested tests: " .. tostring(err) .. "\n")
+end
+results = assert.get_results()
+total_passed = total_passed + results.passed
+total_failed = total_failed + results.failed
+r.ShowConsoleMsg("\n")
+
 -- Final summary
 r.ShowConsoleMsg("========================================\n")
 r.ShowConsoleMsg(string.format("Total Results: %d passed, %d failed\n", total_passed, total_failed))

@@ -159,6 +159,11 @@ function M.add_rack(parent_rack, position)
             r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
             return nil
         end
+        
+        -- Refresh pointer for deeply nested parent racks
+        if parent_rack.pointer and parent_rack.pointer >= 0x2000000 and parent_rack.refresh_pointer then
+            parent_rack:refresh_pointer()
+        end
 
         -- Create the nested rack
         local rack = create_rack_container(rack_idx, nil)
@@ -232,6 +237,11 @@ function M.add_rack(parent_rack, position)
             return nil
         end
         
+        -- Refresh pointers for deeply nested containers before adding
+        if parent_rack.pointer and parent_rack.pointer >= 0x2000000 and parent_rack.refresh_pointer then
+            parent_rack:refresh_pointer()
+        end
+        
         local add_success = parent_rack:add_fx_to_container(chain, mixer_pos)
         if not add_success then
             r.ShowConsoleMsg("SideFX: Failed to add chain to parent rack R" .. parent_idx .. "\n")
@@ -280,9 +290,8 @@ function M.add_rack(parent_rack, position)
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Rack", -1)
 
-        -- Re-find the rack to return
-        local rack_name_pattern = "^R" .. rack_idx .. ":"
-        return find_fx_by_name_pattern(rack_name_pattern)
+        -- Re-find the rack to return using GUID (more reliable for nested racks)
+        return state.track:find_fx_by_guid(rack_guid)
     else
         -- Add to track at specified position
         local rack = create_rack_container(rack_idx, position)
@@ -290,14 +299,15 @@ function M.add_rack(parent_rack, position)
             r.PreventUIRefresh(-1)
             r.Undo_EndBlock("SideFX: Add Rack (failed)", -1)
             return nil
-    end
+        end
+        
+        local rack_guid = rack:get_guid()
 
-    r.PreventUIRefresh(-1)
-    r.Undo_EndBlock("SideFX: Add Rack", -1)
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Rack", -1)
 
         -- Re-find the rack to ensure we have a fresh reference
-        local rack_name_pattern = "^R" .. rack_idx .. ":"
-        return find_fx_by_name_pattern(rack_name_pattern)
+        return state.track:find_fx_by_guid(rack_guid)
     end
 end
 
@@ -325,28 +335,63 @@ end
 -- @param plugin table Plugin info {full_name, name}
 -- @return TrackFX|nil Chain container or nil on failure
 function M.add_chain_to_rack(rack, plugin)
-    if not state.track or not rack or not plugin then return nil end
-    if not fx_utils.is_rack_container(rack) then return nil end
+    if not state.track then 
+        r.ShowConsoleMsg("SideFX ERROR: add_chain_to_rack - no track in state\n")
+        return nil 
+    end
+    if not rack then 
+        r.ShowConsoleMsg("SideFX ERROR: add_chain_to_rack - rack is nil\n")
+        return nil 
+    end
+    if not plugin then 
+        r.ShowConsoleMsg("SideFX ERROR: add_chain_to_rack - plugin is nil\n")
+        return nil 
+    end
+    
+    -- Get name early for better error messages
+    local ok, rack_name_or_err = pcall(function() return rack:get_name() end)
+    local rack_name = ok and rack_name_or_err or "INVALID"
+    local rack_ptr = rack.pointer or -1
+    
+    if not fx_utils.is_rack_container(rack) then 
+        r.ShowConsoleMsg(string.format("SideFX ERROR: '%s' (ptr: 0x%X) is not a rack container or has stale pointer\n", 
+            rack_name, rack_ptr))
+        r.ShowConsoleMsg(string.format("  - This usually means the rack reference is stale after a parent container was modified\n"))
+        r.ShowConsoleMsg(string.format("  - Solution: Re-find the rack by GUID before this operation\n"))
+        return nil 
+    end
 
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
 
-    -- Get GUID before re-finding (GUID is stable)
+    -- Get GUID and name before operations (GUID is stable)
     local rack_guid = rack:get_guid()
     local rack_name = rack:get_name()
     local rack_idx = naming.parse_rack_index(rack_name) or 1
-    local rack_name_pattern = "^R" .. rack_idx .. ":"
-    rack = find_fx_by_name_pattern(rack_name_pattern)
-
-    if not rack or not fx_utils.is_rack_container(rack) then
-        r.ShowConsoleMsg("SideFX: Could not find rack R" .. rack_idx .. "\n")
+    
+    -- Use GUID-based lookup for nested racks (more reliable than pattern matching)
+    rack = state.track:find_fx_by_guid(rack_guid)
+    
+    if not rack then
+        r.ShowConsoleMsg("SideFX: Could not find rack R" .. rack_idx .. " by GUID " .. tostring(rack_guid) .. "\n")
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Chain to Rack (failed)", -1)
         return nil
     end
     
-    -- Re-save GUID in case rack changed (should be same, but be safe)
-    rack_guid = rack:get_guid()
+    -- Refresh pointer for deeply nested racks (prevents stale pointer issues)
+    if rack.pointer and rack.pointer >= 0x2000000 and rack.refresh_pointer then
+        rack:refresh_pointer()
+    end
+    
+    if not fx_utils.is_rack_container(rack) then
+        r.ShowConsoleMsg("SideFX: Could not find valid rack R" .. rack_idx .. " (may have stale pointer)\n")
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Chain to Rack (failed)", -1)
+        return nil
+    end
+    
+    -- Re-get name after re-finding (should be same, but be consistent)
     rack_name = rack:get_name()
     local rack_prefix = rack_name:match("^(R%d+)") or "R1"
 
@@ -407,7 +452,9 @@ function M.add_chain_to_rack(rack, plugin)
     -- Step 4: Create chain container
     local chain = state.track:add_fx_by_name("Container", false, -1)
     local chain_inside = nil  -- Declare outside block for use after
+    local chain_guid = nil    -- Save GUID for later re-finding
     if chain and chain.pointer >= 0 then
+        chain_guid = chain:get_guid()
         chain:set_named_config_param("renamed_name", chain_name)
         chain:add_fx_to_container(device, 0)
 
@@ -421,6 +468,11 @@ function M.add_chain_to_rack(rack, plugin)
             r.PreventUIRefresh(-1)
             r.Undo_EndBlock("SideFX: Add Chain to Rack (failed)", -1)
             return nil
+        end
+        
+        -- Refresh pointer for deeply nested racks before adding to container
+        if rack.pointer and rack.pointer >= 0x2000000 and rack.refresh_pointer then
+            rack:refresh_pointer()
         end
         
         -- Find mixer position
@@ -440,6 +492,7 @@ function M.add_chain_to_rack(rack, plugin)
         local add_success = rack:add_fx_to_container(chain, mixer_pos)
         
         if not add_success then
+            r.ShowConsoleMsg("SideFX: Failed to add chain to rack R" .. rack_idx .. "\n")
             r.PreventUIRefresh(-1)
             r.Undo_EndBlock("SideFX: Add Chain to Rack (failed)", -1)
             return nil
@@ -486,14 +539,21 @@ function M.add_chain_to_rack(rack, plugin)
     r.Undo_EndBlock("SideFX: Add Chain to Rack", -1)
 
     -- Re-find the chain after it's been moved (reference is stale)
-    -- Use the chain_inside if we found it, otherwise search by name pattern
+    -- Use the chain_inside if we found it, otherwise use GUID lookup
     if chain_inside then
         return chain_inside
-    else
-        -- Fallback: search by name pattern (works for nested racks too)
-        local chain_name_pattern = "^" .. chain_name .. "$"
-        return find_fx_by_name_pattern(chain_name_pattern)
+    elseif chain_guid then
+        -- Use GUID-based lookup (more reliable for nested chains)
+        rack = state.track:find_fx_by_guid(rack_guid)
+        if rack then
+            for child in rack:iter_container_children() do
+                if child:get_guid() == chain_guid then
+                    return child
+                end
+            end
+        end
     end
+    return nil
 end
 
 --- Add a device to an existing chain.
@@ -507,27 +567,39 @@ function M.add_device_to_chain(chain, plugin)
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
 
-    -- Re-find chain to ensure we have a fresh reference
+    -- Get GUID and name before operations (GUID is stable)
     local chain_guid = chain:get_guid()
     if not chain_guid then
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Device to Chain (failed)", -1)
         return nil
     end
-
-    -- Get chain name first to build search pattern
+    
     local chain_name = chain:get_name()
-    local chain_name_pattern = "^" .. chain_name:gsub("%(", "%%("):gsub("%)", "%%)"):gsub("%.", "%%.") .. "$"
-    chain = find_fx_by_name_pattern(chain_name_pattern)
 
-    if not chain or not fx_utils.is_chain_container(chain) then
-        r.ShowConsoleMsg("SideFX: Could not find chain: " .. tostring(chain_name) .. "\n")
+    -- Use GUID-based lookup for nested chains (more reliable than pattern matching)
+    chain = state.track:find_fx_by_guid(chain_guid)
+
+    if not chain then
+        r.ShowConsoleMsg("SideFX: Could not find chain: " .. tostring(chain_name) .. " by GUID\n")
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Device to Chain (failed)", -1)
+        return nil
+    end
+    
+    -- Refresh pointer for deeply nested chains (prevents stale pointer issues)
+    if chain.pointer and chain.pointer >= 0x2000000 and chain.refresh_pointer then
+        chain:refresh_pointer()
+    end
+    
+    if not fx_utils.is_chain_container(chain) then
+        r.ShowConsoleMsg("SideFX: Found FX is not a chain container: " .. tostring(chain_name) .. "\n")
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Device to Chain (failed)", -1)
         return nil
     end
 
-    -- Get chain name again (in case it changed)
+    -- Re-get name after re-finding (should be same, but be consistent)
     chain_name = chain:get_name()
     local chain_prefix = chain_name:match("^(R%d+_C%d+)") or chain_name
     local hierarchy = naming.parse_hierarchy(chain_name)
@@ -589,6 +661,11 @@ function M.add_device_to_chain(chain, plugin)
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Device to Chain (chain lost)", -1)
         return nil
+    end
+    
+    -- Refresh pointer for deeply nested chains before adding device
+    if fresh_chain.pointer and fresh_chain.pointer >= 0x2000000 and fresh_chain.refresh_pointer then
+        fresh_chain:refresh_pointer()
     end
 
     device = state.track:find_fx_by_guid(device_guid)
@@ -660,6 +737,11 @@ function M.add_rack_to_chain(chain)
         r.Undo_EndBlock("SideFX: Add Rack to Chain (chain lost)", -1)
         return nil
     end
+    
+    -- Refresh pointer for deeply nested chains before adding rack
+    if chain.pointer and chain.pointer >= 0x2000000 and chain.refresh_pointer then
+        chain:refresh_pointer()
+    end
 
     -- Re-find rack
     rack = state.track:find_fx_by_guid(rack_guid)
@@ -705,11 +787,13 @@ function M.reorder_chain_in_rack(rack, chain_guid, target_chain_guid)
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
 
-    -- Re-find rack to ensure we have a fresh reference
+    -- Get rack GUID before operations
+    local rack_guid = rack:get_guid()
     local rack_name = rack:get_name()
     local rack_idx = naming.parse_rack_index(rack_name) or 1
-    local rack_name_pattern = "^R" .. rack_idx .. ":"
-    rack = find_fx_by_name_pattern(rack_name_pattern)
+    
+    -- Use GUID-based lookup for nested racks (more reliable than pattern matching)
+    rack = state.track:find_fx_by_guid(rack_guid)
 
     if not rack or not fx_utils.is_rack_container(rack) then
         r.PreventUIRefresh(-1)
@@ -797,14 +881,16 @@ end
 --- Renumber chains within a rack after reordering.
 -- @param rack TrackFX Rack container
 function M.renumber_chains_in_rack(rack)
-    if not rack then return end
+    if not state.track or not rack then return end
     if not fx_utils.is_rack_container(rack) then return end
 
-    -- Re-find rack to ensure we have a fresh reference
+    -- Get rack GUID before operations
+    local rack_guid = rack:get_guid()
     local rack_name = rack:get_name()
     local rack_idx = naming.parse_rack_index(rack_name) or 1
-    local rack_name_pattern = "^R" .. rack_idx .. ":"
-    rack = find_fx_by_name_pattern(rack_name_pattern)
+    
+    -- Use GUID-based lookup for nested racks (more reliable than pattern matching)
+    rack = state.track:find_fx_by_guid(rack_guid)
 
     if not rack or not fx_utils.is_rack_container(rack) then
         return
