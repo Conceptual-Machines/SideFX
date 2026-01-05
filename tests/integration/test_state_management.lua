@@ -470,6 +470,163 @@ local function test_top_level_and_nested_rack_independence()
     assert.falsy(state.expanded_racks[nested_rack_guid], "Nested rack should be collapsed")
 end
 
+local function test_deleted_track_state_clearing()
+    assert.section("State is cleared when track is deleted")
+    
+    clear_track_fx()
+    state.expanded_racks = {}
+    state.expanded_nested_chains = {}
+    state.top_level_fx = {}
+    
+    -- Create a rack and set some state
+    local rack1 = rack_module.add_rack_to_track()
+    local rack1_guid = rack1:get_guid()
+    
+    -- Set expansion state
+    state.expanded_racks[rack1_guid] = true
+    state.expanded_nested_chains[rack1_guid] = "{chain-1}"
+    
+    -- Verify state is set
+    assert.truthy(state.expanded_racks[rack1_guid], "Rack should be expanded")
+    assert.equals("{chain-1}", state.expanded_nested_chains[rack1_guid], "Chain should be selected")
+    
+    -- Simulate deleted track by setting state.track to a mock that will fail
+    local original_track = state.track
+    state.track = {
+        get_guid = function()
+            error("Track deleted")
+        end
+    }
+    
+    -- Try to access track (should fail gracefully)
+    local ok, err = pcall(function()
+        state_module.save_expansion_state()
+    end)
+    
+    assert.truthy(ok, "save_expansion_state should not error on deleted track")
+    assert.is_nil(state.track, "state.track should be cleared")
+    
+    -- Restore original track
+    state.track = original_track
+end
+
+local function test_refresh_fx_list_after_track_deletion()
+    assert.section("refresh_fx_list handles track deletion gracefully")
+    
+    clear_track_fx()
+    
+    -- Create a rack
+    local rack1 = rack_module.add_rack_to_track()
+    local chain1 = rack_module.add_chain_to_rack(rack1, { full_name = "ReaComp", name = "ReaComp" })
+    
+    -- Refresh to populate top_level_fx
+    state_module.refresh_fx_list()
+    assert.greater_than(#state.top_level_fx, 0, "top_level_fx should have items")
+    
+    -- Simulate deleted track by replacing with mock that will fail
+    local original_track = state.track
+    state.track = {
+        iter_track_fx_chain = function()
+            error("Track deleted")
+        end,
+        get_track_fx_count = function()
+            error("Track deleted")
+        end
+    }
+    
+    -- Try to refresh (should not error)
+    local ok, err = pcall(function()
+        state_module.refresh_fx_list()
+    end)
+    
+    assert.truthy(ok, "refresh_fx_list should not error after track deletion")
+    assert.is_nil(state.track, "state.track should be cleared")
+    assert.equals(0, #state.top_level_fx, "top_level_fx should be cleared")
+    assert.equals(0, state.last_fx_count, "last_fx_count should be reset")
+    
+    -- Restore original track
+    state.track = original_track
+end
+
+local function test_check_fx_changes_after_track_deletion()
+    assert.section("check_fx_changes handles track deletion gracefully")
+    
+    clear_track_fx()
+    
+    -- Create a rack
+    local rack1 = rack_module.add_rack_to_track()
+    state_module.refresh_fx_list()
+    
+    local initial_count = state.last_fx_count
+    assert.greater_than(initial_count, 0, "Should have FX count")
+    
+    -- Simulate deleted track by replacing with mock that will fail
+    local original_track = state.track
+    state.track = {
+        get_track_fx_count = function()
+            error("Track deleted")
+        end
+    }
+    
+    -- Try to check changes (should not error)
+    local ok, err = pcall(function()
+        state_module.check_fx_changes()
+    end)
+    
+    assert.truthy(ok, "check_fx_changes should not error after track deletion")
+    assert.is_nil(state.track, "state.track should be cleared")
+    assert.equals(0, #state.top_level_fx, "top_level_fx should be cleared")
+    assert.equals(0, state.last_fx_count, "last_fx_count should be reset")
+    
+    -- Restore original track
+    state.track = original_track
+end
+
+local function test_track_deletion_with_expansion_state()
+    assert.section("Track deletion clears expansion state safely")
+    
+    clear_track_fx()
+    state.expanded_racks = {}
+    state.expanded_nested_chains = {}
+    
+    -- Create multiple racks with expansion state
+    local rack1 = rack_module.add_rack_to_track()
+    local rack2 = rack_module.add_rack_to_track()
+    
+    local rack1_guid = rack1:get_guid()
+    local rack2_guid = rack2:get_guid()
+    
+    -- Set expansion state
+    state.expanded_racks[rack1_guid] = true
+    state.expanded_racks[rack2_guid] = true
+    state.expanded_nested_chains[rack1_guid] = "{chain-1}"
+    
+    -- Verify state is set
+    assert.truthy(state.expanded_racks[rack1_guid], "Rack1 should be expanded")
+    assert.truthy(state.expanded_racks[rack2_guid], "Rack2 should be expanded")
+    
+    -- Simulate deleted track by replacing with mock that will fail
+    local original_track = state.track
+    state.track = {
+        get_guid = function()
+            error("Track deleted")
+        end
+    }
+    
+    -- Try to save state (should not error)
+    local ok, err = pcall(function()
+        state_module.save_expansion_state()
+    end)
+    
+    assert.truthy(ok, "save_expansion_state should not error")
+    assert.is_nil(state.track, "state.track should be cleared")
+    -- Note: expanded_racks may still contain GUIDs, but that's okay - they're just strings
+    -- The important thing is that state.track is cleared and no errors occur
+    
+    -- Restore original track
+    state.track = original_track
+end
+
 --------------------------------------------------------------------------------
 -- Run All Tests
 --------------------------------------------------------------------------------
@@ -493,6 +650,10 @@ local function run_all_tests()
         { name = "test_multiple_top_level_racks_independent_expansion", fn = test_multiple_top_level_racks_independent_expansion },
         { name = "test_multiple_top_level_racks_chain_selection_independence", fn = test_multiple_top_level_racks_chain_selection_independence },
         { name = "test_top_level_and_nested_rack_independence", fn = test_top_level_and_nested_rack_independence },
+        { name = "test_deleted_track_state_clearing", fn = test_deleted_track_state_clearing },
+        { name = "test_refresh_fx_list_after_track_deletion", fn = test_refresh_fx_list_after_track_deletion },
+        { name = "test_check_fx_changes_after_track_deletion", fn = test_check_fx_changes_after_track_deletion },
+        { name = "test_track_deletion_with_expansion_state", fn = test_track_deletion_with_expansion_state },
     }
     
     for _, test in ipairs(tests) do

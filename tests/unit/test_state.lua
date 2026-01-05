@@ -251,6 +251,103 @@ local function test_top_level_and_nested_rack_coexistence()
     assert.falsy(state.expanded_racks[nested_rack_guid], "Nested rack should be collapsed")
 end
 
+local function test_save_expansion_state_with_deleted_track()
+    assert.section("save_expansion_state handles deleted tracks gracefully")
+    
+    local state = state_module.state
+    
+    -- Create a mock track that will fail when get_guid is called
+    local mock_track = {
+        get_guid = function()
+            error("Track deleted")
+        end
+    }
+    
+    state.track = mock_track
+    state.expanded_racks = {["{rack-1}"] = true}
+    state.expanded_nested_chains = {["{rack-1}"] = "{chain-1}"}
+    
+    -- Should not error, should clear state.track
+    local ok, err = pcall(function()
+        state_module.save_expansion_state()
+    end)
+    
+    assert.truthy(ok, "save_expansion_state should not error on deleted track")
+    assert.is_nil(state.track, "state.track should be cleared when track is invalid")
+end
+
+local function test_refresh_fx_list_with_deleted_track()
+    assert.section("refresh_fx_list handles deleted tracks gracefully")
+    
+    local state = state_module.state
+    
+    -- Create a mock track that will fail when accessed
+    local mock_track = {
+        iter_track_fx_chain = function()
+            error("Track deleted")
+        end
+    }
+    
+    state.track = mock_track
+    state.top_level_fx = {{}, {}}  -- Some fake FX objects
+    
+    -- Should not error, should clear state
+    local ok, err = pcall(function()
+        state_module.refresh_fx_list()
+    end)
+    
+    assert.truthy(ok, "refresh_fx_list should not error on deleted track")
+    assert.is_nil(state.track, "state.track should be cleared")
+    assert.equals(0, #state.top_level_fx, "top_level_fx should be cleared")
+    assert.equals(0, state.last_fx_count, "last_fx_count should be reset")
+end
+
+local function test_check_fx_changes_with_deleted_track()
+    assert.section("check_fx_changes handles deleted tracks gracefully")
+    
+    local state = state_module.state
+    
+    -- Create a mock track that will fail when accessed
+    local mock_track = {
+        get_track_fx_count = function()
+            error("Track deleted")
+        end
+    }
+    
+    state.track = mock_track
+    state.top_level_fx = {{}, {}}
+    state.last_fx_count = 5
+    
+    -- Should not error, should clear state
+    local ok, err = pcall(function()
+        state_module.check_fx_changes()
+    end)
+    
+    assert.truthy(ok, "check_fx_changes should not error on deleted track")
+    assert.is_nil(state.track, "state.track should be cleared")
+    assert.equals(0, #state.top_level_fx, "top_level_fx should be cleared")
+    assert.equals(0, state.last_fx_count, "last_fx_count should be reset")
+end
+
+local function test_check_fx_changes_with_nil_track()
+    assert.section("check_fx_changes handles nil track gracefully")
+    
+    local state = state_module.state
+    
+    state.track = nil
+    state.top_level_fx = {{}, {}}
+    state.last_fx_count = 5
+    
+    -- Should not error, should clear FX list
+    local ok, err = pcall(function()
+        state_module.check_fx_changes()
+    end)
+    
+    assert.truthy(ok, "check_fx_changes should not error with nil track")
+    assert.equals(0, #state.top_level_fx, "top_level_fx should be cleared")
+    assert.equals(0, state.last_fx_count, "last_fx_count should be reset")
+end
+
 --------------------------------------------------------------------------------
 -- Test Runner
 --------------------------------------------------------------------------------
@@ -265,6 +362,10 @@ function M.run()
     test_multiple_top_level_racks_independence()
     test_top_level_rack_chain_selection_independence()
     test_top_level_and_nested_rack_coexistence()
+    test_save_expansion_state_with_deleted_track()
+    test_refresh_fx_list_with_deleted_track()
+    test_check_fx_changes_with_deleted_track()
+    test_check_fx_changes_with_nil_track()
 end
 
 return M
