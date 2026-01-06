@@ -28,8 +28,8 @@ M.config = {
     -- Modulator sidebar (left side of device)
     mod_sidebar_width = 240,   -- Width for modulator 2×4 grid
     mod_sidebar_collapsed_width = 24,  -- Collapsed width
-    mod_slot_width = 110,
-    mod_slot_height = 50,
+    mod_slot_width = 60,
+    mod_slot_height = 60,
     mod_slot_padding = 4,
 }
 
@@ -775,17 +775,15 @@ function M.draw(ctx, fx, opts)
                         -- Draw slot
                         local slot_id = "slot_" .. slot_idx .. "_" .. guid
                         if modulator then
-                            -- Slot has modulator - show name
-                            local ok_name, mod_name = pcall(function() return modulator:get_name() end)
-                            if not ok_name then mod_name = "Modulator" end
-                            mod_name = mod_name:gsub("^JS: SideFX/", "")  -- Strip prefix
+                            -- Slot has modulator - show short name (LFO1, LFO2, etc.)
+                            local display_name = "LFO" .. (slot_idx + 1)
 
                             local is_expanded = (expanded_slot_idx == slot_idx)
                             if is_expanded then
                                 ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                             end
 
-                            if ctx:button(mod_name .. "##" .. slot_id, slot_width, slot_height) then
+                            if ctx:button(display_name .. "##" .. slot_id, slot_width, slot_height) then
                                 -- Toggle expansion
                                 if expanded_mod_slot[state_guid] == slot_idx then
                                     expanded_mod_slot[state_guid] = nil
