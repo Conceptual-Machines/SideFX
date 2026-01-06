@@ -23,10 +23,10 @@ M.state = {
 
     -- Column navigation: list of expanded container GUIDs (breadcrumb trail)
     expanded_path = {},  -- e.g. {container1_guid, container2_guid, ...}
-    
+
     -- Expanded racks: set of rack GUIDs that are expanded (for nested racks)
     expanded_racks = {},  -- {[rack_guid] = true}
-    
+
     -- Expanded chains in nested racks: track which chain is expanded per nested rack
     -- Keyed by rack GUID to avoid conflicts between multiple nested racks
     expanded_nested_chains = {},  -- {[rack_guid] = chain_guid}
@@ -40,10 +40,10 @@ M.state = {
     -- Rename state
     renaming_fx = nil,  -- GUID of FX being renamed
     rename_text = "",    -- Current rename text
-    
+
     -- Custom display names (SideFX-only, doesn't change REAPER FX names)
     display_names = {},  -- {[fx_guid] = "custom display name"}
-    
+
     -- Save timing
     last_save_frame = nil,  -- Frame count of last save
 
@@ -57,11 +57,13 @@ M.state = {
         filtered = {},
         scanned = false,
     },
-    
+
     -- Modulator state
     modulators = {},  -- List of {fx_idx, links = {{target_fx_idx, param_idx}, ...}}
     mod_link_selecting = nil,  -- {mod_idx, selecting = true} when choosing target
     mod_selected_target = {},  -- {[mod_fx_idx] = {fx_idx, fx_name}} for two-dropdown linking
+    modulator_expanded = {},  -- {[mod_fx_idx] = true} -- which modulators show params
+    modulator_advanced = {},  -- {[mod_fx_idx] = true} -- advanced section expanded
 }
 
 -- Alias for convenience
@@ -102,9 +104,9 @@ end
 --- Refresh the top-level FX list from current track.
 function M.refresh_fx_list()
     state.top_level_fx = {}
-    if not state.track then 
+    if not state.track then
         state.last_fx_count = 0
-        return 
+        return
     end
 
     -- Safely access track (may have been deleted)
@@ -117,14 +119,14 @@ function M.refresh_fx_list()
         end
         state.last_fx_count = state.track:get_track_fx_count()
     end)
-    
+
     -- If track was deleted, clear state
     if not ok then
         state.track = nil
         state.last_fx_count = 0
         return
     end
-    
+
     -- Call refresh callback (e.g., renumber_device_chain)
     if M.on_refresh then
         M.on_refresh()
@@ -138,18 +140,18 @@ end
 
 --- Check if FX chain changed externally and refresh if needed.
 function M.check_fx_changes()
-    if not state.track then 
+    if not state.track then
         -- Clear FX list if track is gone
         state.top_level_fx = {}
         state.last_fx_count = 0
-        return 
+        return
     end
-    
+
     -- Safely check track FX count (track may have been deleted)
-    local ok, current_count = pcall(function() 
+    local ok, current_count = pcall(function()
         return state.track:get_track_fx_count()
     end)
-    
+
     if not ok then
         -- Track was deleted, clear state
         state.track = nil
@@ -157,7 +159,7 @@ function M.check_fx_changes()
         state.last_fx_count = 0
         return
     end
-    
+
     if current_count ~= state.last_fx_count then
         M.refresh_fx_list()
         -- Clear invalid selections
@@ -280,22 +282,22 @@ end
 --- Save expansion state to project.
 function M.save_expansion_state()
     if not state.track then return end
-    
+
     -- Safely get track GUID (track may have been deleted)
     local ok, track_guid = pcall(function() return state.track:get_guid() end)
-    if not ok or not track_guid then 
+    if not ok or not track_guid then
         -- Track was deleted or invalid, clear state
         state.track = nil
-        return 
+        return
     end
-    
+
     -- Serialize expansion state
     local data = {
         expanded_path = state.expanded_path,
         expanded_racks = state.expanded_racks,
         expanded_nested_chains = state.expanded_nested_chains,
     }
-    
+
     -- Convert to JSON-like string (simple serialization)
     local function serialize_table(t, indent)
         indent = indent or 0
@@ -320,7 +322,7 @@ function M.save_expansion_state()
             return tostring(t)
         end
     end
-    
+
     -- Use a simpler approach: serialize as key-value pairs
     local parts = {}
     -- Save expanded_path as comma-separated GUIDs
@@ -343,7 +345,7 @@ function M.save_expansion_state()
     if #chain_pairs > 0 then
         table.insert(parts, "expanded_nested_chains:" .. table.concat(chain_pairs, ","))
     end
-    
+
     local serialized = table.concat(parts, "|")
     if serialized ~= "" then
         r.SetProjExtState(0, "SideFX", "Expansion_" .. track_guid, serialized)
@@ -353,19 +355,19 @@ end
 --- Load expansion state from project.
 function M.load_expansion_state()
     if not state.track then return end
-    
+
     local track_guid = state.track:get_guid()
     if not track_guid then return end
-    
+
     local ok, serialized = r.GetProjExtState(0, "SideFX", "Expansion_" .. track_guid)
     if not ok or not serialized or serialized == "" then return end
-    
+
     -- Parse serialized data
     local parts = {}
     for part in serialized:gmatch("([^|]+)") do
         table.insert(parts, part)
     end
-    
+
     for _, part in ipairs(parts) do
         local key, value = part:match("^([^:]+):(.+)$")
         if key == "expanded_path" then
@@ -393,14 +395,14 @@ end
 --- Save display names to project.
 function M.save_display_names()
     if not state.track then return end
-    
+
     -- Safely get track GUID (track may have been deleted)
     local ok, track_guid = pcall(function() return state.track:get_guid() end)
-    if not ok or not track_guid then 
+    if not ok or not track_guid then
         state.track = nil
-        return 
+        return
     end
-    
+
     -- Serialize display_names as guid=name pairs
     local name_pairs = {}
     local count = 0
@@ -412,7 +414,7 @@ function M.save_display_names()
             count = count + 1
         end
     end
-    
+
     local key = "DisplayNames_" .. track_guid
     local ok_save, err = pcall(function()
         if count > 0 then
@@ -422,7 +424,7 @@ function M.save_display_names()
         -- Don't clear saved data when count is 0 - might be temporary empty state
         -- Only clear explicitly when needed (e.g., on track deletion)
     end)
-    
+
     if not ok_save then
         r.ShowConsoleMsg(string.format("SideFX: Error saving display names: %s\n", tostring(err)))
     end
@@ -431,19 +433,19 @@ end
 --- Load display names from project.
 function M.load_display_names()
     if not state.track then return end
-    
+
     local ok_guid, track_guid = pcall(function() return state.track:get_guid() end)
     if not ok_guid or not track_guid then return end
-    
+
     local key = "DisplayNames_" .. track_guid
     local ok, serialized = r.GetProjExtState(0, "SideFX", key)
-    
+
     -- ok is the length of the value (0 if not found), serialized is the actual value
-    if ok == 0 or not serialized or serialized == "" then 
+    if ok == 0 or not serialized or serialized == "" then
         state.display_names = {}
-        return 
+        return
     end
-    
+
     -- Parse serialized data
     state.display_names = {}
     for pair in serialized:gmatch("([^|]+)") do
