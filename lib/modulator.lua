@@ -7,6 +7,7 @@
 local r = reaper
 
 local state_module = require('lib.state')
+local fx_utils = require('lib.fx_utils')
 
 local M = {}
 
@@ -75,11 +76,13 @@ function M.get_linkable_fx()
     for fx_info in state.track:iter_all_fx_flat() do
         local fx = fx_info.fx
         local name = fx:get_name()
-        -- Skip SideFX internal JSFX (all start with "JS:SideFX/" or "JS: SideFX/")
-        -- and REAPER containers
-        local is_sidefx_jsfx = name and (name:match("^JS:%s?SideFX/") ~= nil)
-        local is_container = fx:is_container()
-        local is_internal = is_sidefx_jsfx or is_container
+        -- Use fx_utils to properly detect internal components
+        local is_internal = fx_utils.is_rack_container(fx) or
+                           fx_utils.is_chain_container(fx) or
+                           fx_utils.is_device_container(fx) or
+                           fx_utils.is_mixer_fx(fx) or
+                           fx_utils.is_utility_fx(fx) or
+                           fx_utils.is_modulator_fx(fx)
 
         if name and not is_internal then
             local params = {}
