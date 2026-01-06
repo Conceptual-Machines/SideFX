@@ -756,10 +756,9 @@ function M.draw(ctx, fx, opts)
                 local state_module = require('lib.state')
                 local state = state_module.state
 
-                -- Calculate slot dimensions to use available width
-                local avail_width = ctx:get_content_region_avail()
+                -- Use fixed square dimensions for slots
                 local slot_padding = 4  -- Padding between slots
-                local slot_width = (avail_width - slot_padding) / 2  -- 2 columns
+                local slot_width = cfg.mod_slot_width
                 local slot_height = cfg.mod_slot_height
 
                 -- 2×4 grid of modulator slots
