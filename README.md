@@ -1,7 +1,7 @@
 # SideFX
 
+[![CI](https://github.com/Conceptual-Machines/SideFX/actions/workflows/ci.yml/badge.svg)](https://github.com/Conceptual-Machines/SideFX/actions/workflows/ci.yml)
 [![Release](https://github.com/Conceptual-Machines/SideFX/actions/workflows/release.yml/badge.svg)](https://github.com/Conceptual-Machines/SideFX/actions/workflows/release.yml)
-[![Tests](https://github.com/Conceptual-Machines/SideFX/actions/workflows/tests.yml/badge.svg)](https://github.com/Conceptual-Machines/SideFX/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](https://github.com/Conceptual-Machines/SideFX/releases)
 
