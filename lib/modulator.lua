@@ -76,12 +76,12 @@ function M.get_linkable_fx()
         local fx = fx_info.fx
         local name = fx:get_name()
         -- Skip SideFX internal components (modulators, containers, utilities, mixers)
+        -- Match any variation: "JS: SideFX/...", "JS:SideFX/...", "SideFX_...", etc.
         local is_internal = name and (
-            name:find("SideFX Modulator") or
-            name:find("SideFX_Modulator") or
-            name:find("SideFX_Utility") or
-            name:find("SideFX_Mixer") or
-            name:find("Container")
+            name:find("SideFX") or  -- Catches all SideFX JSFX
+            name:find("Container") or
+            name:find("Rack") or
+            name:find("Chain")
         )
         if name and not is_internal then
             local params = {}
