@@ -1367,6 +1367,14 @@ function M.draw(ctx, fx, opts)
         ctx:end_child()  -- end panel
     end
 
+    -- Track panel clicks for device selection (for modulator panel)
+    if ctx:is_item_clicked(0) then
+        -- Use container if available, otherwise use FX itself
+        local select_target = container or fx
+        sidefx_state.selected_fx = select_target
+        interacted = true
+    end
+
     -- Right-click context menu
     if ctx:begin_popup_context_item("device_menu_" .. guid) then
         if ctx:menu_item("Open FX Window") then
@@ -1397,14 +1405,6 @@ function M.draw(ctx, fx, opts)
             end
         end
         ctx:end_popup()
-    end
-
-    -- Track panel clicks for device selection (for modulator panel)
-    if ctx:is_item_clicked(0) then
-        -- Use container if available, otherwise use FX itself
-        local select_target = container or fx
-        sidefx_state.selected_fx = select_target
-        interacted = true
     end
 
     ctx:pop_id()

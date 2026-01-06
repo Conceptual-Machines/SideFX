@@ -419,12 +419,12 @@ function M.draw(ctx, state, callbacks)
                 local selected_device = state.selected_fx
                 local device_guid = selected_device:get_guid()
 
-                -- Find the D-container for this device
-                -- The selected_fx might be the main plugin, we need its parent D-container
-                local device_container = selected_device:get_parent_container()
+                -- The selected_fx should be the D-container itself
+                -- (selected in device_panel.lua as 'container or fx')
+                local device_container = selected_device
 
-                if not device_container then
-                    ctx:text_colored(0x888888FF, "No container")
+                if not device_container or not device_container:is_container() then
+                    ctx:text_colored(0x888888FF, "Not a container")
                 else
                     -- Get modulators in this device
                     local modulators = get_device_modulators(device_container)
