@@ -99,7 +99,6 @@ local widgets = require('lib.ui.widgets')
 local browser_panel = require('lib.ui.browser_panel')
 local fx_menu = require('lib.ui.fx_menu')
 local fx_detail_panel = require('lib.ui.fx_detail_panel')
-local modulator_panel = require('lib.ui.modulator_panel')
 local toolbar = require('lib.ui.toolbar')
 local drag_drop = require('lib.ui.drag_drop')
 local rack_ui = require('lib.ui.rack_ui')
@@ -680,18 +679,6 @@ end
 
 -- Use fx_utils module for is_modulator_fx
 local is_modulator_fx = fx_utils.is_modulator_fx
-
-local function draw_modulator_column(ctx, width)
-    modulator_panel.draw(ctx, width, state, {
-        find_modulators_on_track = find_modulators_on_track,
-        get_linkable_fx = get_linkable_fx,
-        get_modulator_links = get_modulator_links,
-        create_param_link = create_param_link,
-        remove_param_link = remove_param_link,
-        add_modulator = add_modulator,
-        delete_modulator = delete_modulator,
-    })
-end
 
 --------------------------------------------------------------------------------
 -- UI: Toolbar (v2 - horizontal layout)
@@ -1782,9 +1769,8 @@ local function main()
 
             -- Layout dimensions
             local browser_w = 260
-            local modulator_w = 240
             local avail_w, avail_h = ctx:get_content_region_avail()
-            local chain_w = avail_w - browser_w - modulator_w - 20
+            local chain_w = avail_w - browser_w - 10
 
             -- Plugin Browser (fixed left)
             ctx:push_style_color(imgui.Col.ChildBg(), 0x1E1E22FF)
@@ -1855,31 +1841,25 @@ local function main()
                     ctx:pop_style_var()
                     ctx:pop_style_color()
                 else
-                    -- Filter out modulators from top_level_fx
-                    -- Also filter out invalid FX (from deleted tracks)
+                    -- Filter out invalid FX (from deleted tracks)
                     local filtered_fx = {}
                     for _, fx in ipairs(state.top_level_fx) do
                         -- Validate FX is still accessible (track may have been deleted)
                         local ok = pcall(function()
                             return fx:get_name()
                         end)
-                        if ok and not is_modulator_fx(fx) then
+                        if ok then
                             table.insert(filtered_fx, fx)
                         end
                     end
 
-                    -- Draw the horizontal device chain
+                    -- Draw the horizontal device chain (includes modulators)
                     draw_device_chain(ctx, filtered_fx, chain_w, avail_h)
                 end
 
                 ctx:end_child()
             end
             ctx:pop_style_color()
-
-            ctx:same_line()
-
-            -- Modulator column (fixed right)
-            draw_modulator_column(ctx, modulator_w)
 
             reaper_theme:unapply(ctx)
 

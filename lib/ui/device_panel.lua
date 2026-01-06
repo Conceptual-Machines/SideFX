@@ -6,6 +6,7 @@
 
 local r = reaper
 local widgets = require('lib.ui.widgets')
+local fx_utils = require('lib.fx_utils')
 
 local M = {}
 
@@ -76,37 +77,37 @@ local function draw_ui_icon(ctx, label, width, height)
     -- Invisible button for interaction
     r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
     local clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
-    
+
     -- Get button bounds for drawing
     local item_min_x, item_min_y = r.ImGui_GetItemRectMin(ctx.ctx)
     local item_max_x, item_max_y = r.ImGui_GetItemRectMax(ctx.ctx)
-    
+
     -- Draw window/screen icon using DrawList
     local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
     local center_x = (item_min_x + item_max_x) / 2
     local center_y = (item_min_y + item_max_y) / 2
     local icon_size = 12
     local half_size = icon_size / 2
-    
+
     -- Draw a simple window icon: rectangle with a line in the middle (like a window)
     local x1 = center_x - half_size
     local y1 = center_y - half_size
     local x2 = center_x + half_size
     local y2 = center_y + half_size
-    
+
     -- Greyish color for the icon
     local icon_color = 0xAAAAAAFF
     -- Border color
     local border_color = 0x666666FF
-    
+
     -- Draw border around the button
     r.ImGui_DrawList_AddRect(draw_list, item_min_x, item_min_y, item_max_x, item_max_y, border_color, 0, 0, 1.0)
-    
+
     -- Outer rectangle (window frame) - signature: (draw_list, x1, y1, x2, y2, color, rounding, flags, thickness)
     r.ImGui_DrawList_AddRect(draw_list, x1, y1, x2, y2, icon_color, 0, 0, 2)
     -- Inner line (window pane divider)
     r.ImGui_DrawList_AddLine(draw_list, center_x, y1, center_x, y2, icon_color, 1.5)
-    
+
     return clicked
 end
 
@@ -125,19 +126,19 @@ local function draw_on_off_circle(ctx, label, is_on, width, height, bg_color_on,
     local center_x = cursor_x + width / 2
     local center_y = cursor_y + height / 2
     local radius = 6  -- Small circle radius
-    
+
     -- Invisible button for interaction
     r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
     local clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
     local is_hovered = r.ImGui_IsItemHovered(ctx.ctx)
-    
+
     -- Draw background and circle
     local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-    
+
     -- Draw background rectangle
     local bg_color = is_on and (bg_color_on or colors.bypass_on) or (bg_color_off or colors.bypass_off)
     r.ImGui_DrawList_AddRectFilled(draw_list, cursor_x, cursor_y, cursor_x + width, cursor_y + height, bg_color, 0)
-    
+
     if is_on then
         -- Filled circle for ON state
         r.ImGui_DrawList_AddCircleFilled(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12)
@@ -145,7 +146,7 @@ local function draw_on_off_circle(ctx, label, is_on, width, height, bg_color_on,
         -- Empty circle (outline only) for OFF state
         r.ImGui_DrawList_AddCircle(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12, 2)
     end
-    
+
     return clicked
 end
 
@@ -310,7 +311,7 @@ end
 
 local function get_display_name(fx)
     if not fx then return "Unknown" end
-    
+
     -- Check for custom display name first (SideFX-only renaming)
     local ok_guid, guid = pcall(function() return fx:get_guid() end)
     if ok_guid and guid then
@@ -320,7 +321,7 @@ local function get_display_name(fx)
             return state.display_names[guid]
         end
     end
-    
+
     -- Fall back to internal name with prefixes stripped
     local name = get_internal_name(fx)
 
@@ -436,6 +437,387 @@ local function reset_param_logging()
 end
 
 --------------------------------------------------------------------------------
+-- Modulator Support
+--------------------------------------------------------------------------------
+
+-- Modulator parameter mapping (same as modulator_panel.lua)
+local MODULATOR_PARAMS = {
+    tempo_mode = 0,    -- slider1 (param 0)
+    rate_hz = 1,       -- slider2 (param 1)
+    sync_rate = 2,     -- slider3 (param 2)
+    phase = 4,         -- slider5 (param 4)
+    depth = 5,         -- slider6 (param 5)
+    trigger_mode = 6,  -- slider20 (param 6)
+    midi_source = 7,   -- slider21 (param 7)
+    midi_note = 8,     -- slider22 (param 8)
+    audio_thresh = 9,  -- slider23 (param 9)
+    attack_ms = 10,    -- slider24 (param 10)
+    release_ms = 11,   -- slider25 (param 11)
+    lfo_mode = 12,     -- slider28 (param 12)
+}
+
+local SYNC_RATES = {
+    "8 bars", "4 bars", "2 bars", "1 bar",
+    "1/2", "1/4", "1/4T", "1/4.",
+    "1/8", "1/8T", "1/8.",
+    "1/16", "1/16T", "1/16.",
+    "1/32", "1/32T", "1/32.",
+    "1/64"
+}
+
+local TRIGGER_MODES = {"Free", "Transport", "MIDI", "Audio"}
+local MIDI_SOURCES = {"This Track", "MIDI Bus"}
+
+-- Track advanced section state per modulator (by GUID)
+local modulator_advanced = {}
+
+--- Draw modulator-specific device panel
+-- @param ctx ImGui context wrapper
+-- @param fx ReaWrap FX object (modulator)
+-- @param opts table Options {on_delete, avail_height, icon_font, ...}
+-- @param guid string FX GUID
+-- @return boolean True if panel was interacted with
+local function draw_modulator_panel(ctx, fx, opts, guid)
+    local cfg = M.config
+    local colors = M.colors
+    local imgui = require('imgui')
+
+    -- Get modulator name
+    local ok_name, name = pcall(function() return fx:get_name() end)
+    if not ok_name then name = "Modulator" end
+
+    local ok_enabled, enabled = pcall(function() return fx:get_enabled() end)
+    if not ok_enabled then enabled = false end
+
+    local avail_height = opts.avail_height or 600
+
+    -- Fixed panel dimensions for modulator (narrower than regular devices)
+    local panel_width = 240
+    local panel_height = avail_height
+
+    local interacted = false
+
+    ctx:push_id(guid)
+
+    -- Panel background
+    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+
+    -- Draw panel frame
+    r.ImGui_DrawList_AddRectFilled(draw_list,
+        cursor_x, cursor_y,
+        cursor_x + panel_width, cursor_y + panel_height,
+        colors.panel_bg, cfg.border_radius)
+    r.ImGui_DrawList_AddRect(draw_list,
+        cursor_x, cursor_y,
+        cursor_x + panel_width, cursor_y + panel_height,
+        colors.panel_border, cfg.border_radius, 0, 1)
+
+    -- Begin child for panel content
+    ctx:push_style_var(imgui.StyleVar.WindowPadding(), cfg.padding, cfg.padding)
+    ctx:push_style_color(imgui.Col.ChildBg(), 0x00000000)  -- Transparent
+
+    if ctx:begin_child("modpanel_" .. guid, panel_width, panel_height, 0) then
+        -- HEADER
+        ctx:push_style_var(imgui.StyleVar.FrameRounding(), 3)
+
+        -- UI Button
+        if draw_ui_icon(ctx, "##ui_" .. guid, 24, 20) then
+            fx:show(3)
+            interacted = true
+        end
+        ctx:same_line()
+
+        -- ON/OFF Button
+        local on_clicked = draw_on_off_circle(ctx, "##on_" .. guid, enabled, 24, 20,
+            0x336633FF, 0x663333FF)
+        if on_clicked then
+            fx:set_enabled(not enabled)
+            interacted = true
+        end
+        ctx:same_line()
+
+        -- Delete Button (X)
+        ctx:push_style_color(imgui.Col.Button(), 0x663333FF)
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x884444FF)
+        if ctx:small_button("X##del_" .. guid) then
+            if opts.on_delete then
+                opts.on_delete(fx)
+            end
+            interacted = true
+        end
+        ctx:pop_style_color(2)
+
+        ctx:same_line()
+        ctx:text_colored(colors.header_text, "LFO")
+
+        ctx:separator()
+        ctx:spacing()
+
+        ctx:pop_style_var()  -- FrameRounding
+
+        -- MODULATOR CONTROLS
+        local control_width = panel_width - cfg.padding * 2 - 20
+
+        -- Safely get parameters
+        local ok_tempo, tempo_mode = pcall(function() return fx:get_param_normalized(MODULATOR_PARAMS.tempo_mode) end)
+        if not ok_tempo then
+            ctx:end_child()
+            ctx:pop_style_color()
+            ctx:pop_style_var()
+            ctx:pop_id()
+            return interacted
+        end
+
+        local is_sync = tempo_mode > 0.5
+
+        -- Rate Mode Toggle
+        ctx:text("Rate:")
+        ctx:same_line()
+        local button_width = 50
+        if not is_sync then
+            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+        end
+        if ctx:button("Free##mode", button_width, 0) then
+            pcall(function() fx:set_param_normalized(MODULATOR_PARAMS.tempo_mode, 0) end)
+            interacted = true
+        end
+        if not is_sync then
+            ctx:pop_style_color()
+        end
+
+        ctx:same_line()
+        if is_sync then
+            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+        end
+        if ctx:button("Sync##mode", button_width, 0) then
+            pcall(function() fx:set_param_normalized(MODULATOR_PARAMS.tempo_mode, 1) end)
+            interacted = true
+        end
+        if is_sync then
+            ctx:pop_style_color()
+        end
+
+        -- LFO Mode Toggle
+        local ok_lfo, lfo_mode = pcall(function() return fx:get_param_normalized(MODULATOR_PARAMS.lfo_mode) end)
+        if ok_lfo then
+            local is_oneshot = lfo_mode > 0.5
+
+            ctx:text("Mode:")
+            ctx:same_line()
+
+            if not is_oneshot then
+                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+            end
+            if ctx:button("Loop##lfo", button_width, 0) then
+                pcall(function() fx:set_param_normalized(MODULATOR_PARAMS.lfo_mode, 0) end)
+                interacted = true
+            end
+            if not is_oneshot then
+                ctx:pop_style_color()
+            end
+
+            ctx:same_line()
+            if is_oneshot then
+                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+            end
+            if ctx:button("One Shot##lfo", button_width + 30, 0) then
+                pcall(function() fx:set_param_normalized(MODULATOR_PARAMS.lfo_mode, 1) end)
+                interacted = true
+            end
+            if is_oneshot then
+                ctx:pop_style_color()
+            end
+        end
+
+        -- Rate Control (Hz or Sync)
+        ctx:set_next_item_width(control_width)
+        if not is_sync then
+            -- Free mode: Hz slider
+            local ok_rate, rate_hz = pcall(function() return fx:get_param_normalized(MODULATOR_PARAMS.rate_hz) end)
+            if ok_rate then
+                local hz_val = 0.01 + rate_hz * 19.99
+                local changed, new_hz = ctx:slider_double("##rate_hz", hz_val, 0.01, 20, "%.2f Hz")
+                if changed then
+                    local norm_val = (new_hz - 0.01) / 19.99
+                    pcall(function() fx:set_param_normalized(MODULATOR_PARAMS.rate_hz, norm_val) end)
+                    interacted = true
+                end
+            end
+        else
+            -- Sync mode: dropdown
+            local ok_sync, sync_rate = pcall(function() return fx:get_param_normalized(MODULATOR_PARAMS.sync_rate) end)
+            if ok_sync then
+                local sync_idx = math.floor(sync_rate * 17 + 0.5)
+                sync_idx = math.max(0, math.min(17, sync_idx))
+                if ctx:begin_combo("##sync_rate", SYNC_RATES[sync_idx + 1]) then
+                    for i, label in ipairs(SYNC_RATES) do
+                        if ctx:selectable(label, i - 1 == sync_idx) then
+                            local norm_val = (i - 1) / 17
+                            pcall(function() fx:set_param_normalized(MODULATOR_PARAMS.sync_rate, norm_val) end)
+                            interacted = true
+                        end
+                    end
+                    ctx:end_combo()
+                end
+            end
+        end
+
+        ctx:spacing()
+
+        -- Phase Slider
+        local ok_phase, phase = pcall(function() return fx:get_param_normalized(MODULATOR_PARAMS.phase) end)
+        if ok_phase then
+            ctx:text("Phase:")
+            ctx:set_next_item_width(control_width)
+            local phase_deg = phase * 360
+            local changed, new_deg = ctx:slider_double("##phase", phase_deg, 0, 360, "%.0f°")
+            if changed then
+                pcall(function() fx:set_param_normalized(MODULATOR_PARAMS.phase, new_deg / 360) end)
+                interacted = true
+            end
+        end
+
+        -- Depth Slider
+        local ok_depth, depth = pcall(function() return fx:get_param_normalized(MODULATOR_PARAMS.depth) end)
+        if ok_depth then
+            ctx:text("Depth:")
+            ctx:set_next_item_width(control_width)
+            local depth_pct = depth * 100
+            local changed, new_pct = ctx:slider_double("##depth", depth_pct, 0, 100, "%.0f%%")
+            if changed then
+                pcall(function() fx:set_param_normalized(MODULATOR_PARAMS.depth, new_pct / 100) end)
+                interacted = true
+            end
+        end
+
+        ctx:spacing()
+        ctx:separator()
+        ctx:spacing()
+
+        -- Trigger Mode
+        local ok_trig, trigger_mode = pcall(function() return fx:get_param_normalized(MODULATOR_PARAMS.trigger_mode) end)
+        if ok_trig then
+            local trigger_idx = math.floor(trigger_mode * 3 + 0.5)
+            trigger_idx = math.max(0, math.min(3, trigger_idx))
+
+            ctx:text("Trigger:")
+            ctx:set_next_item_width(control_width)
+            if ctx:begin_combo("##trigger", TRIGGER_MODES[trigger_idx + 1]) then
+                for i, label in ipairs(TRIGGER_MODES) do
+                    if ctx:selectable(label, i - 1 == trigger_idx) then
+                        local norm_val = (i - 1) / 3
+                        pcall(function() fx:set_param_normalized(MODULATOR_PARAMS.trigger_mode, norm_val) end)
+                        interacted = true
+                    end
+                end
+                ctx:end_combo()
+            end
+
+            -- Advanced section for MIDI/Audio parameters
+            if trigger_idx == 2 or trigger_idx == 3 then
+                local is_advanced = modulator_advanced[guid] or false
+                if ctx:small_button(is_advanced and "▼ Advanced##adv" or "▶ Advanced##adv") then
+                    modulator_advanced[guid] = not is_advanced
+                    interacted = true
+                end
+
+                if is_advanced then
+                    ctx:indent(10)
+
+                    -- MIDI controls (only if Trigger=MIDI)
+                    if trigger_idx == 2 then
+                        local ok_src, midi_src = pcall(function() return fx:get_param_normalized(MODULATOR_PARAMS.midi_source) end)
+                        if ok_src then
+                            local src_idx = midi_src > 0.5 and 1 or 0
+                            ctx:text("MIDI Source:")
+                            ctx:set_next_item_width(control_width - 30)
+                            if ctx:begin_combo("##midi_src", MIDI_SOURCES[src_idx + 1]) then
+                                for i, label in ipairs(MIDI_SOURCES) do
+                                    if ctx:selectable(label, i - 1 == src_idx) then
+                                        pcall(function() fx:set_param_normalized(MODULATOR_PARAMS.midi_source, i - 1) end)
+                                        interacted = true
+                                    end
+                                end
+                                ctx:end_combo()
+                            end
+                        end
+
+                        local ok_note, midi_note = pcall(function() return fx:get_param_normalized(MODULATOR_PARAMS.midi_note) end)
+                        if ok_note then
+                            local note_val = math.floor(midi_note * 127 + 0.5)
+                            ctx:text("MIDI Note:")
+                            ctx:set_next_item_width(control_width - 30)
+                            local changed, new_note = ctx:slider_double("##midi_note", note_val, 0, 127, "%.0f")
+                            if changed then
+                                pcall(function() fx:set_param_normalized(MODULATOR_PARAMS.midi_note, new_note / 127) end)
+                                interacted = true
+                            end
+                        end
+                    end
+
+                    -- Audio Threshold (only if Trigger=Audio)
+                    if trigger_idx == 3 then
+                        local ok_thresh, audio_thresh = pcall(function() return fx:get_param_normalized(MODULATOR_PARAMS.audio_thresh) end)
+                        if ok_thresh then
+                            local thresh_pct = audio_thresh * 100
+                            ctx:text("Threshold:")
+                            ctx:set_next_item_width(control_width - 30)
+                            local changed, new_pct = ctx:slider_double("##audio_thresh", thresh_pct, 0, 100, "%.0f%%")
+                            if changed then
+                                pcall(function() fx:set_param_normalized(MODULATOR_PARAMS.audio_thresh, new_pct / 100) end)
+                                interacted = true
+                            end
+                        end
+                    end
+
+                    -- Attack/Release (for both MIDI and Audio)
+                    if trigger_idx == 2 or trigger_idx == 3 then
+                        local ok_atk, attack_ms = pcall(function() return fx:get_param_normalized(MODULATOR_PARAMS.attack_ms) end)
+                        if ok_atk then
+                            local atk_val = 1 + attack_ms * 1999
+                            ctx:text("Attack:")
+                            ctx:set_next_item_width(control_width - 30)
+                            local changed, new_atk = ctx:slider_double("##attack", atk_val, 1, 2000, "%.0f ms")
+                            if changed then
+                                pcall(function() fx:set_param_normalized(MODULATOR_PARAMS.attack_ms, (new_atk - 1) / 1999) end)
+                                interacted = true
+                            end
+                        end
+
+                        local ok_rel, release_ms = pcall(function() return fx:get_param_normalized(MODULATOR_PARAMS.release_ms) end)
+                        if ok_rel then
+                            local rel_val = 1 + release_ms * 4999
+                            ctx:text("Release:")
+                            ctx:set_next_item_width(control_width - 30)
+                            local changed, new_rel = ctx:slider_double("##release", rel_val, 1, 5000, "%.0f ms")
+                            if changed then
+                                pcall(function() fx:set_param_normalized(MODULATOR_PARAMS.release_ms, (new_rel - 1) / 4999) end)
+                                interacted = true
+                            end
+                        end
+                    end
+
+                    ctx:unindent(10)
+                end
+            end
+        end
+
+        ctx:end_child()
+    end
+
+    ctx:pop_style_color()  -- ChildBg
+    ctx:pop_style_var()    -- WindowPadding
+    ctx:pop_id()
+
+    -- Dummy to advance cursor horizontally
+    ctx:same_line()
+    ctx:dummy(0, 0)
+
+    return interacted
+end
+
+--------------------------------------------------------------------------------
 -- Device Panel Component
 --------------------------------------------------------------------------------
 
@@ -448,7 +830,7 @@ function M.draw(ctx, fx, opts)
     opts = opts or {}
     local cfg = M.config
     local colors = M.colors
-    
+
     -- Get icon font for UI button
     local icon_font = opts.icon_font
     local constants = require('lib.constants')
@@ -460,6 +842,12 @@ function M.draw(ctx, fx, opts)
     -- Safety check: FX might have been deleted
     local ok, guid = pcall(function() return fx:get_guid() end)
     if not ok or not guid then return false end
+
+    -- Check if this is a modulator - if so, use modulator-specific rendering
+    local is_modulator = fx_utils.is_modulator_fx(fx)
+    if is_modulator then
+        return draw_modulator_panel(ctx, fx, opts, guid)
+    end
 
     -- Use container GUID for drag/drop if we have a container
     local container = opts.container
@@ -573,9 +961,9 @@ function M.draw(ctx, fx, opts)
             if r.ImGui_BeginTable(ctx.ctx, "header_collapsed_" .. guid, 2, 0) then
                 r.ImGui_TableSetupColumn(ctx.ctx, "collapse", r.ImGui_TableColumnFlags_WidthFixed(), 24)
                 r.ImGui_TableSetupColumn(ctx.ctx, "path", r.ImGui_TableColumnFlags_WidthStretch())
-                
+
                 r.ImGui_TableNextRow(ctx.ctx)
-                
+
                 -- Collapse button
                 r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
                 ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
@@ -589,7 +977,7 @@ function M.draw(ctx, fx, opts)
                 if r.ImGui_IsItemHovered(ctx.ctx) then
                     ctx:set_tooltip("Expand panel")
                 end
-                
+
                 -- Path identifier
                 r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
                 if device_id then
@@ -597,7 +985,7 @@ function M.draw(ctx, fx, opts)
                     ctx:text("[" .. device_id .. "]")
                     ctx:pop_style_color()
                 end
-                
+
                 r.ImGui_EndTable(ctx.ctx)
             end
         else
@@ -677,7 +1065,7 @@ function M.draw(ctx, fx, opts)
             local sidefx_state = state_module.state
             local rename_guid = guid  -- Use FX GUID for renaming
             local is_renaming = (sidefx_state.renaming_fx == rename_guid)
-            
+
             if is_renaming then
                 -- Rename mode: show input text (just the name)
                 ctx:set_next_item_width(-1)
@@ -821,9 +1209,9 @@ function M.draw(ctx, fx, opts)
                 r.ImGui_TableSetupColumn(ctx.ctx, "ui", r.ImGui_TableColumnFlags_WidthStretch())
                 r.ImGui_TableSetupColumn(ctx.ctx, "on", r.ImGui_TableColumnFlags_WidthStretch())
                 r.ImGui_TableSetupColumn(ctx.ctx, "x", r.ImGui_TableColumnFlags_WidthStretch())
-                
+
                 r.ImGui_TableNextRow(ctx.ctx)
-                
+
                 -- UI button
                 r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
                 -- Draw custom UI icon (border is drawn inside the function)
@@ -834,7 +1222,7 @@ function M.draw(ctx, fx, opts)
                 if r.ImGui_IsItemHovered(ctx.ctx) then
                     ctx:set_tooltip("Open " .. name)
                 end
-                
+
                 -- ON/OFF toggle
                 r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
                 -- Draw custom circle indicator with colored background
@@ -843,7 +1231,7 @@ function M.draw(ctx, fx, opts)
                     fx:set_enabled(not enabled)
                     interacted = true
                 end
-                
+
                 -- Close button
                 r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
                 ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
@@ -857,10 +1245,10 @@ function M.draw(ctx, fx, opts)
                     interacted = true
                 end
                 ctx:pop_style_color(2)
-                
+
                 r.ImGui_EndTable(ctx.ctx)
             end
-            
+
             -- Row 2: name
             ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAAAAFF)
             ctx:text(name)
@@ -1014,9 +1402,9 @@ function M.draw(ctx, fx, opts)
                     if ctx:begin_table("mix_delta_" .. state_guid, 2, table_flags) then
                         ctx:table_setup_column("mix", imgui.TableColumnFlags.WidthStretch())
                         ctx:table_setup_column("delta", imgui.TableColumnFlags.WidthStretch())
-                        
+
                         ctx:table_next_row()
-                        
+
                         -- Mix column
                         ctx:table_set_column_index(0)
                         if has_mix then
@@ -1050,7 +1438,7 @@ function M.draw(ctx, fx, opts)
                                 ctx:set_tooltip(string.format("Device Mix: %.0f%% (parallel blend)", mix_val * 100))
                             end
                         end
-                        
+
                         -- Delta column
                         ctx:table_set_column_index(1)
                         if has_delta then
@@ -1063,7 +1451,7 @@ function M.draw(ctx, fx, opts)
                             ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAACCFF)
                             ctx:text(delta_text)
                             ctx:pop_style_color()
-                            
+
                             -- Center button vertically with mix knob
                             -- Mix column: label (~20px) + spacing (~5px) + knob (30px) + spacing (~5px) + value (~20px) = ~80px total
                             -- Knob center is at: label (20px) + spacing (5px) + knob_radius (15px) = ~40px from top
@@ -1096,7 +1484,7 @@ function M.draw(ctx, fx, opts)
                                 ctx:set_tooltip(delta_on and "Delta Solo: ON (wet - dry)" or "Delta Solo: OFF")
                             end
                         end
-                        
+
                         ctx:end_table()
                     end
                 end
@@ -1138,25 +1526,25 @@ function M.draw(ctx, fx, opts)
                         local fader_w = 32
                         local meter_w = 12
                         local scale_w = 20
-                        
+
                         -- Calculate fader height (accounting for pan slider above)
                         local _, remaining_h = ctx:get_content_region_avail()
                         local fader_h = remaining_h - 22  -- Leave room for dB label
                         fader_h = math.max(50, fader_h)  -- Minimum 50px, but can extend
-                        
+
                         local avail_w, _ = ctx:get_content_region_avail()
                         local total_w = scale_w + fader_w + meter_w + 4
                         local offset_x = math.max(0, (avail_w - total_w) / 2)
-                        
+
                         ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + offset_x)
-                        
+
                         local screen_x, screen_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
                         local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-                        
+
                         local scale_x = screen_x
                         local fader_x = screen_x + scale_w + 2
                         local meter_x = fader_x + fader_w + 2
-                        
+
                         -- dB scale
                         local db_marks = {24, 12, 0, -12, -24}
                         for _, db in ipairs(db_marks) do
@@ -1168,7 +1556,7 @@ function M.draw(ctx, fx, opts)
                                 r.ImGui_DrawList_AddText(draw_list, scale_x, mark_y - 5, 0x888888FF, label)
                             end
                         end
-                        
+
                         -- Fader background
                         r.ImGui_DrawList_AddRectFilled(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x1A1A1AFF, 3)
                         -- Fader fill
@@ -1183,14 +1571,14 @@ function M.draw(ctx, fx, opts)
                         local zero_db_norm = 24 / 48
                         local zero_y = screen_y + fader_h - (fader_h * zero_db_norm)
                         r.ImGui_DrawList_AddLine(draw_list, fader_x, zero_y, fader_x + fader_w, zero_y, 0xFFFFFF44, 1)
-                        
+
                         -- Stereo meters
                         local meter_l_x = meter_x
                         local meter_r_x = meter_x + meter_w / 2 + 1
                         local half_meter_w = meter_w / 2 - 1
                         r.ImGui_DrawList_AddRectFilled(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
                         r.ImGui_DrawList_AddRectFilled(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
-                        
+
                         -- Get track for meters (if available)
                         local state_module = require('lib.state')
                         local sidefx_state = state_module.state
@@ -1217,10 +1605,10 @@ function M.draw(ctx, fx, opts)
                             draw_meter_bar(meter_l_x + 1, half_meter_w - 1, peak_l)
                             draw_meter_bar(meter_r_x + 1, half_meter_w - 1, peak_r)
                         end
-                        
+
                         r.ImGui_DrawList_AddRect(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
                         r.ImGui_DrawList_AddRect(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
-                        
+
                         -- Invisible slider for fader interaction
                         r.ImGui_SetCursorScreenPos(ctx.ctx, fader_x, screen_y)
                         local imgui = require('imgui')
@@ -1240,7 +1628,7 @@ function M.draw(ctx, fx, opts)
                             interacted = true
                         end
                         ctx:pop_style_color(5)
-                        
+
                         -- dB label below fader (with double-click editing)
                         local label_h = 16
                         local label_y = screen_y + fader_h + 2
@@ -1249,16 +1637,16 @@ function M.draw(ctx, fx, opts)
                         local db_label = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db))
                         local text_w = r.ImGui_CalcTextSize(ctx.ctx, db_label)
                         r.ImGui_DrawList_AddText(draw_list, label_x + (fader_w - text_w) / 2, label_y + 1, 0xCCCCCCFF, db_label)
-                        
+
                         -- Invisible button for dB label (for double-click editing)
                         r.ImGui_SetCursorScreenPos(ctx.ctx, label_x, label_y)
                         ctx:invisible_button("##gain_db_label", fader_w, label_h)
-                        
+
                         -- Double-click on dB label to edit value
                         if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
                             ctx:open_popup("##gain_edit_popup")
                         end
-                        
+
                         -- Edit popup for gain
                         if ctx:begin_popup("##gain_edit_popup") then
                             local imgui = require('imgui')
@@ -1275,7 +1663,7 @@ function M.draw(ctx, fx, opts)
                             end
                             ctx:end_popup()
                         end
-                        
+
                         -- Advance cursor past fader
                         r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, label_y + label_h)
                     end
