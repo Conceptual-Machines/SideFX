@@ -622,7 +622,12 @@ function M.draw(ctx, fx, opts)
         -- Calculate panel width: columns + sidebar (if visible) + padding
         content_width = cfg.column_width * num_columns
         local sidebar_w = is_sidebar_collapsed and collapsed_sidebar_w or (cfg.sidebar_width + cfg.sidebar_padding)
-        panel_width = content_width + sidebar_w + cfg.padding * 2
+
+        -- Add modulator sidebar width (will be calculated inside)
+        -- For now, assume collapsed (24px) - will be finalized inside the panel
+        local mod_sidebar_estimate = cfg.mod_sidebar_collapsed_width
+
+        panel_width = content_width + sidebar_w + mod_sidebar_estimate + cfg.padding * 2
     end
 
     local interacted = false
@@ -938,19 +943,25 @@ function M.draw(ctx, fx, opts)
 
             -- UI button
             ctx:table_set_column_index(3)
-            if draw_ui_icon(ctx, "##ui_header_" .. state_guid, 24, 20) then
-                fx:show(3)
-                interacted = true
-            end
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip("Open native FX window")
+            local ui_col_w = ctx:get_content_region_avail()
+            if ui_col_w > 0 then
+                if draw_ui_icon(ctx, "##ui_header_" .. state_guid, math.min(24, ui_col_w), 20) then
+                    fx:show(3)
+                    interacted = true
+                end
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Open native FX window")
+                end
             end
 
             -- ON/OFF toggle
             ctx:table_set_column_index(4)
-            if draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, 24, 20, colors.bypass_on, colors.bypass_off) then
-                fx:set_enabled(not enabled)
-                interacted = true
+            local on_col_w = ctx:get_content_region_avail()
+            if on_col_w > 0 then
+                if draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, math.min(24, on_col_w), 20, colors.bypass_on, colors.bypass_off) then
+                    fx:set_enabled(not enabled)
+                    interacted = true
+                end
             end
 
             -- Close button
