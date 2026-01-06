@@ -25,6 +25,12 @@ M.config = {
     fader_width = 28,          -- Fader width
     fader_height = 70,         -- Fader height
     knob_size = 48,            -- Knob diameter
+    -- Modulator sidebar (left side of device)
+    mod_sidebar_width = 240,   -- Width for modulator 2×4 grid
+    mod_sidebar_collapsed_width = 24,  -- Collapsed width
+    mod_slot_width = 110,
+    mod_slot_height = 50,
+    mod_slot_padding = 4,
 }
 
 -- Utility JSFX name for detection
@@ -58,6 +64,12 @@ local sidebar_collapsed = {}
 
 -- Track panel collapsed state per FX (by GUID) - collapses the whole panel to just header
 local panel_collapsed = {}
+
+-- Track modulator sidebar collapsed state per device container (by GUID)
+local mod_sidebar_collapsed = {}
+
+-- Track which modulator slot is expanded per device container (by GUID)
+local expanded_mod_slot = {}  -- {[device_guid] = slot_index} or nil
 
 -- Rename state: which FX is being renamed and the edit buffer
 local rename_active = {}    -- guid -> true if rename mode active
@@ -437,6 +449,66 @@ local function reset_param_logging()
 end
 
 --------------------------------------------------------------------------------
+-- Modulator Support
+--------------------------------------------------------------------------------
+
+-- Available modulator types
+local MODULATOR_TYPES = {
+    {id = "bezier_lfo", name = "Bezier LFO", jsfx = "JS:SideFX/SideFX_Modulator"},
+    -- Future: Classic LFO, ADSR, etc.
+}
+
+--- Get all modulators inside a device container
+-- @param device_container TrackFX D-container
+-- @return table Array of modulator FX objects
+local function get_device_modulators(device_container)
+    if not device_container or not device_container:is_container() then
+        return {}
+    end
+
+    local modulators = {}
+    local ok, iter = pcall(function() return device_container:iter_container_children() end)
+    if not ok then return {} end
+
+    for child in iter do
+        if fx_utils.is_modulator_fx(child) then
+            table.insert(modulators, child)
+        end
+    end
+
+    return modulators
+end
+
+--- Add a modulator to a device container
+-- @param device_container TrackFX D-container
+-- @param modulator_type table Modulator type definition
+-- @param track Track object
+-- @return TrackFX|nil Modulator FX object or nil on failure
+local function add_modulator_to_device(device_container, modulator_type, track)
+    if not track or not device_container then return nil end
+
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+
+    -- Add the modulator JSFX at track level first
+    local modulator = track:add_fx_by_name(modulator_type.jsfx, false, -1)
+
+    if modulator and modulator.pointer >= 0 then
+        -- Move the modulator into the device container
+        device_container:add_fx_to_container(modulator, -1)
+
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Modulator to Device", -1)
+
+        return modulator
+    end
+
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Add Modulator to Device", -1)
+    return nil
+end
+
+--------------------------------------------------------------------------------
 -- Device Panel Component
 --------------------------------------------------------------------------------
 
@@ -561,33 +633,122 @@ function M.draw(ctx, fx, opts)
     local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
     local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
 
-    -- Check if this device is selected (for modulator panel link)
-    local state_module = require('lib.state')
-    local sidefx_state = state_module.state
-    local is_selected = false
-    if sidefx_state.selected_fx then
-        local ok_sel_guid, sel_guid = pcall(function() return sidefx_state.selected_fx:get_guid() end)
-        if ok_sel_guid and sel_guid == drag_guid then
-            is_selected = true
-        end
-    end
-
-    -- Draw panel frame (with selection highlight)
-    local panel_bg_color = is_selected and 0x3A3A4AFF or colors.panel_bg
-    local border_color = is_selected and 0x6688AAFF or colors.panel_border
-    local border_thickness = is_selected and 2 or 1
-
+    -- Draw panel frame
     r.ImGui_DrawList_AddRectFilled(draw_list,
         cursor_x, cursor_y,
         cursor_x + panel_width, cursor_y + panel_height,
-        panel_bg_color, cfg.border_radius)
+        colors.panel_bg, cfg.border_radius)
     r.ImGui_DrawList_AddRect(draw_list,
         cursor_x, cursor_y,
         cursor_x + panel_width, cursor_y + panel_height,
-        border_color, cfg.border_radius, 0, border_thickness)
+        colors.panel_border, cfg.border_radius, 0, 1)
 
     -- Begin child for panel content
     if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0) then
+
+        -- Get modulator sidebar state (default to collapsed)
+        if mod_sidebar_collapsed[state_guid] == nil then
+            mod_sidebar_collapsed[state_guid] = true
+        end
+        local is_mod_sidebar_collapsed = mod_sidebar_collapsed[state_guid]
+        local mod_sidebar_w = is_mod_sidebar_collapsed and cfg.mod_sidebar_collapsed_width or cfg.mod_sidebar_width
+
+        -- Wrapper table: [Modulator Sidebar | Main Content]
+        if r.ImGui_BeginTable(ctx.ctx, "device_wrapper_" .. guid, 2, r.ImGui_TableFlags_BordersInnerV()) then
+            r.ImGui_TableSetupColumn(ctx.ctx, "modulators", r.ImGui_TableColumnFlags_WidthFixed(), mod_sidebar_w)
+            r.ImGui_TableSetupColumn(ctx.ctx, "content", r.ImGui_TableColumnFlags_WidthStretch())
+
+            r.ImGui_TableNextRow(ctx.ctx)
+
+            -- === MODULATOR SIDEBAR ===
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+
+            -- TODO: Draw modulator sidebar here
+            if is_mod_sidebar_collapsed then
+                -- Collapsed: show expand button
+                if ctx:button("▶##expand_mod_" .. guid, 20, 30) then
+                    mod_sidebar_collapsed[state_guid] = false
+                    interacted = true
+                end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip("Expand Modulators")
+                end
+            else
+                -- Expanded: show grid
+                if ctx:button("◀##collapse_mod_" .. guid, 24, 20) then
+                    mod_sidebar_collapsed[state_guid] = true
+                    interacted = true
+                end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip("Collapse Modulators")
+                end
+                ctx:same_line()
+                ctx:text("Modulators")
+                ctx:separator()
+
+                -- Get modulators for this device
+                local modulators = get_device_modulators(container)
+                local expanded_slot_idx = expanded_mod_slot[state_guid]
+
+                -- 2×4 grid of modulator slots
+                for row = 0, 3 do
+                    for col = 0, 1 do
+                        local slot_idx = row * 2 + col
+                        local modulator = modulators[slot_idx + 1]  -- Lua 1-based
+
+                        if col > 0 then
+                            ctx:same_line()
+                        end
+
+                        -- Draw slot
+                        local slot_id = "slot_" .. slot_idx .. "_" .. guid
+                        if modulator then
+                            -- Slot has modulator - show name
+                            local ok_name, mod_name = pcall(function() return modulator:get_name() end)
+                            if not ok_name then mod_name = "Modulator" end
+                            mod_name = mod_name:gsub("^JS: SideFX/", "")  -- Strip prefix
+
+                            local is_expanded = (expanded_slot_idx == slot_idx)
+                            if is_expanded then
+                                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+                            end
+
+                            if ctx:button(mod_name .. "##" .. slot_id, cfg.mod_slot_width, cfg.mod_slot_height) then
+                                -- Toggle expansion
+                                if expanded_mod_slot[state_guid] == slot_idx then
+                                    expanded_mod_slot[state_guid] = nil
+                                else
+                                    expanded_mod_slot[state_guid] = slot_idx
+                                end
+                                interacted = true
+                            end
+
+                            if is_expanded then
+                                ctx:pop_style_color()
+                            end
+                        else
+                            -- Empty slot - show + button
+                            if ctx:button("+##" .. slot_id, cfg.mod_slot_width, cfg.mod_slot_height) then
+                                -- Show modulator type dropdown (simplified for now - just add Bezier LFO)
+                                local track = opts.track or state.track
+                                if track and container then
+                                    local new_mod = add_modulator_to_device(container, MODULATOR_TYPES[1], track)
+                                    if new_mod and opts.refresh_fx_list then
+                                        opts.refresh_fx_list()
+                                    end
+                                end
+                                interacted = true
+                            end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Add Modulator")
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- === MAIN CONTENT ===
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
 
         -- Header row using table for proper alignment
         if is_panel_collapsed then
@@ -1364,15 +1525,10 @@ function M.draw(ctx, fx, opts)
             r.ImGui_EndTable(ctx.ctx)
         end  -- end device_layout table
 
-        ctx:end_child()  -- end panel
-    end
+            ctx:end_table()  -- end device_wrapper table
+        end
 
-    -- Track panel clicks for device selection (for modulator panel)
-    if ctx:is_item_clicked(0) then
-        -- Use container if available, otherwise use FX itself
-        local select_target = container or fx
-        sidefx_state.selected_fx = select_target
-        interacted = true
+        ctx:end_child()  -- end panel
     end
 
     -- Right-click context menu

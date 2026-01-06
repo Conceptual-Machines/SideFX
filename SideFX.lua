@@ -102,7 +102,6 @@ local fx_detail_panel = require('lib.ui.fx_detail_panel')
 local toolbar = require('lib.ui.toolbar')
 local drag_drop = require('lib.ui.drag_drop')
 local rack_ui = require('lib.ui.rack_ui')
-local modulator_grid_panel = require('lib.ui.modulator_grid_panel')
 
 --------------------------------------------------------------------------------
 -- Icons (using OpenMoji font)
@@ -879,6 +878,8 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                                 utility = dev_utility,
                                 container = dev,
                                 icon_font = icon_font,
+                                track = state.track,
+                                refresh_fx_list = refresh_fx_list,
                                 on_delete = function()
                                     dev:delete()
                                     refresh_fx_list()
@@ -1492,6 +1493,8 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                     container = container,  -- Pass container reference
                     container_name = container and container:get_name() or nil,
                     icon_font = icon_font,
+                    track = state.track,
+                    refresh_fx_list = refresh_fx_list,
                     on_delete = function(fx_to_delete)
                         if container then
                             -- Delete the whole D-container
@@ -1813,19 +1816,8 @@ local function main()
 
             ctx:same_line()
 
-            -- Modulator Grid Panel (between browser and device chain)
-            local modulator_panel_w = modulator_grid_panel.draw(ctx, state, {
-                add_modulator_to_device = add_modulator_to_device,
-                delete_modulator = function(modulator)
-                    modulator:delete()
-                end,
-                refresh_fx_list = refresh_fx_list,
-            })
-
-            ctx:same_line()
-
             -- Calculate remaining width for device chain
-            local chain_w = avail_w - browser_w - modulator_panel_w - 20
+            local chain_w = avail_w - browser_w - 20
 
             -- Device Chain (horizontal scroll, center area)
             ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1EFF)
