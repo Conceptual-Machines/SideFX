@@ -212,7 +212,7 @@ function M.draw_fader(ctx, label, db_val, width, height, min_db, max_db)
     local label_y = screen_y + height + 2
     ctx:draw_list_add_rect_filled(draw_list, screen_x, label_y, screen_x + width, label_y + label_h, 0x222222FF, 2)
 
-    local db_label = db_val >= 0 and string.format("+%.0f", db_val) or string.format("%.0f", db_val)
+    local db_label = (math.abs(db_val) < 0.1) and "0" or (db_val > 0 and string.format("+%.0f", db_val) or string.format("%.0f", db_val))
     local text_w, _ = ctx:calc_text_size(db_label)
     ctx:draw_list_add_text(draw_list, screen_x + (width - text_w) / 2, label_y + 1, 0xCCCCCCFF, db_label)
 

@@ -11,6 +11,206 @@ local widgets = require('lib.ui.widgets')
 local M = {}
 
 --------------------------------------------------------------------------------
+-- Custom Widgets
+--------------------------------------------------------------------------------
+
+--- Draw an ON/OFF circle indicator with colored background
+-- @param ctx ImGui context
+-- @param label string Label for the button
+-- @param is_on boolean Whether the state is ON
+-- @param width number Button width
+-- @param height number Button height
+-- @param bg_color_on number RGBA color for ON background
+-- @param bg_color_off number RGBA color for OFF background
+-- @return boolean True if clicked
+local function draw_on_off_circle(ctx, label, is_on, width, height, bg_color_on, bg_color_off)
+    -- Get cursor position for drawing
+    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+    local center_x = cursor_x + width / 2
+    local center_y = cursor_y + height / 2
+    local radius = 6  -- Small circle radius
+    
+    -- Invisible button for interaction
+    r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
+    local clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
+    local is_hovered = r.ImGui_IsItemHovered(ctx.ctx)
+    
+    -- Draw background and circle
+    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+    
+    -- Draw background rectangle
+    local bg_color = is_on and bg_color_on or bg_color_off
+    r.ImGui_DrawList_AddRectFilled(draw_list, cursor_x, cursor_y, cursor_x + width, cursor_y + height, bg_color, 0)
+    
+    if is_on then
+        -- Filled circle for ON state
+        r.ImGui_DrawList_AddCircleFilled(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12)
+    else
+        -- Empty circle (outline only) for OFF state
+        r.ImGui_DrawList_AddCircle(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12, 2)
+    end
+    
+    return clicked
+end
+
+--------------------------------------------------------------------------------
+-- Rack Header
+--------------------------------------------------------------------------------
+
+--- Draw the rack header with name, identifier, ON button, and X button
+-- @param ctx ImGui context wrapper
+-- @param rack ReaWrap FX object (rack container)
+-- @param is_nested boolean Whether this is a nested rack
+-- @param state table State object
+-- @param callbacks table Callbacks:
+--   - on_toggle_expand: (rack_guid, is_expanded) -> nil
+--   - on_rename: (rack_guid, display_name) -> nil
+--   - on_dissolve: (rack) -> nil
+--   - on_delete: (rack) -> nil
+--   - icon_font: ImGui font for emojis (optional)
+function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
+    is_nested = (is_nested == true)
+    
+    local ok_guid, rack_guid = pcall(function() return rack:get_guid() end)
+    if not ok_guid or not rack_guid then
+        return -- Rack has been deleted
+    end
+    
+    local fx_utils = require('lib.fx_utils')
+    local state_module = require('lib.state')
+    
+    
+    local rack_name = fx_utils.get_rack_display_name(rack)
+    local is_expanded = (state.expanded_racks[rack_guid] == true)
+    local expand_icon = is_expanded and "▼" or "▶"
+    local button_id = is_nested and ("rack_toggle_nested_" .. rack_guid) or ("rack_toggle_top_" .. rack_guid)
+    
+    -- Check if rack is being renamed
+    local is_renaming_rack = (state.renaming_fx == rack_guid)
+    
+    -- Use table for layout with different widths based on expansion state
+    -- Collapsed: 25% | 25% | 25% | 25% (icon only)
+    -- Expanded: 70% | 10% | 10% | 10% (full name)
+    local table_flags = imgui.TableFlags.SizingStretchProp()
+    if ctx:begin_table("rack_header_" .. rack_guid, 4, table_flags) then
+        if is_expanded then
+            -- Expanded: name gets 70%, others get 10% each
+            ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 7)
+            ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 1)
+            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
+            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
+        else
+            -- Collapsed: equal 25% per column
+            ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthStretch(), 1)
+            ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 1)
+            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
+            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
+        end
+        
+        ctx:table_next_row()
+        
+        -- Column 0: Rack name (70%)
+        ctx:table_set_column_index(0)
+        if is_renaming_rack then
+            -- Inline rename input for rack
+            if not state.rename_text or state.rename_text == "" then
+                state.rename_text = state.display_names[rack_guid] or ""
+            end
+            
+            ctx:set_next_item_width(-1)
+            
+            -- Set keyboard focus on first frame
+            if not state._rename_focused then
+                ctx:set_keyboard_focus_here()
+                state._rename_focused = true
+            end
+            
+            -- Style the input to be visible
+            ctx:push_style_color(imgui.Col.FrameBg(), 0x4A4A4AFF)
+            ctx:push_style_color(imgui.Col.Text(), 0xFFFFFFFF)
+            local changed, new_text = ctx:input_text("##rack_rename" .. rack_guid, state.rename_text, imgui.InputTextFlags.EnterReturnsTrue())
+            ctx:pop_style_color(2)
+            
+            state.rename_text = new_text
+            if changed then
+                if state.rename_text ~= "" then
+                    state.display_names[rack_guid] = state.rename_text
+                else
+                    state.display_names[rack_guid] = nil
+                end
+                state_module.save_display_names()
+                state.renaming_fx = nil
+                state.rename_text = ""
+                state._rename_focused = nil
+            elseif ctx:is_item_deactivated_after_edit() then
+                if state.rename_text ~= "" then
+                    state.display_names[rack_guid] = state.rename_text
+                else
+                    state.display_names[rack_guid] = nil
+                end
+                state_module.save_display_names()
+                state.renaming_fx = nil
+                state.rename_text = ""
+                state._rename_focused = nil
+            elseif ctx:is_key_pressed(imgui.Key.Escape()) then
+                state.renaming_fx = nil
+                state.rename_text = ""
+                state._rename_focused = nil
+            end
+        else
+            -- Show only icon when collapsed, full name when expanded
+            local button_text = is_expanded and (expand_icon .. " " .. rack_name:sub(1, 20)) or expand_icon
+            if ctx:button(button_text .. "##" .. button_id, -1, 20) then
+                callbacks.on_toggle_expand(rack_guid, is_expanded)
+            end
+            
+            -- Rack context menu (attached to the button above)
+            if ctx:begin_popup_context_item(button_id) then
+                if ctx:menu_item("Rename") then
+                    callbacks.on_rename(rack_guid, state.display_names[rack_guid])
+                end
+                ctx:separator()
+                if ctx:menu_item("Dissolve Container") then
+                    callbacks.on_dissolve(rack)
+                end
+                ctx:separator()
+                if ctx:menu_item("Delete") then
+                    callbacks.on_delete(rack)
+                end
+                ctx:end_popup()
+            end
+        end
+        
+        -- Column 1: Path identifier (10%)
+        ctx:table_set_column_index(1)
+        local rack_id = fx_utils.get_rack_identifier(rack)
+        if rack_id then
+            ctx:text_colored(0x888888FF, "[" .. rack_id .. "]")
+        end
+        
+        -- Column 2: ON button (10%)
+        ctx:table_set_column_index(2)
+        local ok_enabled, rack_enabled = pcall(function() return rack:get_enabled() end)
+        rack_enabled = ok_enabled and rack_enabled or false
+        -- Draw custom circle indicator with colored background
+        local avail_w, _ = ctx:get_content_region_avail()
+        if draw_on_off_circle(ctx, "##rack_on_off_" .. rack_guid, rack_enabled, avail_w, 20, 0x44AA44FF, 0xAA4444FF) then
+            pcall(function() rack:set_enabled(not rack_enabled) end)
+        end
+
+        -- Column 3: X button (10%)
+        ctx:table_set_column_index(3)
+        ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
+        if ctx:button("×##rack_del", -1, 20) then
+            callbacks.on_delete(rack)
+        end
+        ctx:pop_style_color()
+        
+        ctx:end_table()
+    end
+end
+
+--------------------------------------------------------------------------------
 -- Chain Row (for chains table)
 --------------------------------------------------------------------------------
 
@@ -29,15 +229,22 @@ local M = {}
 --   - on_add_device_to_chain: (chain, plugin) -> nil
 --   - on_reorder_chain: (rack, dragged_guid, target_guid) -> nil
 --   - on_delete_chain: (chain, is_selected, is_nested_rack, rack_guid) -> nil
+--   - on_rename_chain: (chain_guid, display_name) -> nil
 --   - on_refresh: () -> nil
 function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_nested_rack, state, get_fx_display_name, callbacks)
     -- Explicitly check if is_nested_rack is true (not just truthy)
     is_nested_rack = (is_nested_rack == true)
     local ok_name, chain_raw_name = pcall(function() return chain:get_name() end)
-    local chain_name = ok_name and get_fx_display_name(chain) or "Unknown"
+    -- Use chain label name (just the name, no [R1_C1] in the row)
+    local fx_utils = require('lib.fx_utils')
+    local chain_name = ok_name and fx_utils.get_chain_label_name(chain) or "Unknown"
     local ok_en, chain_enabled = pcall(function() return chain:get_enabled() end)
     chain_enabled = ok_en and chain_enabled or false
-    local chain_guid = chain:get_guid()
+    local ok_guid, chain_guid = pcall(function() return chain:get_guid() end)
+    if not ok_guid or not chain_guid then
+        -- Chain has been deleted, skip drawing this row
+        return
+    end
 
     -- Column 1: Chain name button
     ctx:table_set_column_index(0)
@@ -55,12 +262,93 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
         row_color = 0x44AA4488  -- Green tint when chain dragging
     end
 
-    ctx:push_style_color(imgui.Col.Button(), row_color)
-    if ctx:button(chain_name .. "##chain_btn", -1, 20) then
-        local rack_guid = rack:get_guid()
-        callbacks.on_chain_select(chain_guid, is_selected, is_nested_rack, rack_guid)
+    -- Check if chain is being renamed
+    local is_renaming_chain = (state.renaming_fx == chain_guid)
+    local chain_btn_id = "chain_btn_" .. chain_guid
+    
+    if is_renaming_chain then
+        -- Inline rename input for chain
+        -- Ensure rename_text is initialized (should be set by callback, but handle edge case)
+        if not state.rename_text or state.rename_text == "" then
+            state.rename_text = state.display_names[chain_guid] or ""
+        end
+        
+        -- Set width to fill the table cell
+        ctx:set_next_item_width(-1)
+        
+        -- Set keyboard focus on first frame of rename mode
+        if not state._rename_focused then
+            ctx:set_keyboard_focus_here()
+            state._rename_focused = true
+        end
+        
+        -- Style the input to be visible (light background, white text)
+        ctx:push_style_color(imgui.Col.FrameBg(), 0x4A4A4AFF)
+        ctx:push_style_color(imgui.Col.Text(), 0xFFFFFFFF)
+        local changed, new_text = ctx:input_text("##chain_rename" .. chain_guid, state.rename_text, imgui.InputTextFlags.EnterReturnsTrue())
+        ctx:pop_style_color(2)
+        
+        -- Update state.rename_text with the current input value
+        state.rename_text = new_text
+        
+        if changed then
+            if state.rename_text ~= "" then
+                state.display_names[chain_guid] = state.rename_text
+            else
+                state.display_names[chain_guid] = nil
+            end
+            local state_module = require('lib.state')
+            state_module.save_display_names()
+            state.renaming_fx = nil
+            state.rename_text = ""
+            state._rename_focused = nil
+        elseif ctx:is_item_deactivated_after_edit() then
+            if state.rename_text ~= "" then
+                state.display_names[chain_guid] = state.rename_text
+            else
+                state.display_names[chain_guid] = nil
+            end
+            local state_module = require('lib.state')
+            state_module.save_display_names()
+            state.renaming_fx = nil
+            state.rename_text = ""
+            state._rename_focused = nil
+        elseif ctx:is_key_pressed(imgui.Key.Escape()) then
+            state.renaming_fx = nil
+            state.rename_text = ""
+            state._rename_focused = nil
+        end
+    else
+        ctx:push_style_color(imgui.Col.Button(), row_color)
+        if ctx:button(chain_name .. "##" .. chain_btn_id, -1, 20) then
+            local rack_guid = rack:get_guid()
+            callbacks.on_chain_select(chain_guid, is_selected, is_nested_rack, rack_guid)
+        end
+        ctx:pop_style_color()
+        
+        -- Check for double-click to rename (after button is drawn)
+        if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
+            local custom_name = state.display_names[chain_guid]
+            callbacks.on_rename_chain(chain_guid, custom_name)
+        end
+        
+        -- Chain context menu
+        if ctx:begin_popup_context_item(chain_btn_id) then
+            if ctx:menu_item("Rename") then
+                -- Get the custom name if it exists, otherwise use empty string
+                local custom_name = state.display_names[chain_guid]
+                callbacks.on_rename_chain(chain_guid, custom_name)
+            end
+            ctx:separator()
+            if ctx:menu_item("Delete") then
+                chain:delete()
+                local rack_guid = rack:get_guid()
+                callbacks.on_delete_chain(chain, is_selected, is_nested_rack, rack_guid)
+                callbacks.on_refresh()
+            end
+            ctx:end_popup()
+        end
     end
-    ctx:pop_style_color()
 
     -- Make the button a drag-drop target (must be called right after the button)
     if ctx:begin_drag_drop_target() then
@@ -101,22 +389,18 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
         end
     end
 
-    -- Column 2: Enable button
+    -- Column 2: Enable button (circle icon) - same size as X button
     ctx:table_set_column_index(1)
-    if chain_enabled then
-        ctx:push_style_color(imgui.Col.Button(), 0x44AA44FF)
-    else
-        ctx:push_style_color(imgui.Col.Button(), 0xAA4444FF)
-    end
-    if ctx:small_button(chain_enabled and "ON" or "OF") then
+    local bg_color_on = 0x44AA44FF  -- Green for ON
+    local bg_color_off = 0xAA4444FF  -- Red for OFF
+    if draw_on_off_circle(ctx, "##chain_on_off_" .. chain_guid, chain_enabled, 24, 20, bg_color_on, bg_color_off) then
         pcall(function() chain:set_enabled(not chain_enabled) end)
     end
-    ctx:pop_style_color()
 
-    -- Column 3: Delete button
+    -- Column 3: Delete button (same size as ON button)
     ctx:table_set_column_index(2)
     ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
-    if ctx:small_button("×") then
+    if ctx:button("×", 24, 20) then
         chain:delete()
         local rack_guid = rack:get_guid()
         callbacks.on_delete_chain(chain, is_selected, is_nested_rack, rack_guid)
@@ -132,7 +416,7 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
         if ok_vol and vol_norm then
             -- Fixed: Range is -60 to +12 dB (72 dB total), not -24 to +12 (36 dB)
             local vol_db = -60 + vol_norm * 72
-            local vol_format = vol_db >= 0 and string.format("+%.0f", vol_db) or string.format("%.0f", vol_db)
+            local vol_format = (math.abs(vol_db) < 0.1) and "0" or (vol_db > 0 and string.format("+%.0f", vol_db) or string.format("%.0f", vol_db))
             ctx:set_next_item_width(-1)
             local vol_changed, new_vol_db = ctx:slider_double("##vol_" .. chain_idx, vol_db, -60, 12, vol_format)
             if vol_changed then

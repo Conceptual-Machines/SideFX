@@ -1,6 +1,6 @@
 -- @description SideFX - Smart FX Container Manager
 -- @author Nomad Monad
--- @version 0.1.0
+-- @version 0.1.1
 -- @provides
 --   [nomain] lib/*.lua
 --   [nomain] lib/ui/*.lua
@@ -542,8 +542,9 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
                     state.rename_text = new_text
                     -- If Enter was pressed (EnterReturnsTrue flag), save and finish
                     if state.rename_text ~= "" then
-                        -- Save renamed name
-                        fx:set_named_config_param("renamed_name", state.rename_text)
+                    -- Store custom display name in state (SideFX-only, doesn't change REAPER name)
+                    state.display_names[guid] = state.rename_text
+                    state_module.save_display_names()
                     end
                     state.renaming_fx = nil
                     state.rename_text = ""
@@ -551,8 +552,9 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
                 -- Check if item was deactivated after edit (clicked away)
                 if ctx:is_item_deactivated_after_edit() then
                     if state.rename_text ~= "" then
-                        -- Save renamed name
-                        fx:set_named_config_param("renamed_name", state.rename_text)
+                    -- Store custom display name in state (SideFX-only, doesn't change REAPER name)
+                    state.display_names[guid] = state.rename_text
+                    state_module.save_display_names()
                     end
                     state.renaming_fx = nil
                     state.rename_text = ""
@@ -723,7 +725,13 @@ local rack_panel = nil    -- Lazy loaded
 -- Draw expanded chain column with devices
 local function draw_chain_column(ctx, selected_chain, rack_h)
     local selected_chain_guid = selected_chain:get_guid()
-    local chain_display_name = get_fx_display_name(selected_chain)
+    -- Get chain name and identifier separately
+    local chain_name = fx_utils.get_chain_label_name(selected_chain)
+    local chain_id = nil
+    local ok_name, raw_name = pcall(function() return selected_chain:get_name() end)
+    if ok_name and raw_name then
+        chain_id = raw_name:match("^(R%d+_C%d+)") or raw_name:match("R%d+_C%d+")
+    end
 
     -- Get devices from chain
     local devices = {}
@@ -749,12 +757,23 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
         -- Use table layout so header width matches content width
         local table_flags = imgui.TableFlags.SizingStretchSame()
         if ctx:begin_table("chain_table_" .. selected_chain_guid, 1, table_flags) then
-            -- Row 1: Header
-            ctx:table_next_row()
+            -- Row 1: Header (smaller)
+            ctx:table_next_row(0, 20)  -- Smaller row height (20px instead of default)
             ctx:table_set_column_index(0)
+            -- Use smaller font for header
+            if default_font then
+                ctx:push_font(default_font, 12)  -- 12px instead of 14px
+            end
             ctx:text_colored(0xAAAAAAFF, "Chain:")
             ctx:same_line()
-            ctx:text(chain_display_name)
+            ctx:text(chain_name)
+            if chain_id then
+                ctx:same_line()
+                ctx:text_colored(0x888888FF, " [" .. chain_id .. "]")
+            end
+            if default_font then
+                ctx:pop_font()
+            end
             ctx:separator()
 
             -- Row 2: Content
@@ -797,7 +816,7 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                 ctx:begin_group()
 
                 for k, dev in ipairs(devices) do
-                    local dev_name = get_fx_display_name(dev)
+                    local dev_name = fx_utils.get_device_display_name(dev)
                     local dev_enabled = dev:get_enabled()
 
                     -- Arrow connector between items
@@ -821,7 +840,8 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                         if rack_data.is_expanded and nested_chain_guid then
                             local nested_chain = nil
                             for _, chain in ipairs(rack_data.chains) do
-                                if chain:get_guid() == nested_chain_guid then
+                                local ok_guid, chain_guid = pcall(function() return chain:get_guid() end)
+                                if ok_guid and chain_guid and chain_guid == nested_chain_guid then
                                     nested_chain = chain
                                     break
                                 end
@@ -842,9 +862,16 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                                 avail_height = chain_content_h - 20,
                                 utility = dev_utility,
                                 container = dev,
+                                icon_font = icon_font,
                                 on_delete = function()
                                     dev:delete()
                                     refresh_fx_list()
+                                end,
+                                on_rename = function(fx)
+                                    -- Rename the container (dev), not the main FX
+                                    local dev_guid = dev:get_guid()
+                                    state.renaming_fx = dev_guid
+                                    state.rename_text = get_fx_display_name(dev)
                                 end,
                                 on_plugin_drop = function(plugin_name, insert_before_idx)
                                     local plugin = { full_name = plugin_name, name = plugin_name }
@@ -917,7 +944,6 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
     -- Explicitly check if is_nested is true (not just truthy)
     is_nested = (is_nested == true)
     local rack_guid = rack:get_guid()
-    local rack_name = get_fx_display_name(rack)
     
     -- Use expanded_racks for ALL racks (both top-level and nested)
     -- This allows multiple top-level racks to be expanded independently
@@ -940,63 +966,49 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
     local child_id = is_nested and ("rack_nested_" .. rack_guid) or ("rack_" .. rack_guid)
     if ctx:begin_child(child_id, rack_w, rack_h, imgui.ChildFlags.Border()) then
 
-        -- Rack header
-        local expand_icon = is_expanded and "▼" or "▶"
-        -- Use unique button ID that includes nested flag AND guid to avoid conflicts
-        local button_id = is_nested and ("rack_toggle_nested_" .. rack_guid) or ("rack_toggle_top_" .. rack_guid)
-        if ctx:button(expand_icon .. " " .. rack_name:sub(1, 20) .. "##" .. button_id, -60, 24) then
-            -- Use expanded_racks for ALL racks (both top-level and nested)
-            -- This allows multiple top-level racks to be expanded independently
-            if is_expanded then
-                state.expanded_racks[rack_guid] = nil
-                -- Clear chain selection when collapsing (works for both top-level and nested)
-                state.expanded_nested_chains[rack_guid] = nil
-            else
-                state.expanded_racks[rack_guid] = true
-            end
-            -- Save expansion state when it changes
-            state_module.save_expansion_state()
-        end
-
-        ctx:same_line()
-        local rack_enabled = rack:get_enabled()
-        ctx:push_style_color(imgui.Col.Button(), rack_enabled and 0x44AA44FF or 0xAA4444FF)
-        if ctx:small_button(rack_enabled and "ON" or "OF") then
-            rack:set_enabled(not rack_enabled)
-        end
-        ctx:pop_style_color()
-
-        ctx:same_line()
-        ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
-        if ctx:small_button("×##rack_del") then
-            rack:delete()
-            refresh_fx_list()
-        end
-        ctx:pop_style_color()
+        -- Draw rack header using widget
+        rack_ui.draw_rack_header(ctx, rack, is_nested, state, {
+            icon_font = icon_font,
+            on_toggle_expand = function(rack_guid, is_expanded)
+                if is_expanded then
+                    state.expanded_racks[rack_guid] = nil
+                    state.expanded_nested_chains[rack_guid] = nil
+                else
+                    state.expanded_racks[rack_guid] = true
+                end
+                state_module.save_expansion_state()
+            end,
+            on_rename = function(rack_guid, display_name)
+                state.renaming_fx = rack_guid
+                state.rename_text = display_name or ""
+            end,
+            on_dissolve = function(rack)
+                dissolve_container(rack)
+            end,
+            on_delete = function(rack)
+                rack:delete()
+                refresh_fx_list()
+            end,
+        })
 
         -- Get mixer for controls
         local mixer = get_rack_mixer(rack)
 
         if not is_expanded then
-            -- Collapsed view - full height fader with meter and scale
-            ctx:text_disabled(string.format("%d chains", #chains))
-
+            -- Collapsed view - separate tables without dummy() calls
             if mixer then
-                local avail_w, _ = ctx:get_content_region_avail()
-                local fader_w = 24
-                local meter_w = 12  -- Stereo meter (2x6px)
+                local fader_w = 32
+                local meter_w = 12
                 local scale_w = 20
-                local total_w = scale_w + fader_w + meter_w + 4  -- scale + fader + meter + gaps
-
-                -- Helper to center items
-                local function center_offset(item_w)
-                    return math.max(0, (avail_w - item_w) / 2)
-                end
-
-                -- Pan slider at top (centered)
+                
+                -- Chain count
+                ctx:text_disabled(string.format("%d chains", #chains))
+                
+                -- Pan slider
                 local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(1) end)
                 if ok_pan and pan_norm then
                     local pan_val = -100 + pan_norm * 200
+                    local avail_w, _ = ctx:get_content_region_avail()
                     local pan_w = math.min(avail_w - 4, 80)
                     local pan_offset = math.max(0, (avail_w - pan_w) / 2)
                     ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + pan_offset)
@@ -1005,116 +1017,94 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                         pcall(function() mixer:set_param_normalized(1, (new_pan + 100) / 200) end)
                     end
                 end
-
+                
                 ctx:spacing()
-                ctx:spacing()
-                ctx:spacing()
-
-                -- Calculate remaining height for fader (leave room for text label)
-                local text_label_h = 18
+                
+                -- Calculate fader height
                 local _, remaining_h = ctx:get_content_region_avail()
-                local fader_h = remaining_h - text_label_h - 4
+                local fader_h = remaining_h - 22  -- Leave room for dB label
                 fader_h = math.max(50, fader_h)
-
-                -- Gain fader with meter and scale
+                
+                -- Fader with meter and scale
                 local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
                 if ok_gain and gain_norm then
                     local gain_db = -24 + gain_norm * 36
-                    local gain_format = gain_db >= 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db)
-
-                    -- Position for the whole control group
-                    local cursor_x_start = ctx:get_cursor_pos_x()
-                    local group_x = cursor_x_start + center_offset(total_w)
-                    ctx:set_cursor_pos_x(group_x)
-
+                    local gain_format = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db))
+                    
+                    local avail_w, _ = ctx:get_content_region_avail()
+                    local total_w = scale_w + fader_w + meter_w + 4
+                    local offset_x = math.max(0, (avail_w - total_w) / 2 - 8)  -- Shift 8px left from center
+                    
+                    ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + offset_x)
+                    
                     local screen_x, screen_y = ctx:get_cursor_screen_pos()
                     local draw_list = ctx:get_window_draw_list()
-
-                    -- Positions
+                    
                     local scale_x = screen_x
                     local fader_x = screen_x + scale_w + 2
                     local meter_x = fader_x + fader_w + 2
-
-                    -- dB scale markings on left
+                    
+                    -- dB scale
                     local db_marks = {12, 6, 0, -6, -12, -18, -24}
                     for _, db in ipairs(db_marks) do
                         local mark_norm = (db + 24) / 36
                         local mark_y = screen_y + fader_h - (fader_h * mark_norm)
-                        -- Tick line
                         ctx:draw_list_add_line(draw_list, scale_x + scale_w - 6, mark_y, scale_x + scale_w, mark_y, 0x666666FF, 1)
-                        -- dB label (only for key values)
                         if db == 0 or db == -12 or db == 12 then
                             local label = db == 0 and "0" or tostring(db)
                             ctx:draw_list_add_text(draw_list, scale_x, mark_y - 5, 0x888888FF, label)
                         end
                     end
-
+                    
                     -- Fader background
                     ctx:draw_list_add_rect_filled(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x1A1A1AFF, 3)
-
-                    -- Fader fill from bottom (gain setting)
+                    -- Fader fill
                     local fill_h = fader_h * gain_norm
                     if fill_h > 2 then
                         local fill_top = screen_y + fader_h - fill_h
                         ctx:draw_list_add_rect_filled(draw_list, fader_x + 2, fill_top, fader_x + fader_w - 2, screen_y + fader_h - 2, 0x5588AACC, 2)
                     end
-
                     -- Fader border
                     ctx:draw_list_add_rect(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x555555FF, 3)
-
-                    -- 0dB line on fader
-                    local zero_db_norm = 24 / 36  -- 0dB position
+                    -- 0dB line
+                    local zero_db_norm = 24 / 36
                     local zero_y = screen_y + fader_h - (fader_h * zero_db_norm)
                     ctx:draw_list_add_line(draw_list, fader_x, zero_y, fader_x + fader_w, zero_y, 0xFFFFFF44, 1)
-
-                    -- Stereo level meters on right
+                    
+                    -- Stereo meters
                     local meter_l_x = meter_x
                     local meter_r_x = meter_x + meter_w / 2 + 1
                     local half_meter_w = meter_w / 2 - 1
-
-                    -- Meter backgrounds
                     ctx:draw_list_add_rect_filled(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
                     ctx:draw_list_add_rect_filled(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
-
-                    -- Get track peak levels (stereo)
+                    
                     if state.track and state.track.pointer then
                         local peak_l = r.Track_GetPeakInfo(state.track.pointer, 0)
                         local peak_r = r.Track_GetPeakInfo(state.track.pointer, 1)
-
-                        -- Helper to draw a meter bar
                         local function draw_meter_bar(x, w, peak)
                             if peak > 0 then
                                 local peak_db = 20 * math.log(peak, 10)
                                 peak_db = math.max(-60, math.min(12, peak_db))
                                 local peak_norm = (peak_db + 60) / 72
-
                                 local meter_fill_h = fader_h * peak_norm
                                 if meter_fill_h > 1 then
                                     local meter_top = screen_y + fader_h - meter_fill_h
-                                    -- Color based on level
                                     local meter_color
-                                    if peak_db > 0 then
-                                        meter_color = 0xFF4444FF  -- Red
-                                    elseif peak_db > -6 then
-                                        meter_color = 0xFFAA44FF  -- Orange
-                                    elseif peak_db > -18 then
-                                        meter_color = 0x44FF44FF  -- Green
-                                    else
-                                        meter_color = 0x44AA44FF  -- Dark green
-                                    end
+                                    if peak_db > 0 then meter_color = 0xFF4444FF
+                                    elseif peak_db > -6 then meter_color = 0xFFAA44FF
+                                    elseif peak_db > -18 then meter_color = 0x44FF44FF
+                                    else meter_color = 0x44AA44FF end
                                     ctx:draw_list_add_rect_filled(draw_list, x, meter_top, x + w, screen_y + fader_h - 1, meter_color, 0)
                                 end
                             end
                         end
-
                         draw_meter_bar(meter_l_x + 1, half_meter_w - 1, peak_l)
                         draw_meter_bar(meter_r_x + 1, half_meter_w - 1, peak_r)
                     end
-
-                    -- Meter borders
+                    
                     ctx:draw_list_add_rect(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
                     ctx:draw_list_add_rect(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
-
+                    
                     -- Invisible slider for fader interaction
                     ctx:set_cursor_screen_pos(fader_x, screen_y)
                     ctx:push_style_color(imgui.Col.FrameBg(), 0x00000000)
@@ -1122,41 +1112,29 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                     ctx:push_style_color(imgui.Col.FrameBgActive(), 0x00000000)
                     ctx:push_style_color(imgui.Col.SliderGrab(), 0xAAAAAAFF)
                     ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
-
                     local gain_changed, new_gain_db = ctx:v_slider_double("##master_gain_v", fader_w, fader_h, gain_db, -24, 12, "")
                     if gain_changed then
                         pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
                     end
-                    -- Double-click to reset to 0 dB
                     if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
                         pcall(function() mixer:set_param_normalized(0, (0 + 24) / 36) end)
                     end
-
                     ctx:pop_style_color(5)
-
-                    -- dB value label at bottom with background (centered under fader+meter)
-                    local label_w = fader_w + meter_w + 2
-                    local label_x = fader_x
+                    
+                    -- Advance cursor past the control
                     local label_y = screen_y + fader_h + 2
-
-                    -- Background
-                    ctx:draw_list_add_rect_filled(draw_list, label_x, label_y, label_x + label_w, label_y + text_label_h - 2, 0x222222FF, 2)
-
-                    -- Text centered
+                    
+                    -- dB value label positioned under the fader
                     local db_text_w, _ = ctx:calc_text_size(gain_format)
-                    ctx:draw_list_add_text(draw_list, label_x + (label_w - db_text_w) / 2, label_y + 2, 0xCCCCCCFF, gain_format)
-
-                    -- Invisible button for click to edit
+                    local label_x = fader_x + (fader_w - db_text_w) / 2  -- Center under fader
                     ctx:set_cursor_screen_pos(label_x, label_y)
-                    ctx:invisible_button("##gain_label_btn", label_w, text_label_h - 2)
-
-                    -- Double-click to type value
+                    ctx:text(gain_format)
+                    
+                    -- Double-click to edit
                     if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-                        ctx:open_popup("##gain_edit_popup")
+                        ctx:open_popup("##gain_edit_popup_" .. rack_guid)
                     end
-
-                    -- Edit popup
-                    if ctx:begin_popup("##gain_edit_popup") then
+                    if ctx:begin_popup("##gain_edit_popup_" .. rack_guid) then
                         ctx:set_next_item_width(60)
                         ctx:set_keyboard_focus_here()
                         local input_changed, input_val = ctx:input_double("##gain_input", gain_db, 0, 0, "%.1f")
@@ -1169,10 +1147,6 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                         end
                         ctx:end_popup()
                     end
-
-                    -- Advance cursor past the whole control
-                    ctx:set_cursor_screen_pos(screen_x, label_y + text_label_h)
-                    ctx:dummy(total_w, 0)
                 end
             else
                 ctx:text_disabled("No mixer")
@@ -1197,7 +1171,7 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                     local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
                     if ok_gain and gain_norm then
                         local gain_db = -24 + gain_norm * 36
-                        local gain_format = gain_db >= 0 and string.format("+%.1f", gain_db) or string.format("%.1f", gain_db)
+                        local gain_format = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.1f", gain_db) or string.format("%.1f", gain_db))
                         ctx:set_next_item_width(-1)
                         local gain_changed, new_gain_db = ctx:slider_double("##master_gain", gain_db, -24, 12, gain_format)
                         if gain_changed then
@@ -1233,7 +1207,10 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
             ctx:same_line()
             ctx:push_style_color(imgui.Col.Button(), 0x446688FF)
             if ctx:small_button("+ Chain") then
-                -- TODO: Open plugin selector
+                local chain = rack_module.add_empty_chain_to_rack(rack)
+                if chain then
+                    refresh_fx_list()
+                end
             end
             ctx:pop_style_color()
 
@@ -1245,7 +1222,7 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                 -- Chains table
                 if ctx:begin_table("chains_table", 5, imgui.TableFlags.SizingStretchProp()) then
                     ctx:table_setup_column("name", imgui.TableColumnFlags.WidthFixed(), 80)
-                    ctx:table_setup_column("enable", imgui.TableColumnFlags.WidthFixed(), 28)
+                    ctx:table_setup_column("enable", imgui.TableColumnFlags.WidthFixed(), 24)
                     ctx:table_setup_column("delete", imgui.TableColumnFlags.WidthFixed(), 24)
                     ctx:table_setup_column("volume", imgui.TableColumnFlags.WidthStretch(), 1)
                     ctx:table_setup_column("pan", imgui.TableColumnFlags.WidthFixed(), 60)
@@ -1253,11 +1230,16 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                     for j, chain in ipairs(chains) do
                         ctx:table_next_row()
                         ctx:push_id("chain_" .. j)
-                        local chain_guid = chain:get_guid()
+                        local ok_guid, chain_guid = pcall(function() return chain:get_guid() end)
+                        if not ok_guid or not chain_guid then
+                            -- Chain has been deleted, skip this row
+                            ctx:pop_id()
+                            goto continue_chain
+                        end
                         -- Check selection based on whether this is a nested rack
                         -- For nested racks, use the rack's GUID to look up the expanded chain
                         -- Check if this chain is selected (works for both top-level and nested)
-                        local rack_guid = rack:get_guid()
+                            local rack_guid = rack:get_guid()
                         local is_selected = (state.expanded_nested_chains[rack_guid] == chain_guid)
                         rack_ui.draw_chain_row(ctx, chain, j, rack, mixer, is_selected, is_nested, state, get_fx_display_name, {
                             on_chain_select = function(chain_guid, is_selected, is_nested_rack, rack_guid)
@@ -1271,6 +1253,10 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                             end,
                             on_add_device_to_chain = add_device_to_chain,
                             on_reorder_chain = reorder_chain_in_rack,
+                            on_rename_chain = function(chain_guid, custom_name)
+                                state.renaming_fx = chain_guid
+                                state.rename_text = custom_name or ""
+                            end,
                             on_delete_chain = function(chain, is_selected, is_nested_rack, rack_guid)
                                 -- Clear chain selection when deleting (works for both top-level and nested)
                                 if is_selected then
@@ -1280,6 +1266,7 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                             on_refresh = refresh_fx_list,
                         })
                         ctx:pop_id()
+                        ::continue_chain::
                     end
 
                     ctx:end_table()
@@ -1453,7 +1440,8 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
             if rack_data.is_expanded and selected_chain_guid then
                 local selected_chain = nil
                 for _, chain in ipairs(rack_data.chains) do
-                    if chain:get_guid() == selected_chain_guid then
+                    local ok_guid, chain_guid = pcall(function() return chain:get_guid() end)
+                    if ok_guid and chain_guid and chain_guid == selected_chain_guid then
                         selected_chain = chain
                         break
                     end
@@ -1487,6 +1475,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                     utility = utility,  -- Paired SideFX_Utility for gain/pan
                     container = container,  -- Pass container reference
                     container_name = container and container:get_name() or nil,
+                    icon_font = icon_font,
                     on_delete = function(fx_to_delete)
                         if container then
                             -- Delete the whole D-container
@@ -1676,9 +1665,10 @@ local function main()
     refresh_fx_list()
     scan_plugins()
     
-    -- Load expansion state for current track
+    -- Load expansion state and display names for current track
     if state.track then
         state_module.load_expansion_state()
+        state_module.load_display_names()
     end
 
     Window.run({
@@ -1688,9 +1678,10 @@ local function main()
         dockable = true,
         
         on_close = function(self)
-            -- Save expansion state when window closes
+            -- Save expansion state and display names when window closes
             if state.track then
                 state_module.save_expansion_state()
+                state_module.save_display_names()
             end
         end,
 
@@ -1764,20 +1755,23 @@ local function main()
                 -- (save_expansion_state will handle invalid tracks safely)
                 if state_track_valid then
                     state_module.save_expansion_state()
+                    state_module.save_display_names()
                 end
                 
                 state.track, state.track_name = track, name
                 state.expanded_path = {}
                 state.expanded_racks = {}
                 state.expanded_nested_chains = {}
+                state.display_names = {}  -- Clear display names for new track
                 state.selected_fx = nil
                 clear_multi_select()
                 refresh_fx_list()
                 
                 -- Load expansion state for new track
-                if state.track then
-                    state_module.load_expansion_state()
-                end
+            if state.track then
+                state_module.load_expansion_state()
+                state_module.load_display_names()
+            end
             else
                 -- Check for external FX changes (e.g. user deleted FX in REAPER)
                 check_fx_changes()
@@ -1810,21 +1804,74 @@ local function main()
             local chain_flags = imgui.WindowFlags.HorizontalScrollbar()
             if ctx:begin_child("DeviceChain", chain_w, 0, imgui.ChildFlags.Border(), chain_flags) then
 
-                -- Filter out modulators from top_level_fx
-                -- Also filter out invalid FX (from deleted tracks)
-                local filtered_fx = {}
-                for _, fx in ipairs(state.top_level_fx) do
-                    -- Validate FX is still accessible (track may have been deleted)
-                    local ok = pcall(function()
-                        return fx:get_name()
-                    end)
-                    if ok and not is_modulator_fx(fx) then
-                        table.insert(filtered_fx, fx)
+                if not state.track then
+                    -- No track selected - show message with red border
+                    local avail_w, avail_h = ctx:get_content_region_avail()
+                    local msg_w = 300
+                    local msg_h = 60
+                    local msg_x = (avail_w - msg_w) / 2
+                    local msg_y = (avail_h - msg_h) / 2
+                    
+                    -- Position using dummy spacing
+                    if msg_y > 0 then
+                        ctx:dummy(0, msg_y)
                     end
-                end
+                    if msg_x > 0 then
+                        ctx:dummy(msg_x, 0)
+                        ctx:same_line()
+                    end
+                    
+                    -- Red border using child window with manual border drawing
+                    ctx:push_style_color(imgui.Col.ChildBg(), 0x2A1A1AFF)  -- Slightly red-tinted background
+                    ctx:push_style_var(imgui.StyleVar.WindowPadding(), 20, 15)
+                    if ctx:begin_child("no_track_msg", msg_w, msg_h, 0) then
+                        -- Get window bounds for border drawing
+                        local window_min_x, window_min_y = r.ImGui_GetWindowPos(ctx.ctx)
+                        local window_max_x = window_min_x + r.ImGui_GetWindowWidth(ctx.ctx)
+                        local window_max_y = window_min_y + r.ImGui_GetWindowHeight(ctx.ctx)
+                        local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                        local border_thickness = 2.0
+                        
+                        -- Draw red border rectangle around the child window
+                        r.ImGui_DrawList_AddRect(draw_list, window_min_x, window_min_y, window_max_x, window_max_y, 0xFF0000FF, 0, 0, border_thickness)
+                        
+                        -- Center the text using available space
+                        local text = "Select a track"
+                        local text_w, text_h = ctx:calc_text_size(text)
+                        local child_w, child_h = ctx:get_content_region_avail()
+                        local text_x = (child_w - text_w) / 2
+                        local text_y = (child_h - text_h) / 2
+                        if text_y > 0 then
+                            ctx:dummy(0, text_y)
+                        end
+                        if text_x > 0 then
+                            ctx:dummy(text_x, 0)
+                            ctx:same_line()
+                        end
+                        ctx:push_style_color(imgui.Col.Text(), 0xFFFFFFFF)
+                        ctx:text(text)
+                        ctx:pop_style_color()
+                    end
+                    ctx:end_child()
+                    ctx:pop_style_var()
+                    ctx:pop_style_color()
+                else
+                    -- Filter out modulators from top_level_fx
+                    -- Also filter out invalid FX (from deleted tracks)
+                    local filtered_fx = {}
+                    for _, fx in ipairs(state.top_level_fx) do
+                        -- Validate FX is still accessible (track may have been deleted)
+                        local ok = pcall(function()
+                            return fx:get_name()
+                        end)
+                        if ok and not is_modulator_fx(fx) then
+                            table.insert(filtered_fx, fx)
+                        end
+                    end
 
-                -- Draw the horizontal device chain
-                draw_device_chain(ctx, filtered_fx, chain_w, avail_h)
+                    -- Draw the horizontal device chain
+                    draw_device_chain(ctx, filtered_fx, chain_w, avail_h)
+                end
 
                 ctx:end_child()
             end
@@ -1840,6 +1887,22 @@ local function main()
             -- Pop default font if we pushed it
             if default_font then
                 ctx:pop_font()
+            end
+            
+            -- Periodically save state (every 60 frames ~= 1 second at 60fps)
+            -- Only save if there are actual display names to avoid clearing saved data
+            if state.track and (not state.last_save_frame or (ctx.frame_count - state.last_save_frame) > 60) then
+                state_module.save_expansion_state()
+                -- Only save display names if there are any (don't clear saved data)
+                local has_display_names = false
+                for _ in pairs(state.display_names) do
+                    has_display_names = true
+                    break
+                end
+                if has_display_names then
+                    state_module.save_display_names()
+                end
+                state.last_save_frame = ctx.frame_count
             end
         end,
     })

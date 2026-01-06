@@ -22,7 +22,6 @@ local M = {}
 -- @param callbacks table Callbacks:
 --   - on_refresh: () -> nil
 --   - on_add_rack: () -> nil
---   - on_add_fx: () -> nil
 --   - on_collapse_from_depth: (depth) -> nil
 function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks)
     -- Refresh button
@@ -52,17 +51,6 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         ctx:end_drag_drop_source()
     end
     if ctx:is_item_hovered() then ctx:set_tooltip("Click to add rack at end\nOr drag to drop anywhere") end
-
-    ctx:same_line()
-
-    -- Add FX button
-    if ctx:button("+ FX") then
-        -- TODO: Open FX browser popup or add last used FX
-        if state.track then
-            callbacks.on_add_fx()
-        end
-    end
-    if ctx:is_item_hovered() then ctx:set_tooltip("Add FX at end of chain") end
 
     ctx:same_line()
     ctx:text("|")

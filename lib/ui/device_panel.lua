@@ -5,6 +5,7 @@
 -- @license MIT
 
 local r = reaper
+local widgets = require('lib.ui.widgets')
 
 local M = {}
 
@@ -64,6 +65,89 @@ local rename_buffer = {}    -- guid -> current edit text
 --------------------------------------------------------------------------------
 -- Custom Widgets
 --------------------------------------------------------------------------------
+
+--- Draw a UI button icon (window/screen icon)
+-- @param ctx ImGui context
+-- @param label string Label for the button
+-- @param width number Button width
+-- @param height number Button height
+-- @return boolean True if clicked
+local function draw_ui_icon(ctx, label, width, height)
+    -- Invisible button for interaction
+    r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
+    local clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
+    
+    -- Get button bounds for drawing
+    local item_min_x, item_min_y = r.ImGui_GetItemRectMin(ctx.ctx)
+    local item_max_x, item_max_y = r.ImGui_GetItemRectMax(ctx.ctx)
+    
+    -- Draw window/screen icon using DrawList
+    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+    local center_x = (item_min_x + item_max_x) / 2
+    local center_y = (item_min_y + item_max_y) / 2
+    local icon_size = 12
+    local half_size = icon_size / 2
+    
+    -- Draw a simple window icon: rectangle with a line in the middle (like a window)
+    local x1 = center_x - half_size
+    local y1 = center_y - half_size
+    local x2 = center_x + half_size
+    local y2 = center_y + half_size
+    
+    -- Greyish color for the icon
+    local icon_color = 0xAAAAAAFF
+    -- Border color
+    local border_color = 0x666666FF
+    
+    -- Draw border around the button
+    r.ImGui_DrawList_AddRect(draw_list, item_min_x, item_min_y, item_max_x, item_max_y, border_color, 0, 0, 1.0)
+    
+    -- Outer rectangle (window frame) - signature: (draw_list, x1, y1, x2, y2, color, rounding, flags, thickness)
+    r.ImGui_DrawList_AddRect(draw_list, x1, y1, x2, y2, icon_color, 0, 0, 2)
+    -- Inner line (window pane divider)
+    r.ImGui_DrawList_AddLine(draw_list, center_x, y1, center_x, y2, icon_color, 1.5)
+    
+    return clicked
+end
+
+--- Draw an ON/OFF circle indicator with colored background
+-- @param ctx ImGui context
+-- @param label string Label for the button
+-- @param is_on boolean Whether the state is ON
+-- @param width number Button width
+-- @param height number Button height
+-- @param bg_color_on number RGBA color for ON background
+-- @param bg_color_off number RGBA color for OFF background
+-- @return boolean True if clicked
+local function draw_on_off_circle(ctx, label, is_on, width, height, bg_color_on, bg_color_off)
+    -- Get cursor position for drawing
+    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+    local center_x = cursor_x + width / 2
+    local center_y = cursor_y + height / 2
+    local radius = 6  -- Small circle radius
+    
+    -- Invisible button for interaction
+    r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
+    local clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
+    local is_hovered = r.ImGui_IsItemHovered(ctx.ctx)
+    
+    -- Draw background and circle
+    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+    
+    -- Draw background rectangle
+    local bg_color = is_on and (bg_color_on or colors.bypass_on) or (bg_color_off or colors.bypass_off)
+    r.ImGui_DrawList_AddRectFilled(draw_list, cursor_x, cursor_y, cursor_x + width, cursor_y + height, bg_color, 0)
+    
+    if is_on then
+        -- Filled circle for ON state
+        r.ImGui_DrawList_AddCircleFilled(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12)
+    else
+        -- Empty circle (outline only) for OFF state
+        r.ImGui_DrawList_AddCircle(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12, 2)
+    end
+    
+    return clicked
+end
 
 --- Draw a knob control
 -- @param ctx ImGui context
@@ -226,6 +310,18 @@ end
 
 local function get_display_name(fx)
     if not fx then return "Unknown" end
+    
+    -- Check for custom display name first (SideFX-only renaming)
+    local ok_guid, guid = pcall(function() return fx:get_guid() end)
+    if ok_guid and guid then
+        local state_module = require('lib.state')
+        local state = state_module.state
+        if state.display_names[guid] then
+            return state.display_names[guid]
+        end
+    end
+    
+    -- Fall back to internal name with prefixes stripped
     local name = get_internal_name(fx)
 
     -- Strip SideFX internal prefixes for clean UI display
@@ -352,6 +448,12 @@ function M.draw(ctx, fx, opts)
     opts = opts or {}
     local cfg = M.config
     local colors = M.colors
+    
+    -- Get icon font for UI button
+    local icon_font = opts.icon_font
+    local constants = require('lib.constants')
+    local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
+    local ui_icon = constants.icon_text(emojimgui, constants.Icons.window)
 
     if not fx then return false end
 
@@ -363,12 +465,20 @@ function M.draw(ctx, fx, opts)
     local container = opts.container
     local drag_guid = container and container:get_guid() or guid
 
-    local ok2, name = pcall(function() return get_display_name(fx) end)
-    if not ok2 then name = "Unknown" end
-
-    -- Use container name if provided (shows D-prefix)
-    if opts.container_name then
-        name = opts.container_name
+    -- Get device name and identifier separately
+    local fx_utils = require('lib.fx_utils')
+    local name = "Unknown"
+    local device_id = nil
+    if container then
+        -- Get actual FX name (plugin name, not hierarchical) and identifier separately
+        local ok_name, fx_name = pcall(function() return fx_utils.get_display_name(fx) end)
+        if ok_name then name = fx_name end
+        local ok_id, id = pcall(function() return fx_utils.get_device_identifier(container) end)
+        if ok_id then device_id = id end
+    else
+        -- No container, use regular display name
+        local ok2, fx_name = pcall(function() return get_display_name(fx) end)
+        if ok2 then name = fx_name end
     end
 
     local ok3, enabled = pcall(function() return fx:get_enabled() end)
@@ -458,16 +568,55 @@ function M.draw(ctx, fx, opts)
     if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0) then
 
         -- Header row using table for proper alignment
-        if r.ImGui_BeginTable(ctx.ctx, "header_" .. guid, 4, 0) then
-            r.ImGui_TableSetupColumn(ctx.ctx, "drag", r.ImGui_TableColumnFlags_WidthFixed(), 24)
-            r.ImGui_TableSetupColumn(ctx.ctx, "name", r.ImGui_TableColumnFlags_WidthStretch())
-            r.ImGui_TableSetupColumn(ctx.ctx, "close", r.ImGui_TableColumnFlags_WidthFixed(), 20)
-            r.ImGui_TableSetupColumn(ctx.ctx, "collapse", r.ImGui_TableColumnFlags_WidthFixed(), 20)
+        if is_panel_collapsed then
+            -- Collapsed header: collapse button | path
+            if r.ImGui_BeginTable(ctx.ctx, "header_collapsed_" .. guid, 2, 0) then
+                r.ImGui_TableSetupColumn(ctx.ctx, "collapse", r.ImGui_TableColumnFlags_WidthFixed(), 24)
+                r.ImGui_TableSetupColumn(ctx.ctx, "path", r.ImGui_TableColumnFlags_WidthStretch())
+                
+                r.ImGui_TableNextRow(ctx.ctx)
+                
+                -- Collapse button
+                r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+                ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+                if ctx:button("▶##collapse_" .. state_guid, 20, 20) then
+                    panel_collapsed[state_guid] = false
+                    interacted = true
+                end
+                ctx:pop_style_color(3)
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Expand panel")
+                end
+                
+                -- Path identifier
+                r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+                if device_id then
+                    ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
+                    ctx:text("[" .. device_id .. "]")
+                    ctx:pop_style_color()
+                end
+                
+                r.ImGui_EndTable(ctx.ctx)
+            end
+        else
+            -- Expanded header: drag | name (50%) | path (15%) | ui | on | x | collapse (buttons fixed width)
+            local imgui = require('imgui')
+            local table_flags = imgui.TableFlags.SizingStretchProp()
+            if ctx:begin_table("header_" .. guid, 7, table_flags) then
+                ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
+                ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 50)  -- 50%
+                ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 15)  -- 15%
+                ctx:table_setup_column("ui", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
+                ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
+                ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
+                ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
 
-            r.ImGui_TableNextRow(ctx.ctx)
+                ctx:table_next_row()
 
             -- Drag handle / collapse toggle
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+            ctx:table_set_column_index(0)
             ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
             ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
             ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
@@ -520,55 +669,70 @@ function M.draw(ctx, fx, opts)
             end
 
             -- Device name (double-click to rename)
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-            local max_name_len = math.floor(content_width / 7)
+            ctx:table_set_column_index(1)
 
-            if rename_active[state_guid] then
-                -- Rename mode: show input text
-                r.ImGui_SetNextItemWidth(ctx.ctx, content_width - 10)
+            -- Check if this device/container is being renamed (use SideFX state system)
+            -- Use FX GUID for renaming since we display the FX name, not the container name
+            local state_module = require('lib.state')
+            local sidefx_state = state_module.state
+            local rename_guid = guid  -- Use FX GUID for renaming
+            local is_renaming = (sidefx_state.renaming_fx == rename_guid)
+            
+            if is_renaming then
+                -- Rename mode: show input text (just the name)
+                ctx:set_next_item_width(-1)
 
-                -- Focus on first frame
-                if not rename_buffer[state_guid] then
-                    rename_buffer[state_guid] = name
+                -- Initialize rename text if needed (use just the name, not the identifier)
+                if not sidefx_state.rename_text or sidefx_state.rename_text == "" then
+                    sidefx_state.rename_text = name  -- Just the name, no identifier
                     r.ImGui_SetKeyboardFocusHere(ctx.ctx)
                 end
 
-                local changed, new_text = r.ImGui_InputText(ctx.ctx, "##rename_" .. state_guid, rename_buffer[state_guid], r.ImGui_InputTextFlags_EnterReturnsTrue())
-                rename_buffer[state_guid] = new_text
+                local changed, new_text = r.ImGui_InputText(ctx.ctx, "##rename_" .. state_guid, sidefx_state.rename_text, r.ImGui_InputTextFlags_EnterReturnsTrue())
+                sidefx_state.rename_text = new_text
 
                 -- Commit on Enter
                 if changed then
-                    local target = opts.container or fx
-                    rename_fx(target, new_text)
-                    rename_active[state_guid] = nil
-                    rename_buffer[state_guid] = nil
+                    if sidefx_state.rename_text ~= "" then
+                        -- Store custom display name in state (SideFX-only, doesn't change REAPER name)
+                        sidefx_state.display_names[rename_guid] = sidefx_state.rename_text
+                    else
+                        -- Clear custom name if empty
+                        sidefx_state.display_names[rename_guid] = nil
+                    end
+                    state_module.save_display_names()
+                    sidefx_state.renaming_fx = nil
+                    sidefx_state.rename_text = ""
                     interacted = true
                 end
 
                 -- Cancel on Escape or click elsewhere
-                if r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Escape()) or
-                   (not r.ImGui_IsItemActive(ctx.ctx) and not r.ImGui_IsItemFocused(ctx.ctx) and rename_buffer[state_guid]) then
-                    -- Check if we lost focus (clicked elsewhere)
-                    if not r.ImGui_IsItemActive(ctx.ctx) and r.ImGui_IsMouseClicked(ctx.ctx, 0) then
-                        rename_active[state_guid] = nil
-                        rename_buffer[state_guid] = nil
-                    elseif r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Escape()) then
-                        rename_active[state_guid] = nil
-                        rename_buffer[state_guid] = nil
+                if r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Escape()) then
+                    sidefx_state.renaming_fx = nil
+                    sidefx_state.rename_text = ""
+                elseif not r.ImGui_IsItemActive(ctx.ctx) and not r.ImGui_IsItemFocused(ctx.ctx) and r.ImGui_IsMouseClicked(ctx.ctx, 0) then
+                    -- Lost focus - commit if text changed
+                    if sidefx_state.rename_text ~= "" then
+                        sidefx_state.display_names[rename_guid] = sidefx_state.rename_text
+                    else
+                        sidefx_state.display_names[rename_guid] = nil
                     end
+                    state_module.save_display_names()
+                    sidefx_state.renaming_fx = nil
+                    sidefx_state.rename_text = ""
                 end
             else
                 -- Normal mode: show text, double-click to rename
-                local display_name = truncate(name, max_name_len)
+                local display_name = truncate(name, 50)  -- Reasonable max length
                 if not enabled then
-                    ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
+                    ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
                 end
 
-                -- Selectable for double-click detection
-                if r.ImGui_Selectable(ctx.ctx, display_name .. "##name_" .. state_guid, false, r.ImGui_SelectableFlags_AllowDoubleClick(), content_width - 10, 0) then
+                -- Selectable for double-click detection (name only) - use 0 width to fill column
+                if r.ImGui_Selectable(ctx.ctx, display_name .. "##name_" .. state_guid, false, r.ImGui_SelectableFlags_AllowDoubleClick(), 0, 0) then
                     if r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
-                        rename_active[state_guid] = true
-                        rename_buffer[state_guid] = name
+                        sidefx_state.renaming_fx = rename_guid
+                        sidefx_state.rename_text = name  -- Just the name, no identifier
                         interacted = true
                     end
                 end
@@ -581,11 +745,35 @@ function M.draw(ctx, fx, opts)
                 end
             end
 
+            -- Path identifier (15%)
+            ctx:table_set_column_index(2)
+            if device_id then
+                ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
+                ctx:text("[" .. device_id .. "]")
+                ctx:pop_style_color()
+            end
+
+            -- UI button
+            ctx:table_set_column_index(3)
+            if draw_ui_icon(ctx, "##ui_header_" .. state_guid, 24, 20) then
+                fx:show(3)
+                interacted = true
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Open native FX window")
+            end
+
+            -- ON/OFF toggle
+            ctx:table_set_column_index(4)
+            if draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, 24, 20, colors.bypass_on, colors.bypass_off) then
+                fx:set_enabled(not enabled)
+                interacted = true
+            end
+
             -- Close button
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
-            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x663333FF)
-            if ctx:small_button("×") then
+            ctx:table_set_column_index(5)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x664444FF)
+            if ctx:button("×", 24, 20) then
                 if opts.on_delete then
                     opts.on_delete(fx)
                 else
@@ -593,22 +781,22 @@ function M.draw(ctx, fx, opts)
                 end
                 interacted = true
             end
-            ctx:pop_style_color(2)
+            ctx:pop_style_color()
 
             -- Sidebar collapse/expand button (rightmost) - only show when panel is expanded
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 3)
+            ctx:table_set_column_index(6)
             if not is_panel_collapsed then
                 ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
                 ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
                 if is_sidebar_collapsed then
-                    if ctx:small_button("▶") then
+                    if ctx:button("▶##sidebar_" .. state_guid, 24, 20) then
                         sidebar_collapsed[state_guid] = false
                     end
                     if r.ImGui_IsItemHovered(ctx.ctx) then
                         ctx:set_tooltip("Expand sidebar")
                     end
                 else
-                    if ctx:small_button("◀") then
+                    if ctx:button("◀##sidebar_" .. state_guid, 24, 20) then
                         sidebar_collapsed[state_guid] = true
                     end
                     if r.ImGui_IsItemHovered(ctx.ctx) then
@@ -618,49 +806,64 @@ function M.draw(ctx, fx, opts)
                 ctx:pop_style_color(2)
             end
 
-            r.ImGui_EndTable(ctx.ctx)
-        end
+            ctx:end_table()
+            end  -- end expanded header
+        end  -- end if is_panel_collapsed check for header
 
         -- Render collapsed panel content
         if is_panel_collapsed then
             ctx:separator()
 
-            -- UI button (centered)
-            local btn_w = panel_width - cfg.padding * 2
-            if ctx:button("UI", btn_w, 28) then
-                fx:show(3)
-                interacted = true
+            -- Collapsed view table layout
+            -- Row 1: ui | on | x
+            -- Row 2: name
+            if r.ImGui_BeginTable(ctx.ctx, "controls_" .. guid, 3, r.ImGui_TableFlags_SizingStretchSame()) then
+                r.ImGui_TableSetupColumn(ctx.ctx, "ui", r.ImGui_TableColumnFlags_WidthStretch())
+                r.ImGui_TableSetupColumn(ctx.ctx, "on", r.ImGui_TableColumnFlags_WidthStretch())
+                r.ImGui_TableSetupColumn(ctx.ctx, "x", r.ImGui_TableColumnFlags_WidthStretch())
+                
+                r.ImGui_TableNextRow(ctx.ctx)
+                
+                -- UI button
+                r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+                -- Draw custom UI icon (border is drawn inside the function)
+                if draw_ui_icon(ctx, "##ui_" .. state_guid, -1, 24) then
+                    fx:show(3)
+                    interacted = true
+                end
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Open " .. name)
+                end
+                
+                -- ON/OFF toggle
+                r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+                -- Draw custom circle indicator with colored background
+                local avail_w, avail_h = ctx:get_content_region_avail()
+                if draw_on_off_circle(ctx, "##on_off_" .. state_guid, enabled, avail_w, 24, colors.bypass_on, colors.bypass_off) then
+                    fx:set_enabled(not enabled)
+                    interacted = true
+                end
+                
+                -- Close button
+                r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x444444FF)
+                if ctx:button("×", -1, 24) then
+                    if opts.on_delete then
+                        opts.on_delete(fx)
+                    else
+                        fx:delete()
+                    end
+                    interacted = true
+                end
+                ctx:pop_style_color(2)
+                
+                r.ImGui_EndTable(ctx.ctx)
             end
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip("Open " .. name)
-            end
-
-            -- ON/OFF toggle
-            if enabled then
-                ctx:push_style_color(r.ImGui_Col_Button(), colors.bypass_on)
-            else
-                ctx:push_style_color(r.ImGui_Col_Button(), colors.bypass_off)
-            end
-            if ctx:button(enabled and "ON" or "OFF", btn_w, 24) then
-                fx:set_enabled(not enabled)
-                interacted = true
-            end
-            ctx:pop_style_color()
-
-            ctx:spacing()
-            ctx:separator()
-            ctx:spacing()
-
-            -- Wrapped name - split into lines
-            local max_chars_per_line = math.floor((panel_width - cfg.padding * 2) / 8)
-            max_chars_per_line = math.max(8, max_chars_per_line)
-            local remaining = name
+            
+            -- Row 2: name
             ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAAAAFF)
-            while #remaining > 0 do
-                local line = remaining:sub(1, max_chars_per_line)
-                remaining = remaining:sub(max_chars_per_line + 1)
-                ctx:text(line)
-            end
+            ctx:text(name)
             ctx:pop_style_color()
 
             ctx:end_child()  -- end panel
@@ -778,61 +981,67 @@ function M.draw(ctx, fx, opts)
             else
                 -- Expanded sidebar
                 local ctrl_w = cfg.sidebar_width - cfg.padding * 2  -- Full width controls
-                local btn_w = 70  -- Narrower buttons
+                local btn_w = 70  -- Narrower buttons (for pan slider)
 
-                -- UI button (centered)
-                center_item(btn_w)
-                if ctx:button("UI", btn_w, btn_h) then
-                    fx:show(3)
-                    interacted = true
-                end
-                if ctx:is_item_hovered() then
-                    ctx:set_tooltip("Open native FX window")
-                end
-
-                -- ON/OFF toggle (centered)
-                center_item(btn_w)
-                if enabled then
-                    ctx:push_style_color(r.ImGui_Col_Button(), colors.bypass_on)
-                else
-                    ctx:push_style_color(r.ImGui_Col_Button(), colors.bypass_off)
-                end
-                if ctx:button(enabled and "ON" or "OFF", btn_w, btn_h) then
-                    fx:set_enabled(not enabled)
-                    interacted = true
-                end
-                ctx:pop_style_color()
-
-                ctx:spacing()
-                ctx:separator()
-
-                -- Container Mix control (parallel dry/wet blend) - only if we have a container
+                -- Mix and Delta on the same line using a table with bottom border
                 local container = opts.container
+                local has_mix = false
+                local mix_val, mix_idx
                 if container then
-                    local ok_mix, mix_idx = pcall(function() return container:get_param_from_ident(":wet") end)
+                    local ok_mix
+                    ok_mix, mix_idx = pcall(function() return container:get_param_from_ident(":wet") end)
                     if ok_mix and mix_idx and mix_idx >= 0 then
-                        local ok_mv, mix_val = pcall(function() return container:get_param_normalized(mix_idx) end)
-                        if ok_mv and mix_val then
-                            -- Center "Mix" label
+                        local ok_mv
+                        ok_mv, mix_val = pcall(function() return container:get_param_normalized(mix_idx) end)
+                        has_mix = ok_mv and mix_val
+                    end
+                end
+
+                local has_delta = false
+                local delta_val, delta_idx
+                local ok_delta
+                ok_delta, delta_idx = pcall(function() return fx:get_param_from_ident(":delta") end)
+                if ok_delta and delta_idx and delta_idx >= 0 then
+                    local ok_dv
+                    ok_dv, delta_val = pcall(function() return fx:get_param_normalized(delta_idx) end)
+                    has_delta = ok_dv and delta_val
+                end
+
+                -- Only show table if we have mix or delta
+                if has_mix or has_delta then
+                    local imgui = require('imgui')
+                    local table_flags = imgui.TableFlags.BordersH()
+                    if ctx:begin_table("mix_delta_" .. state_guid, 2, table_flags) then
+                        ctx:table_setup_column("mix", imgui.TableColumnFlags.WidthStretch())
+                        ctx:table_setup_column("delta", imgui.TableColumnFlags.WidthStretch())
+                        
+                        ctx:table_next_row()
+                        
+                        -- Mix column
+                        ctx:table_set_column_index(0)
+                        if has_mix then
+                            -- "Mix" label (centered)
                             local mix_text = "Mix"
                             local mix_text_w = r.ImGui_CalcTextSize(ctx.ctx, mix_text)
-                            center_item(mix_text_w)
+                            local col_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
+                            r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - mix_text_w) / 2)
                             ctx:push_style_color(r.ImGui_Col_Text(), 0xCC88FFFF)  -- Purple for container
                             ctx:text(mix_text)
                             ctx:pop_style_color()
 
-                            -- Center the knob
-                            center_item(cfg.knob_size)
-                            local mix_changed, new_mix = draw_knob(ctx, "##mix_knob", mix_val, cfg.knob_size)
+                            -- Smaller knob (30px)
+                            local mix_knob_size = 30
+                            r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - mix_knob_size) / 2)
+                            local mix_changed, new_mix = draw_knob(ctx, "##mix_knob", mix_val, mix_knob_size)
                             if mix_changed then
                                 pcall(function() container:set_param_normalized(mix_idx, new_mix) end)
                                 interacted = true
                             end
 
-                            -- Center value below knob
+                            -- Value below knob (centered)
                             local mix_val_text = string.format("%.0f%%", mix_val * 100)
                             local mix_val_text_w = r.ImGui_CalcTextSize(ctx.ctx, mix_val_text)
-                            center_item(mix_val_text_w)
+                            r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - mix_val_text_w) / 2)
                             ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAAAAFF)
                             ctx:text(mix_val_text)
                             ctx:pop_style_color()
@@ -840,49 +1049,55 @@ function M.draw(ctx, fx, opts)
                             if r.ImGui_IsItemHovered(ctx.ctx) then
                                 ctx:set_tooltip(string.format("Device Mix: %.0f%% (parallel blend)", mix_val * 100))
                             end
-
-                            ctx:spacing()
                         end
-                    end
-                end
+                        
+                        -- Delta column
+                        ctx:table_set_column_index(1)
+                        if has_delta then
+                            -- "Delta" label (centered horizontally)
+                            local delta_text = "Delta"
+                            local delta_text_w = r.ImGui_CalcTextSize(ctx.ctx, delta_text)
+                            local col_start_x = r.ImGui_GetCursorPosX(ctx.ctx)
+                            local col_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
+                            r.ImGui_SetCursorPosX(ctx.ctx, col_start_x + (col_w - delta_text_w) / 2)
+                            ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAACCFF)
+                            ctx:text(delta_text)
+                            ctx:pop_style_color()
+                            
+                            -- Center button vertically with mix knob
+                            -- Mix column: label (~20px) + spacing (~5px) + knob (30px) + spacing (~5px) + value (~20px) = ~80px total
+                            -- Knob center is at: label (20px) + spacing (5px) + knob_radius (15px) = ~40px from top
+                            -- Delta column: label (~20px) + button (18px) = ~38px minimum
+                            -- To center button with knob: button center should be at ~40px
+                            -- Button center is 9px from button top, so button top should be at 40 - 9 = 31px
+                            -- After label (~20px), we need 31 - 20 = 11px spacing
+                            ctx:spacing()  -- Small spacing after label
+                            r.ImGui_Dummy(ctx.ctx, 0, 6)  -- Additional spacing to align with knob center
 
-                -- Internal FX Wet/Dry is hidden (set to 100% internally)
-                -- Container Mix control above serves as the main parallel blend
+                            local delta_on = delta_val > 0.5
+                            if delta_on then
+                                ctx:push_style_color(r.ImGui_Col_Button(), 0x6666CCFF)
+                            else
+                                ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
+                            end
 
-                -- Delta Solo control
-                local ok_delta, delta_idx = pcall(function() return fx:get_param_from_ident(":delta") end)
-                if ok_delta and delta_idx and delta_idx >= 0 then
-                    local ok_dv, delta_val = pcall(function() return fx:get_param_normalized(delta_idx) end)
-                    if ok_dv and delta_val then
-                        ctx:spacing()
+                            -- Delta button (centered horizontally)
+                            local delta_btn_w = 36
+                            local delta_btn_h = 18
+                            local col_w_btn = r.ImGui_GetContentRegionAvail(ctx.ctx)
+                            r.ImGui_SetCursorPosX(ctx.ctx, col_start_x + (col_w_btn - delta_btn_w) / 2)
+                            if ctx:button(delta_on and "∆" or "—", delta_btn_w, delta_btn_h) then
+                                pcall(function() fx:set_param_normalized(delta_idx, delta_on and 0 or 1) end)
+                                interacted = true
+                            end
+                            ctx:pop_style_color()
 
-                        -- Center "Delta" label
-                        local delta_text = "Delta"
-                        local delta_text_w = r.ImGui_CalcTextSize(ctx.ctx, delta_text)
-                        center_item(delta_text_w)
-                        ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAACCFF)
-                        ctx:text(delta_text)
-                        ctx:pop_style_color()
-
-                        local delta_on = delta_val > 0.5
-                        if delta_on then
-                            ctx:push_style_color(r.ImGui_Col_Button(), 0x6666CCFF)
-                        else
-                            ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
+                            if r.ImGui_IsItemHovered(ctx.ctx) then
+                                ctx:set_tooltip(delta_on and "Delta Solo: ON (wet - dry)" or "Delta Solo: OFF")
+                            end
                         end
-
-                        -- Center delta button
-                        local delta_btn_w = 36
-                        center_item(delta_btn_w)
-                        if ctx:button(delta_on and "∆" or "—", delta_btn_w, 18) then
-                            pcall(function() fx:set_param_normalized(delta_idx, delta_on and 0 or 1) end)
-                            interacted = true
-                        end
-                        ctx:pop_style_color()
-
-                        if r.ImGui_IsItemHovered(ctx.ctx) then
-                            ctx:set_tooltip(delta_on and "Delta Solo: ON (wet - dry)" or "Delta Solo: OFF")
-                        end
+                        
+                        ctx:end_table()
                     end
                 end
 
@@ -892,69 +1107,177 @@ function M.draw(ctx, fx, opts)
                     local ok_g, gain_val = pcall(function() return utility:get_param_normalized(0) end)
                     local ok_p, pan_val = pcall(function() return utility:get_param_normalized(1) end)
 
-                    if ok_g then
-                        gain_val = gain_val or 0.5
-                        local gain_db = (gain_val - 0.5) * 48
-
-                        ctx:spacing()
-
-                        -- Center "Gain" label
-                        local gain_text = "Gain"
-                        local gain_text_w = r.ImGui_CalcTextSize(ctx.ctx, gain_text)
-                        center_item(gain_text_w)
-                        ctx:push_style_color(r.ImGui_Col_Text(), 0xAACC88FF)
-                        ctx:text(gain_text)
-                        ctx:pop_style_color()
-
-                        -- Center the fader
-                        center_item(cfg.fader_width)
-                        local gain_format = gain_db >= 0 and "+%.0f" or "%.0f"
-                        local gain_changed, new_gain_db = draw_fader(ctx, "##gain_fader", gain_db, -24, 24, cfg.fader_width, cfg.fader_height, gain_format)
-                        if gain_changed then
-                            local new_norm = (new_gain_db + 24) / 48
-                            pcall(function() utility:set_param_normalized(0, new_norm) end)
-                            interacted = true
-                        end
-                        if r.ImGui_IsItemHovered(ctx.ctx) then
-                            ctx:set_tooltip(string.format("Gain: %+.1f dB", gain_db))
-                        end
-                    end
-
+                    -- Pan slider first (above fader)
                     if ok_p then
                         pan_val = pan_val or 0.5
                         local pan_pct = (pan_val - 0.5) * 200
 
                         ctx:spacing()
 
-                        -- Center "Pan" label
-                        local pan_text = "Pan"
-                        local pan_text_w = r.ImGui_CalcTextSize(ctx.ctx, pan_text)
-                        center_item(pan_text_w)
-                        ctx:push_style_color(r.ImGui_Col_Text(), 0xCCAA88FF)
-                        ctx:text(pan_text)
-                        ctx:pop_style_color()
-
-                        local pan_str
-                        if pan_pct < -1 then
-                            pan_str = string.format("%.0fL", -pan_pct)
-                        elseif pan_pct > 1 then
-                            pan_str = string.format("%.0fR", pan_pct)
-                        else
-                            pan_str = "C"
-                        end
-
-                        -- Center the pan slider (narrower)
-                        center_item(btn_w)
-                        ctx:set_next_item_width(btn_w)
-                        local pan_changed, new_pan_pct = ctx:slider_double("##pan", pan_pct, -100, 100, pan_str)
+                        -- Use collapsed rack pan slider (with label underneath)
+                        local avail_w, _ = ctx:get_content_region_avail()
+                        local pan_w = math.min(avail_w - 4, 80)
+                        local pan_offset = math.max(0, (avail_w - pan_w) / 2)
+                        ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + pan_offset)
+                        local pan_changed, new_pan = widgets.draw_pan_slider(ctx, "##utility_pan", pan_pct, pan_w)
                         if pan_changed then
-                            local new_norm = (new_pan_pct / 200) + 0.5
+                            local new_norm = (new_pan + 100) / 200
                             pcall(function() utility:set_param_normalized(1, new_norm) end)
                             interacted = true
                         end
-                        if r.ImGui_IsItemHovered(ctx.ctx) then
-                            ctx:set_tooltip("Pan: " .. pan_str)
+                    end
+
+                    if ok_g then
+                        gain_val = gain_val or 0.5
+                        local gain_norm = gain_val
+                        local gain_db = (gain_val - 0.5) * 48
+
+                        ctx:spacing()
+
+                        -- Fader with meter and scale (same as collapsed rack)
+                        local fader_w = 32
+                        local meter_w = 12
+                        local scale_w = 20
+                        
+                        -- Calculate fader height (accounting for pan slider above)
+                        local _, remaining_h = ctx:get_content_region_avail()
+                        local fader_h = remaining_h - 22  -- Leave room for dB label
+                        fader_h = math.max(50, fader_h)  -- Minimum 50px, but can extend
+                        
+                        local avail_w, _ = ctx:get_content_region_avail()
+                        local total_w = scale_w + fader_w + meter_w + 4
+                        local offset_x = math.max(0, (avail_w - total_w) / 2)
+                        
+                        ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + offset_x)
+                        
+                        local screen_x, screen_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+                        local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                        
+                        local scale_x = screen_x
+                        local fader_x = screen_x + scale_w + 2
+                        local meter_x = fader_x + fader_w + 2
+                        
+                        -- dB scale
+                        local db_marks = {24, 12, 0, -12, -24}
+                        for _, db in ipairs(db_marks) do
+                            local mark_norm = (db + 24) / 48
+                            local mark_y = screen_y + fader_h - (fader_h * mark_norm)
+                            r.ImGui_DrawList_AddLine(draw_list, scale_x + scale_w - 6, mark_y, scale_x + scale_w, mark_y, 0x666666FF, 1)
+                            if db == 0 or db == -12 or db == 12 or db == 24 then
+                                local label = db == 0 and "0" or tostring(db)
+                                r.ImGui_DrawList_AddText(draw_list, scale_x, mark_y - 5, 0x888888FF, label)
+                            end
                         end
+                        
+                        -- Fader background
+                        r.ImGui_DrawList_AddRectFilled(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x1A1A1AFF, 3)
+                        -- Fader fill
+                        local fill_h = fader_h * gain_norm
+                        if fill_h > 2 then
+                            local fill_top = screen_y + fader_h - fill_h
+                            r.ImGui_DrawList_AddRectFilled(draw_list, fader_x + 2, fill_top, fader_x + fader_w - 2, screen_y + fader_h - 2, 0x5588AACC, 2)
+                        end
+                        -- Fader border
+                        r.ImGui_DrawList_AddRect(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x555555FF, 3)
+                        -- 0dB line (at center since range is -24 to +24)
+                        local zero_db_norm = 24 / 48
+                        local zero_y = screen_y + fader_h - (fader_h * zero_db_norm)
+                        r.ImGui_DrawList_AddLine(draw_list, fader_x, zero_y, fader_x + fader_w, zero_y, 0xFFFFFF44, 1)
+                        
+                        -- Stereo meters
+                        local meter_l_x = meter_x
+                        local meter_r_x = meter_x + meter_w / 2 + 1
+                        local half_meter_w = meter_w / 2 - 1
+                        r.ImGui_DrawList_AddRectFilled(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
+                        r.ImGui_DrawList_AddRectFilled(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
+                        
+                        -- Get track for meters (if available)
+                        local state_module = require('lib.state')
+                        local sidefx_state = state_module.state
+                        if sidefx_state.track and sidefx_state.track.pointer then
+                            local peak_l = r.Track_GetPeakInfo(sidefx_state.track.pointer, 0)
+                            local peak_r = r.Track_GetPeakInfo(sidefx_state.track.pointer, 1)
+                            local function draw_meter_bar(x, w, peak)
+                                if peak > 0 then
+                                    local peak_db = 20 * math.log(peak, 10)
+                                    peak_db = math.max(-60, math.min(24, peak_db))
+                                    local peak_norm = (peak_db + 60) / 84
+                                    local meter_fill_h = fader_h * peak_norm
+                                    if meter_fill_h > 1 then
+                                        local meter_top = screen_y + fader_h - meter_fill_h
+                                        local meter_color
+                                        if peak_db > 0 then meter_color = 0xFF4444FF
+                                        elseif peak_db > -6 then meter_color = 0xFFAA44FF
+                                        elseif peak_db > -18 then meter_color = 0x44FF44FF
+                                        else meter_color = 0x44AA44FF end
+                                        r.ImGui_DrawList_AddRectFilled(draw_list, x, meter_top, x + w, screen_y + fader_h - 1, meter_color, 0)
+                                    end
+                                end
+                            end
+                            draw_meter_bar(meter_l_x + 1, half_meter_w - 1, peak_l)
+                            draw_meter_bar(meter_r_x + 1, half_meter_w - 1, peak_r)
+                        end
+                        
+                        r.ImGui_DrawList_AddRect(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
+                        r.ImGui_DrawList_AddRect(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
+                        
+                        -- Invisible slider for fader interaction
+                        r.ImGui_SetCursorScreenPos(ctx.ctx, fader_x, screen_y)
+                        local imgui = require('imgui')
+                        ctx:push_style_color(imgui.Col.FrameBg(), 0x00000000)
+                        ctx:push_style_color(imgui.Col.FrameBgHovered(), 0x00000000)
+                        ctx:push_style_color(imgui.Col.FrameBgActive(), 0x00000000)
+                        ctx:push_style_color(imgui.Col.SliderGrab(), 0xAAAAAAFF)
+                        ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
+                        local gain_changed, new_gain_db = ctx:v_slider_double("##gain_fader_v", fader_w, fader_h, gain_db, -24, 24, "")
+                        if gain_changed then
+                            local new_norm = (new_gain_db + 24) / 48
+                            pcall(function() utility:set_param_normalized(0, new_norm) end)
+                            interacted = true
+                        end
+                        if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
+                            pcall(function() utility:set_param_normalized(0, 0.5) end)  -- Reset to 0dB
+                            interacted = true
+                        end
+                        ctx:pop_style_color(5)
+                        
+                        -- dB label below fader (with double-click editing)
+                        local label_h = 16
+                        local label_y = screen_y + fader_h + 2
+                        local label_x = fader_x
+                        r.ImGui_DrawList_AddRectFilled(draw_list, label_x, label_y, label_x + fader_w, label_y + label_h, 0x222222FF, 2)
+                        local db_label = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db))
+                        local text_w = r.ImGui_CalcTextSize(ctx.ctx, db_label)
+                        r.ImGui_DrawList_AddText(draw_list, label_x + (fader_w - text_w) / 2, label_y + 1, 0xCCCCCCFF, db_label)
+                        
+                        -- Invisible button for dB label (for double-click editing)
+                        r.ImGui_SetCursorScreenPos(ctx.ctx, label_x, label_y)
+                        ctx:invisible_button("##gain_db_label", fader_w, label_h)
+                        
+                        -- Double-click on dB label to edit value
+                        if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
+                            ctx:open_popup("##gain_edit_popup")
+                        end
+                        
+                        -- Edit popup for gain
+                        if ctx:begin_popup("##gain_edit_popup") then
+                            local imgui = require('imgui')
+                            ctx:set_next_item_width(60)
+                            ctx:set_keyboard_focus_here()
+                            local input_changed, input_val = ctx:input_double("##gain_input", gain_db, 0, 0, "%.1f")
+                            if input_changed then
+                                local new_norm = (math.max(-24, math.min(24, input_val)) + 24) / 48
+                                pcall(function() utility:set_param_normalized(0, new_norm) end)
+                                interacted = true
+                            end
+                            if ctx:is_key_pressed(imgui.Key.Enter()) or ctx:is_key_pressed(imgui.Key.Escape()) then
+                                ctx:close_current_popup()
+                            end
+                            ctx:end_popup()
+                        end
+                        
+                        -- Advance cursor past fader
+                        r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, label_y + label_h)
                     end
 
                     -- Phase Invert controls
@@ -1034,6 +1357,13 @@ function M.draw(ctx, fx, opts)
         if ctx:menu_item("Rename...") then
             if opts.on_rename then
                 opts.on_rename(fx)
+            else
+                -- Fallback: use SideFX state system directly
+                -- Use FX GUID for renaming since we display the FX name
+                local state_module = require('lib.state')
+                local sidefx_state = state_module.state
+                sidefx_state.renaming_fx = guid  -- Use FX GUID
+                sidefx_state.rename_text = name
             end
         end
         ctx:separator()
