@@ -837,12 +837,16 @@ function M.draw(ctx, fx, opts)
 
                     local expanded_modulator = modulators[expanded_slot_idx + 1]
                     if expanded_modulator then
+                        ctx:text("Has modulator")
                         ctx:separator()
                         ctx:spacing()
 
                         -- Get parameter values safely
                         local ok, param_count = pcall(function() return expanded_modulator:get_param_count() end)
+                        ctx:text(string.format("Param check: ok=%s, count=%s", tostring(ok), tostring(param_count)))
                         if ok and param_count and param_count > 0 then
+                            ctx:text("SHOULD SEE CONTROLS BELOW")
+                            ctx:spacing()
                             -- Get available width for controls
                             local control_width = ctx:get_content_region_avail() - 8  -- Small padding
 
