@@ -752,6 +752,10 @@ function M.draw(ctx, fx, opts)
                 -- Require imgui for Col constants
                 local imgui = require('imgui')
 
+                -- Require state module for modulator UI state
+                local state_module = require('lib.state')
+                local state = state_module.state
+
                 -- 2×4 grid of modulator slots
                 for row = 0, 3 do
                     for col = 0, 1 do
