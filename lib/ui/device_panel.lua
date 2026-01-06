@@ -596,6 +596,13 @@ function M.draw(ctx, fx, opts)
     local is_sidebar_collapsed = sidebar_collapsed[state_guid] or false
     local collapsed_sidebar_w = 8  -- Minimal width when collapsed (button is in header)
 
+    -- Check modulator sidebar state early for panel width calculation
+    if mod_sidebar_collapsed[state_guid] == nil then
+        mod_sidebar_collapsed[state_guid] = true
+    end
+    local is_mod_sidebar_collapsed = mod_sidebar_collapsed[state_guid]
+    local mod_sidebar_w = is_mod_sidebar_collapsed and cfg.mod_sidebar_collapsed_width or cfg.mod_sidebar_width
+
     -- Calculate dimensions based on collapsed state
     local panel_height, panel_width, content_width, num_columns, params_per_column
 
@@ -619,15 +626,11 @@ function M.draw(ctx, fx, opts)
         num_columns = math.ceil(visible_count / params_per_column)
         num_columns = math.max(1, num_columns)
 
-        -- Calculate panel width: columns + sidebar (if visible) + padding
+        -- Calculate panel width: columns + sidebar (if visible) + modulator sidebar + padding
         content_width = cfg.column_width * num_columns
         local sidebar_w = is_sidebar_collapsed and collapsed_sidebar_w or (cfg.sidebar_width + cfg.sidebar_padding)
 
-        -- Add modulator sidebar width (will be calculated inside)
-        -- For now, assume collapsed (24px) - will be finalized inside the panel
-        local mod_sidebar_estimate = cfg.mod_sidebar_collapsed_width
-
-        panel_width = content_width + sidebar_w + mod_sidebar_estimate + cfg.padding * 2
+        panel_width = content_width + sidebar_w + mod_sidebar_w + cfg.padding * 2
     end
 
     local interacted = false
@@ -651,14 +654,8 @@ function M.draw(ctx, fx, opts)
     -- Begin child for panel content
     if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0) then
 
-        -- Get modulator sidebar state (default to collapsed)
-        if mod_sidebar_collapsed[state_guid] == nil then
-            mod_sidebar_collapsed[state_guid] = true
-        end
-        local is_mod_sidebar_collapsed = mod_sidebar_collapsed[state_guid]
-        local mod_sidebar_w = is_mod_sidebar_collapsed and cfg.mod_sidebar_collapsed_width or cfg.mod_sidebar_width
-
         -- Wrapper table: [Modulator Sidebar | Main Content]
+        -- (mod_sidebar_w already calculated above for panel width)
         if r.ImGui_BeginTable(ctx.ctx, "device_wrapper_" .. guid, 2, r.ImGui_TableFlags_BordersInnerV()) then
             r.ImGui_TableSetupColumn(ctx.ctx, "modulators", r.ImGui_TableColumnFlags_WidthFixed(), mod_sidebar_w)
             r.ImGui_TableSetupColumn(ctx.ctx, "content", r.ImGui_TableColumnFlags_WidthStretch())
