@@ -77,12 +77,12 @@ function M.get_linkable_fx()
         local fx = fx_info.fx
         local name = fx:get_name()
         -- Use fx_utils to properly detect internal components
-        local is_internal = fx_utils.is_rack_container(fx) or
-                           fx_utils.is_chain_container(fx) or
-                           fx_utils.is_device_container(fx) or
-                           fx_utils.is_mixer_fx(fx) or
-                           fx_utils.is_utility_fx(fx) or
-                           fx_utils.is_modulator_fx(fx)
+        -- Filter out all containers (racks, chains, devices) and internal JSFX
+        local is_container = fx:is_container()  -- Filters racks, chains, devices
+        local is_internal_jsfx = fx_utils.is_mixer_fx(fx) or
+                                fx_utils.is_utility_fx(fx) or
+                                fx_utils.is_modulator_fx(fx)
+        local is_internal = is_container or is_internal_jsfx
 
         if name and not is_internal then
             local params = {}
