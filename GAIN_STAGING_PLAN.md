@@ -1,312 +1,500 @@
-# Gain Staging Feature Plan
+# Auto Gain Staging Feature Plan
 
 ## Overview
-Add visual gain staging to SideFX by reading output levels from SideFX Utility plugins in the chain and displaying them as compact meters.
+Automatically analyze and adjust gain levels throughout the FX chain to maintain optimal signal levels at each stage. Uses SideFX Utility plugins to both measure output levels and apply corrective gain.
 
-## Current Capabilities
+## Core Concept
 
-### SideFX Utility JSFX
-The utility plugin already has level metering built-in:
-- **slider5**: Output Level (0-1 range, hidden parameter)
-- Calculated as: `max(abs(spl0), abs(spl1))`
-- Smoothed with: `slider5 = slider5 * 0.95 + level * 0.05`
-- Updates every sample
+### The Problem
+When building FX chains, each effect can change the output level:
+- Compressors often boost output (+3 to +10dB)
+- EQs can add/remove energy
+- Saturators increase levels
+- Result: Cascading gain issues, clipping, or loss of headroom
 
-This means we can already read signal levels from any utility in the chain!
+### The Solution
+**Auto Gain Staging** function that:
+1. Measures output level at each stage (utility slider5)
+2. Calculates required gain adjustment to hit target level
+3. Applies adjustment to utility gain parameter (slider1)
+4. Runs iteratively until all stages are at target
 
-## Proposed Feature
+## SideFX Utility Parameters
 
-### Visual Design
-Add compact level meters to each device in the chain that has a utility plugin:
+### Input Parameters
+- **slider1**: Gain (dB) - Range: -24dB to +24dB
+- **slider2**: Pan (%)
+- **slider3**: Phase Invert L
+- **slider4**: Phase Invert R
 
+### Output Measurement
+- **slider5**: Output Level - Range: 0-1 (linear amplitude)
+  - Calculated: `max(abs(spl0), abs(spl1))`
+  - Smoothed: `slider5 = slider5 * 0.95 + level * 0.05`
+  - Updates per-sample (real-time)
+
+## Algorithm
+
+### Step 1: Scan Chain for Utilities
+```lua
+function get_chain_utilities(container)
+    local utilities = {}
+
+    for child in container:iter_container_children() do
+        local is_util = fx_utils.is_utility_fx(child)
+        local is_mod = fx_utils.is_modulator_fx(child)
+
+        if is_util and not is_mod then
+            table.insert(utilities, {
+                fx = child,
+                guid = child:get_guid(),
+                current_gain_db = child:get_param_normalized(0) * 48 - 24,  -- slider1 to dB
+                output_level = 0,
+                target_adjustment_db = 0
+            })
+        end
+    end
+
+    return utilities
+end
+```
+
+### Step 2: Measure Output Levels
+```lua
+function measure_utility_levels(utilities)
+    for _, util in ipairs(utilities) do
+        local ok, level_norm = pcall(function()
+            return util.fx:get_param_normalized(4)  -- slider5
+        end)
+
+        if ok and level_norm > 0 then
+            -- Convert linear amplitude to dB
+            util.output_level = 20 * math.log10(level_norm)
+        else
+            util.output_level = -96  -- Silent
+        end
+    end
+end
+```
+
+### Step 3: Calculate Required Adjustments
+```lua
+function calculate_adjustments(utilities, target_db)
+    -- target_db: desired output level (e.g., -12dB for 12dB headroom)
+
+    for _, util in ipairs(utilities) do
+        -- How much do we need to adjust to hit target?
+        local level_error = util.output_level - target_db
+
+        -- Adjustment needed (invert because we want to compensate)
+        util.target_adjustment_db = -level_error
+
+        -- New gain = current gain + adjustment
+        local new_gain_db = util.current_gain_db + util.target_adjustment_db
+
+        -- Clamp to slider1 range (-24 to +24 dB)
+        new_gain_db = math.max(-24, math.min(24, new_gain_db))
+
+        util.new_gain_db = new_gain_db
+    end
+end
+```
+
+### Step 4: Apply Adjustments
+```lua
+function apply_gain_adjustments(utilities)
+    for _, util in ipairs(utilities) do
+        -- Convert dB to normalized parameter value (0-1)
+        -- slider1: -24dB to +24dB maps to 0-1
+        local gain_norm = (util.new_gain_db + 24) / 48
+
+        local ok = pcall(function()
+            util.fx:set_param_normalized(0, gain_norm)
+        end)
+
+        if ok then
+            print(string.format(
+                "Adjusted utility gain: %.1f dB → %.1f dB (output was %.1f dB)",
+                util.current_gain_db,
+                util.new_gain_db,
+                util.output_level
+            ))
+        end
+    end
+end
+```
+
+### Step 5: Main Function
+```lua
+function auto_gain_stage(container, opts)
+    opts = opts or {}
+    local target_db = opts.target_db or -12  -- Default: -12dB (12dB headroom)
+    local max_iterations = opts.max_iterations or 3
+    local tolerance_db = opts.tolerance_db or 1  -- ±1dB is acceptable
+
+    -- Ensure playback is active for accurate measurement
+    if not (reaper.GetPlayState() & 1) then
+        reaper.ShowMessageBox(
+            "Please start playback before running auto gain staging.\nSignal must be present for accurate measurement.",
+            "Auto Gain Staging", 0
+        )
+        return false
+    end
+
+    for iteration = 1, max_iterations do
+        -- Wait for measurement to stabilize
+        wait_ms(200)  -- Let smoothing settle
+
+        -- Get all utilities in chain
+        local utilities = get_chain_utilities(container)
+
+        if #utilities == 0 then
+            reaper.ShowMessageBox(
+                "No SideFX Utility plugins found in chain.\nAdd utilities between devices to enable gain staging.",
+                "Auto Gain Staging", 0
+            )
+            return false
+        end
+
+        -- Measure current levels
+        measure_utility_levels(utilities)
+
+        -- Check if we're within tolerance
+        local all_within_tolerance = true
+        for _, util in ipairs(utilities) do
+            local error = math.abs(util.output_level - target_db)
+            if error > tolerance_db then
+                all_within_tolerance = false
+                break
+            end
+        end
+
+        if all_within_tolerance then
+            print(string.format("Auto gain staging complete in %d iteration(s)", iteration))
+            return true
+        end
+
+        -- Calculate and apply adjustments
+        calculate_adjustments(utilities, target_db)
+        apply_gain_adjustments(utilities)
+
+        print(string.format("Iteration %d/%d complete", iteration, max_iterations))
+    end
+
+    print("Auto gain staging complete (max iterations reached)")
+    return true
+end
+```
+
+## UI Integration
+
+### Option 1: Chain Context Menu
+Add to chain header right-click menu:
+```
+┌─────────────────────────────┐
+│ Chain 1                     │
+│ ┌─────────────────────────┐ │
+│ │ Rename Chain            │ │
+│ │ Delete Chain            │ │
+│ │ ─────────────────       │ │
+│ │ Auto Gain Stage...   ⚡ │ │ ← New option
+│ └─────────────────────────┘ │
+└─────────────────────────────┘
+```
+
+### Option 2: Toolbar Button
+Add to main toolbar:
+```
+[Browser] [+Rack] [+Chain] [⚡ Gain Stage] [Settings]
+                            └─ New button
+```
+
+### Option 3: Device Panel Action
+Add button to device panel when utility is present:
 ```
 ┌─────────────────────────┐
-│  Device Name        [●] │  ← Header with gain indicator
+│  SideFX Utility     [⚡] │ ← Gain stage button
 │  ┌─────────┐            │
-│  │ Param 1 │            │
+│  │ Gain    │ +3dB       │
 │  └─────────┘            │
-│                         │
-│  Output: ████▌░░ -6dB   │  ← Level meter (optional expanded view)
 └─────────────────────────┘
 ```
 
-### Compact Mode (Default)
-- **Gain dot indicator** in device header
-  - 🟢 Green: -12dB to -6dB (optimal range)
-  - 🟡 Yellow: -6dB to -3dB (getting hot)
-  - 🔴 Red: -3dB to 0dB (clipping risk)
-  - ⚫ Gray: Below -24dB (too quiet)
+## Auto Gain Stage Dialog
 
-### Expanded Mode (Optional)
-- Small horizontal meter bar below device header
-- dB readout next to meter
-- Peak hold indicator
-- Color-coded segments:
-  - Green: -∞ to -12dB
-  - Yellow: -12dB to -6dB
-  - Orange: -6dB to -3dB
-  - Red: -3dB to 0dB
+When user triggers function, show modal:
 
-## Implementation Steps
+```
+╔═══════════════════════════════════════════╗
+║  Auto Gain Stage                          ║
+╠═══════════════════════════════════════════╣
+║                                           ║
+║  Target Level:  [-12] dB                  ║
+║                 ▲ Recommended for headroom║
+║                                           ║
+║  Tolerance:     [±1] dB                   ║
+║                                           ║
+║  Max Iterations: [3]                      ║
+║                                           ║
+║  ⚠ Playback must be active               ║
+║     Signal present for measurement        ║
+║                                           ║
+║  Found 4 utilities in chain:              ║
+║  • Device 1 Output: -6.2 dB               ║
+║  • Device 2 Output: +2.4 dB ⚠             ║
+║  • Device 3 Output: -11.8 dB              ║
+║  • Device 4 Output: -9.1 dB               ║
+║                                           ║
+║           [Cancel]  [Apply]               ║
+╚═══════════════════════════════════════════╝
+```
 
-### Phase 1: Data Collection
+## Advanced Options
+
+### Per-Stage Target Levels
+Allow different targets for different stages:
+```lua
+local stage_targets = {
+    [1] = -12,  -- First stage: -12dB
+    [2] = -12,  -- Second stage: -12dB
+    [3] = -6,   -- Pre-master: -6dB (hotter)
+}
+```
+
+### Preserve Relative Levels
+Option to maintain relative level differences between stages:
+```lua
+function preserve_relative_levels(utilities, target_db)
+    -- Calculate average current level
+    local avg_level = 0
+    for _, util in ipairs(utilities) do
+        avg_level = avg_level + util.output_level
+    end
+    avg_level = avg_level / #utilities
+
+    -- Apply same offset to all utilities
+    local offset = target_db - avg_level
+
+    for _, util in ipairs(utilities) do
+        util.target_adjustment_db = offset
+    end
+end
+```
+
+### Safe Mode (Attenuate Only)
+Only reduce gain, never boost:
+```lua
+function safe_gain_stage(utilities, target_db)
+    for _, util in ipairs(utilities) do
+        if util.output_level > target_db then
+            -- Reduce gain to hit target
+            util.target_adjustment_db = -(util.output_level - target_db)
+        else
+            -- Leave quiet stages alone (no boost)
+            util.target_adjustment_db = 0
+        end
+    end
+end
+```
+
+## Iterative Approach
+
+Why multiple iterations?
+1. **Downstream effects**: Adjusting gain at stage 1 affects measurements at stage 2+
+2. **Smoothing lag**: slider5 has 0.95 smoothing coefficient
+3. **Signal variation**: Dynamic content (music) varies over time
+
+Each iteration:
+1. Measure → Adjust → Wait
+2. Levels converge toward target
+3. Typically converges in 2-3 iterations
+
+## Workflow Example
+
+### Before Auto Gain Staging
+```
+Input      → EQ        → Compressor → Saturator → Output
+-18dB      → -18dB     → -8dB ⚠      → +2dB ⚠⚠   → +2dB ⚠⚠
+           Util +0dB   Util +0dB     Util +0dB
+```
+
+### After Auto Gain Staging (Target: -12dB)
+```
+Input      → EQ        → Compressor → Saturator → Output
+-18dB      → -18dB     → -8dB        → +2dB      → -12dB ✓
+           Util +0dB   Util -4dB ✓   Util -14dB ✓
+```
+
+### Result
+- EQ utility: No change needed (level already good)
+- Compressor utility: Reduced -4dB (compensate for compression gain)
+- Saturator utility: Reduced -14dB (compensate for saturation boost)
+- Final output: -12dB (optimal for further processing)
+
+## Implementation Files
+
+### 1. Create New Module
+**File**: `lib/gain_staging.lua`
+
+```lua
+local M = {}
+
+-- Main function (as described above)
+function M.auto_gain_stage(container, opts)
+    -- Implementation here
+end
+
+-- Helper functions
+function M.get_chain_utilities(container)
+    -- Implementation here
+end
+
+function M.measure_utility_levels(utilities)
+    -- Implementation here
+end
+
+-- ... etc
+
+return M
+```
+
+### 2. Add UI in Device Panel
 **File**: `lib/ui/device_panel.lua`
 
-1. **Detect utility plugins** in device container
-   ```lua
-   function get_device_utility(container)
-       for child in container:iter_container_children() do
-           if fx_utils.is_utility_fx(child) then
-               return child
-           end
-       end
-       return nil
-   end
-   ```
+Add "⚡ Gain Stage" button to utility device header
 
-2. **Read output level** from slider5
-   ```lua
-   local ok, level_norm = pcall(function()
-       return utility_fx:get_param_normalized(4)  -- slider5 (0-indexed)
-   end)
-   if ok then
-       -- level_norm is 0-1, representing linear amplitude
-       local level_db = 20 * math.log10(level_norm + 0.00001)  -- Avoid log(0)
-       return level_db
-   end
-   ```
+### 3. Add Toolbar Action
+**File**: `lib/ui/toolbar.lua`
 
-3. **Cache levels** in state
-   ```lua
-   state.device_levels = state.device_levels or {}
-   state.device_levels[device_guid] = {
-       level_db = level_db,
-       peak_db = math.max(peak_db, level_db),
-       timestamp = os.clock()
-   }
-   ```
+Add "Auto Gain Stage" button to main toolbar
 
-### Phase 2: Visual Indicators
+### 4. Add Chain Menu Item
+**File**: `lib/ui/rack_ui.lua` or `SideFX.lua`
 
-#### Option A: Header Dot (Minimal)
-**Location**: Device panel header (next to device name)
+Add context menu item for chains
 
+## Safety Considerations
+
+### 1. Playback Required
+- Must have signal flowing for accurate measurement
+- Check `reaper.GetPlayState()` before running
+- Show clear warning if stopped
+
+### 2. Undo Point
 ```lua
--- In device header rendering
-local level_db = state.device_levels[guid] and state.device_levels[guid].level_db or -96
-
--- Color coding
-local dot_color
-if level_db > -3 then
-    dot_color = 0xFF3333FF  -- Red
-elseif level_db > -6 then
-    dot_color = 0xFFAA33FF  -- Orange
-elseif level_db > -12 then
-    dot_color = 0xFFFF33FF  -- Yellow
-elseif level_db > -24 then
-    dot_color = 0x33FF33FF  -- Green
-else
-    dot_color = 0x666666FF  -- Gray (too quiet)
-end
-
--- Draw indicator dot
-ctx:push_style_color(imgui.Col.Text(), dot_color)
-ctx:text("●")
-ctx:pop_style_color()
-
--- Tooltip with exact level
-if ctx:is_item_hovered() then
-    ctx:set_tooltip(string.format("Output: %.1f dB", level_db))
-end
+reaper.Undo_BeginBlock()
+-- Apply all gain adjustments
+reaper.Undo_EndBlock("Auto Gain Stage", -1)
 ```
 
-#### Option B: Compact Meter Bar
-**Location**: Below device header, above parameters
+### 3. Gain Limits
+- Clamp to slider1 range (-24dB to +24dB)
+- Warn if adjustment exceeds range
+- Suggest manual adjustment if needed
 
+### 4. Zero-Signal Detection
 ```lua
--- Draw meter bar (100px wide, 4px tall)
-local meter_width = 100
-local meter_height = 4
-local fill_width = math.min(meter_width, (level_db + 60) / 60 * meter_width)  -- -60dB to 0dB range
-
--- Background
-ctx:push_style_color(imgui.Col.FrameBg(), 0x333333FF)
-ctx:dummy(meter_width, meter_height)
-ctx:pop_style_color()
-
--- Fill with gradient (green -> yellow -> red)
-local fill_color
-if level_db > -6 then
-    fill_color = 0xFF3333FF  -- Red
-elseif level_db > -12 then
-    fill_color = 0xFFAA33FF  -- Orange
-else
-    fill_color = 0x33FF33FF  -- Green
-end
-
--- Draw fill
-ctx:push_style_color(imgui.Col.PlotHistogram(), fill_color)
-ctx:progress_bar(fill_width / meter_width, meter_width, meter_height, "")
-ctx:pop_style_color()
-
--- dB readout
-ctx:same_line()
-ctx:text(string.format("%.1f dB", level_db))
-```
-
-### Phase 3: Chain Overview
-**File**: `SideFX.lua` (main chain view)
-
-Add a "Gain Staging" mode toggle in toolbar:
-- When enabled, show compact meters above each device in chain
-- Highlight devices with problematic levels (too hot or too quiet)
-- Show suggested adjustments
-
-```
-[Device1] [Device2] [Device3] [Device4]
-   -6dB     +2dB⚠     -12dB     -18dB
-   🟢       🔴        🟢        ⚫
-```
-
-## Advanced Features (Future)
-
-### 1. Auto Gain Staging
-```lua
-function auto_gain_stage(chain)
-    -- Analyze all utility levels in chain
-    -- Suggest gain adjustments to keep each stage at -12dB (headroom)
-    -- User can accept/reject suggestions
+if util.output_level < -90 then
+    print("Warning: No signal detected at utility " .. util.guid)
+    -- Skip or use nominal adjustment
 end
 ```
 
-### 2. Gain History Graph
-- Show gain over time for selected device
-- Identify transient peaks vs sustained levels
-- Help diagnose problematic gain spikes
+### 5. User Confirmation
+Show preview of adjustments before applying:
+```
+Proposed Adjustments:
+  • Utility 1: +0.0 dB (no change)
+  • Utility 2: -4.2 dB
+  • Utility 3: -14.8 dB
 
-### 3. Target Level Setting
-- User configurable target level (default: -12dB)
-- Color coding adjusts based on target
-- Per-device or global setting
-
-### 4. Peak Hold with Reset
-- Hold peak level for X seconds
-- Visual peak indicator (thin line)
-- Right-click to reset peak
+Apply these adjustments? [Yes] [No]
+```
 
 ## Configuration
 
-Add to `lib/ui/device_panel.lua` config:
-
+Add to settings:
 ```lua
--- Gain staging
-gain_staging_enabled = true,        -- Show gain indicators
-gain_meter_mode = "dot",            -- "dot", "bar", or "none"
-gain_target_db = -12,               -- Target level for optimal gain
-gain_warning_threshold_db = -3,    -- Show warning above this
-gain_quiet_threshold_db = -24,     -- Show warning below this
-gain_update_rate_ms = 50,          -- Update frequency (20Hz)
+gain_staging = {
+    default_target_db = -12,
+    default_tolerance_db = 1,
+    default_max_iterations = 3,
+    require_playback = true,
+    safe_mode = false,  -- Only attenuate, never boost
+    preserve_relative = false,  -- Maintain level relationships
+}
 ```
-
-## Technical Considerations
-
-### Performance
-- Reading parameters is fast (pcall overhead minimal)
-- Only read utility level, not all parameters
-- Cache levels, update at 20Hz max (every 3 frames at 60fps)
-- Skip hidden/collapsed devices
-
-### Accuracy
-- `slider5` uses peak detection: `max(abs(spl0), abs(spl1))`
-- Smoothed with 0.95 coefficient (fast response, minimal lag)
-- True peak, not RMS (more conservative for clipping detection)
-- Updates per-sample (accurate for transients)
-
-### Compatibility
-- Only works with SideFX Utility plugins
-- Devices without utility show no indicator (or gray)
-- Non-utility devices can't be monitored (limitation)
-- Could add utility auto-insertion: "Add Utility for Gain Staging"
-
-## Benefits
-
-1. **Visual feedback**: Instantly see if any stage is clipping or too quiet
-2. **Mix confidence**: Know your levels are optimal throughout the chain
-3. **Problem diagnosis**: Quickly identify which device is causing clipping
-4. **Workflow**: No need to open each device to check levels
-5. **Education**: Users learn proper gain staging by seeing levels
-
-## Limitations
-
-1. **Utility required**: Devices must have SideFX Utility to be monitored
-2. **No input metering**: Only monitors output of utility (not device itself)
-3. **Stereo only**: Shows max(L, R), not separate channels
-4. **No frequency analysis**: Just overall level, not per-band
-
-## Future Enhancements
-
-- **Spectrum analyzer**: Mini FFT view for frequency balance
-- **Stereo correlation**: Show L/R balance and phase issues
-- **LUFS metering**: Integrate loudness measurement (more complex)
-- **Compare mode**: Show before/after levels when adjusting
-- **Automation recording**: Record gain adjustments as automation
-
-## Files to Modify
-
-1. **lib/ui/device_panel.lua**
-   - Add `get_device_utility()` function
-   - Add `read_output_level()` function
-   - Add gain indicator rendering in header
-   - Add optional meter bar below header
-
-2. **lib/fx_utils.lua**
-   - Add `is_utility_fx()` helper (if not exists)
-   - Add `get_utility_level()` wrapper
-
-3. **lib/state.lua**
-   - Add `device_levels` table to state
-   - Add peak hold tracking
-   - Add level history (optional)
-
-4. **SideFX.lua**
-   - Add "Gain Staging" toolbar toggle
-   - Add chain overview meters (when enabled)
-   - Add auto-gain-staging modal (future)
 
 ## Testing Checklist
 
-- [ ] Correctly detects SideFX Utility in device container
-- [ ] Reads slider5 (output level) without errors
-- [ ] Converts linear amplitude to dB correctly
-- [ ] Color coding matches dB thresholds
-- [ ] Tooltip shows exact dB value
-- [ ] Updates smoothly (no flickering)
-- [ ] Performance: No lag with 10+ devices
+- [ ] Correctly identifies all utilities in chain
+- [ ] Measures output levels accurately (compare to REAPER meter)
+- [ ] Calculates correct gain adjustments
+- [ ] Applies adjustments to slider1
+- [ ] Converges to target within tolerance
+- [ ] Handles zero-signal gracefully
+- [ ] Respects gain limits (-24 to +24 dB)
+- [ ] Creates undo point
+- [ ] Shows clear warnings/errors
 - [ ] Works with nested racks
-- [ ] Handles missing utility gracefully (no errors)
-- [ ] Peak hold resets correctly
-- [ ] State persists across window close/open
+- [ ] Handles missing utilities
+- [ ] Preserves other utility settings (pan, phase)
+
+## Future Enhancements
+
+### 1. RMS vs Peak
+Add option to use RMS instead of peak for target matching
+
+### 2. Frequency-Weighted Staging
+Use different targets for different frequency ranges
+
+### 3. Headroom Reservation
+Target different levels for different device types:
+- Compressors: -12dB (need headroom)
+- Limiters: -3dB (expect hot signal)
+- Effects: -18dB (prefer conservative)
+
+### 4. Visual Preview
+Show before/after gain structure with animated graph
+
+### 5. Batch Staging
+Apply to all chains in track at once
+
+### 6. Learn Mode
+Remember typical adjustments needed for specific effect combos
+
+## Limitations
+
+1. **Requires utilities**: Can only measure/adjust stages with SideFX Utility
+2. **Dynamic content**: Measurements vary with signal content
+3. **Latency**: Some plugins have latency that affects measurement
+4. **Sidechain**: Doesn't account for sidechain inputs
+5. **Stereo only**: No M/S or multi-channel support
+
+## Benefits
+
+1. **One-click optimization**: No manual gain adjustment needed
+2. **Consistent workflow**: Same target level throughout chain
+3. **Prevent clipping**: Automatically create headroom
+4. **Save time**: No trial-and-error gain tweaking
+5. **Learn proper levels**: See what adjustments are needed
+6. **Iterative improvement**: Converges to optimal levels
 
 ## Priority
-**Medium-High** - Very useful for mixing workflow, requires minimal changes to existing code
+**High** - Core mixing feature, unique value proposition for SideFX
 
 ## Estimated Effort
-- Phase 1 (Data Collection): ~2 hours
-- Phase 2 (Visual Indicators): ~3 hours
-- Phase 3 (Chain Overview): ~2 hours
-- Testing & Polish: ~2 hours
-- **Total: ~9 hours**
+- Core algorithm: ~4 hours
+- UI integration (dialog): ~3 hours
+- Toolbar/menu integration: ~2 hours
+- Testing & polish: ~3 hours
+- Documentation: ~1 hour
+- **Total: ~13 hours**
 
 ---
 
-## Example Usage Flow
+## Key Innovation
 
-1. User builds FX chain with utilities between devices
-2. SideFX automatically shows gain dots in device headers
-3. User notices red dot on "Compressor" device
-4. Clicks to expand, sees +2dB output
-5. Adjusts utility gain to -10dB post-compression
-6. Dot turns green, indicates healthy level
-7. Next device receives optimal input level
+This is an **active gain staging system** that doesn't just show levels—it fixes them automatically. Similar to auto-gain in modern DAWs, but applied per-stage in the FX chain rather than just at the track level.
 
-This creates a visual gain staging workflow without leaving SideFX!
+The utility plugins act as both **sensors** (slider5 measures output) and **actuators** (slider1 adjusts gain), creating a closed-loop control system for optimal gain structure.
