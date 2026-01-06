@@ -838,9 +838,9 @@ function M.draw(ctx, fx, opts)
                     r.ShowConsoleMsg(string.format("expanded_modulator exists: %s\n", tostring(expanded_modulator ~= nil)))
 
                     if expanded_modulator then
-                        -- Get parameter values safely
-                        local ok, param_count = pcall(function() return expanded_modulator:get_param_count() end)
-                        r.ShowConsoleMsg(string.format("get_param_count ok: %s\n", tostring(ok)))
+                        -- Get parameter values safely (ReaWrap uses get_num_params, not get_param_count)
+                        local ok, param_count = pcall(function() return expanded_modulator:get_num_params() end)
+                        r.ShowConsoleMsg(string.format("get_num_params ok: %s\n", tostring(ok)))
                         r.ShowConsoleMsg(string.format("param_count: %s\n", tostring(param_count)))
 
                         if ok and param_count and param_count > 0 then
@@ -1079,7 +1079,7 @@ function M.draw(ctx, fx, opts)
                                     local ok_check, is_mod = pcall(function() return fx_utils.is_modulator_fx(child) end)
                                     if not (ok_check and is_mod) then
                                         -- Check each parameter of this device
-                                        local ok_params, param_count = pcall(function() return child:get_param_count() end)
+                                        local ok_params, param_count = pcall(function() return child:get_num_params() end)
                                         if ok_params and param_count then
                                             for param_idx = 0, param_count - 1 do
                                                 -- Query if this param is linked to our modulator
@@ -1178,7 +1178,7 @@ function M.draw(ctx, fx, opts)
 
                                 -- Parameter selector (if device selected)
                                 if link_state.device_fx then
-                                    local ok_params, param_count = pcall(function() return link_state.device_fx:get_param_count() end)
+                                    local ok_params, param_count = pcall(function() return link_state.device_fx:get_num_params() end)
                                     if ok_params and param_count and param_count > 0 then
                                         local current_param_name = link_state.param_name or "Select Parameter..."
                                         ctx:set_next_item_width(control_width)
