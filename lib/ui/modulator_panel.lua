@@ -9,6 +9,281 @@ local imgui = require('imgui')
 local M = {}
 
 --------------------------------------------------------------------------------
+-- Parameter Mapping
+--------------------------------------------------------------------------------
+
+local PARAM_MAP = {
+    tempo_mode = 0,    -- slider1
+    rate_hz = 1,       -- slider2
+    sync_rate = 2,     -- slider3
+    phase = 4,         -- slider5
+    depth = 5,         -- slider6
+    trigger_mode = 19, -- slider20
+    midi_source = 20,  -- slider21
+    midi_note = 21,    -- slider22
+    audio_thresh = 22, -- slider23
+    attack_ms = 23,    -- slider24
+    release_ms = 24,   -- slider25
+    lfo_mode = 27,     -- slider28
+}
+
+local SYNC_RATES = {
+    "8 bars", "4 bars", "2 bars", "1 bar",
+    "1/2", "1/4", "1/4T", "1/4.",
+    "1/8", "1/8T", "1/8.",
+    "1/16", "1/16T", "1/16.",
+    "1/32", "1/32T", "1/32.",
+    "1/64"
+}
+
+local TRIGGER_MODES = {"Free", "Transport", "MIDI", "Audio"}
+local MIDI_SOURCES = {"This Track", "MIDI Bus"}
+
+--------------------------------------------------------------------------------
+-- Helper Functions
+--------------------------------------------------------------------------------
+
+--- Draw modulator parameter controls
+-- @param ctx ImGui context wrapper
+-- @param mod table Modulator data {fx, fx_idx, name}
+-- @param state table State object
+-- @param width number Available width
+local function draw_modulator_params(ctx, mod, state, width)
+    local fx = mod.fx
+
+    -- Safely get parameters (FX might be deleted)
+    local ok, tempo_mode = pcall(function() return fx:get_param_normalized(PARAM_MAP.tempo_mode) end)
+    if not ok then return end
+
+    local is_sync = tempo_mode > 0.5
+
+    -- Rate Controls
+    ctx:text("Rate:")
+    ctx:same_line()
+
+    -- Free/Sync toggle buttons
+    local button_width = 45
+    if not is_sync then
+        ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+    end
+    if ctx:button("Free##mode_" .. mod.fx_idx, button_width, 0) then
+        pcall(function() fx:set_param_normalized(PARAM_MAP.tempo_mode, 0) end)
+    end
+    if not is_sync then
+        ctx:pop_style_color()
+    end
+
+    ctx:same_line()
+    if is_sync then
+        ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+    end
+    if ctx:button("Sync##mode_" .. mod.fx_idx, button_width, 0) then
+        pcall(function() fx:set_param_normalized(PARAM_MAP.tempo_mode, 1) end)
+    end
+    if is_sync then
+        ctx:pop_style_color()
+    end
+
+    -- Rate control (Hz slider or Sync dropdown) - on next line for full width
+    ctx:set_next_item_width(width - 20)
+    if not is_sync then
+        -- Free mode: Hz slider
+        local ok_rate, rate_hz = pcall(function() return fx:get_param_normalized(PARAM_MAP.rate_hz) end)
+        if ok_rate then
+            -- Convert normalized to Hz (0.01 - 20 Hz)
+            local hz_val = 0.01 + rate_hz * 19.99
+            local changed, new_hz = ctx:slider_double("##rate_hz_" .. mod.fx_idx, hz_val, 0.01, 20, "%.2f Hz")
+            if changed then
+                local norm_val = (new_hz - 0.01) / 19.99
+                pcall(function() fx:set_param_normalized(PARAM_MAP.rate_hz, norm_val) end)
+            end
+        end
+    else
+        -- Sync mode: dropdown
+        local ok_sync, sync_rate = pcall(function() return fx:get_param_normalized(PARAM_MAP.sync_rate) end)
+        if ok_sync then
+            local sync_idx = math.floor(sync_rate * 17 + 0.5)
+            sync_idx = math.max(0, math.min(17, sync_idx))
+            if ctx:begin_combo("##sync_rate_" .. mod.fx_idx, SYNC_RATES[sync_idx + 1]) then
+                for i, label in ipairs(SYNC_RATES) do
+                    if ctx:selectable(label, i - 1 == sync_idx) then
+                        local norm_val = (i - 1) / 17
+                        pcall(function() fx:set_param_normalized(PARAM_MAP.sync_rate, norm_val) end)
+                    end
+                end
+                ctx:end_combo()
+            end
+        end
+    end
+
+    -- Phase slider
+    local ok_phase, phase = pcall(function() return fx:get_param_normalized(PARAM_MAP.phase) end)
+    if ok_phase then
+        ctx:text("Phase:")
+        ctx:same_line()
+        ctx:set_next_item_width(width - 100)
+        local phase_deg = phase * 360
+        local changed, new_deg = ctx:slider_double("##phase_" .. mod.fx_idx, phase_deg, 0, 360, "%.0f°")
+        if changed then
+            pcall(function() fx:set_param_normalized(PARAM_MAP.phase, new_deg / 360) end)
+        end
+    end
+
+    -- Depth slider
+    local ok_depth, depth = pcall(function() return fx:get_param_normalized(PARAM_MAP.depth) end)
+    if ok_depth then
+        ctx:text("Depth:")
+        ctx:same_line()
+        ctx:set_next_item_width(width - 100)
+        local depth_pct = depth * 100
+        local changed, new_pct = ctx:slider_double("##depth_" .. mod.fx_idx, depth_pct, 0, 100, "%.0f%%")
+        if changed then
+            pcall(function() fx:set_param_normalized(PARAM_MAP.depth, new_pct / 100) end)
+        end
+    end
+
+    -- Trigger Mode dropdown
+    local ok_trig, trigger_mode = pcall(function() return fx:get_param_normalized(PARAM_MAP.trigger_mode) end)
+    if ok_trig then
+        local trigger_idx = math.floor(trigger_mode * 3 + 0.5)
+        trigger_idx = math.max(0, math.min(3, trigger_idx))
+
+        ctx:text("Trigger:")
+        ctx:same_line()
+        ctx:set_next_item_width(width - 100)
+        if ctx:begin_combo("##trigger_" .. mod.fx_idx, TRIGGER_MODES[trigger_idx + 1]) then
+            for i, label in ipairs(TRIGGER_MODES) do
+                if ctx:selectable(label, i - 1 == trigger_idx) then
+                    local norm_val = (i - 1) / 3
+                    pcall(function() fx:set_param_normalized(PARAM_MAP.trigger_mode, norm_val) end)
+                end
+            end
+            ctx:end_combo()
+        end
+
+        -- LFO Mode toggle buttons
+        local ok_lfo, lfo_mode = pcall(function() return fx:get_param_normalized(PARAM_MAP.lfo_mode) end)
+        if ok_lfo then
+            local is_oneshot = lfo_mode > 0.5
+
+            ctx:text("LFO:")
+            ctx:same_line()
+
+            if not is_oneshot then
+                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+            end
+            if ctx:button("Loop##lfo_" .. mod.fx_idx, 55, 0) then
+                pcall(function() fx:set_param_normalized(PARAM_MAP.lfo_mode, 0) end)
+            end
+            if not is_oneshot then
+                ctx:pop_style_color()
+            end
+
+            ctx:same_line()
+            if is_oneshot then
+                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+            end
+            if ctx:button("One Shot##lfo_" .. mod.fx_idx, 70, 0) then
+                pcall(function() fx:set_param_normalized(PARAM_MAP.lfo_mode, 1) end)
+            end
+            if is_oneshot then
+                ctx:pop_style_color()
+            end
+        end
+
+        -- Advanced section (collapsible)
+        local is_advanced = state.modulator_advanced[mod.fx_idx] or false
+        if ctx:small_button(is_advanced and "▼ Advanced##adv_" .. mod.fx_idx or "▶ Advanced##adv_" .. mod.fx_idx) then
+            state.modulator_advanced[mod.fx_idx] = not is_advanced
+        end
+
+        if is_advanced then
+            ctx:indent(10)
+
+            -- MIDI controls (show only if Trigger=MIDI)
+            if trigger_idx == 2 then
+                -- MIDI Source
+                local ok_src, midi_src = pcall(function() return fx:get_param_normalized(PARAM_MAP.midi_source) end)
+                if ok_src then
+                    local src_idx = midi_src > 0.5 and 1 or 0
+                    ctx:text("MIDI Source:")
+                    ctx:same_line()
+                    ctx:set_next_item_width(width - 130)
+                    if ctx:begin_combo("##midi_src_" .. mod.fx_idx, MIDI_SOURCES[src_idx + 1]) then
+                        for i, label in ipairs(MIDI_SOURCES) do
+                            if ctx:selectable(label, i - 1 == src_idx) then
+                                pcall(function() fx:set_param_normalized(PARAM_MAP.midi_source, i - 1) end)
+                            end
+                        end
+                        ctx:end_combo()
+                    end
+                end
+
+                -- MIDI Note
+                local ok_note, midi_note = pcall(function() return fx:get_param_normalized(PARAM_MAP.midi_note) end)
+                if ok_note then
+                    local note_val = math.floor(midi_note * 127 + 0.5)
+                    ctx:text("MIDI Note:")
+                    ctx:same_line()
+                    ctx:set_next_item_width(width - 130)
+                    local changed, new_note = ctx:slider_double("##midi_note_" .. mod.fx_idx, note_val, 0, 127, "%.0f")
+                    if changed then
+                        pcall(function() fx:set_param_normalized(PARAM_MAP.midi_note, new_note / 127) end)
+                    end
+                end
+            end
+
+            -- Audio Threshold (show only if Trigger=Audio)
+            if trigger_idx == 3 then
+                local ok_thresh, audio_thresh = pcall(function() return fx:get_param_normalized(PARAM_MAP.audio_thresh) end)
+                if ok_thresh then
+                    local thresh_pct = audio_thresh * 100
+                    ctx:text("Audio Threshold:")
+                    ctx:same_line()
+                    ctx:set_next_item_width(width - 150)
+                    local changed, new_pct = ctx:slider_double("##audio_thresh_" .. mod.fx_idx, thresh_pct, 0, 100, "%.0f%%")
+                    if changed then
+                        pcall(function() fx:set_param_normalized(PARAM_MAP.audio_thresh, new_pct / 100) end)
+                    end
+                end
+            end
+
+            -- Attack/Release (show if Trigger=MIDI or Audio)
+            if trigger_idx == 2 or trigger_idx == 3 then
+                local ok_atk, attack_ms = pcall(function() return fx:get_param_normalized(PARAM_MAP.attack_ms) end)
+                if ok_atk then
+                    local atk_val = 1 + attack_ms * 1999
+                    ctx:text("Attack:")
+                    ctx:same_line()
+                    ctx:set_next_item_width(width - 130)
+                    local changed, new_atk = ctx:slider_double("##attack_" .. mod.fx_idx, atk_val, 1, 2000, "%.0f ms")
+                    if changed then
+                        pcall(function() fx:set_param_normalized(PARAM_MAP.attack_ms, (new_atk - 1) / 1999) end)
+                    end
+                end
+
+                local ok_rel, release_ms = pcall(function() return fx:get_param_normalized(PARAM_MAP.release_ms) end)
+                if ok_rel then
+                    local rel_val = 1 + release_ms * 4999
+                    ctx:text("Release:")
+                    ctx:same_line()
+                    ctx:set_next_item_width(width - 130)
+                    local changed, new_rel = ctx:slider_double("##release_" .. mod.fx_idx, rel_val, 1, 5000, "%.0f ms")
+                    if changed then
+                        pcall(function() fx:set_param_normalized(PARAM_MAP.release_ms, (new_rel - 1) / 4999) end)
+                    end
+                end
+            end
+
+            ctx:unindent(10)
+        end
+    end
+
+    ctx:spacing()
+    ctx:separator()
+end
+
+--------------------------------------------------------------------------------
 -- Modulator Panel
 --------------------------------------------------------------------------------
 
@@ -76,6 +351,8 @@ function M.draw(ctx, width, state, callbacks)
                 ctx:pop_style_color(2)
 
                 if header_open then
+                    -- Draw parameter controls
+                    draw_modulator_params(ctx, mod, state, width)
                     -- Show existing links
                     local links = callbacks.get_modulator_links(mod.fx_idx)
                     if #links > 0 then
@@ -153,5 +430,3 @@ function M.draw(ctx, width, state, callbacks)
 end
 
 return M
-
-

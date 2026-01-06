@@ -3,23 +3,23 @@ author:Nomad Monad
 version:2.0
 
 // Rate
-slider1:0<0,1,1{Free,Sync}>Tempo Mode
-slider2:1<0.01,20,0.01>Rate (Hz)
-slider3:5<0,17,1{8 bars,4 bars,2 bars,1 bar,1/2,1/4,1/4T,1/4.,1/8,1/8T,1/8.,1/16,1/16T,1/16.,1/32,1/32T,1/32.,1/64}>Sync Rate
+slider1:0<0,1,1{Free,Sync}>-Tempo Mode
+slider2:1<0.01,20,0.01>-Rate (Hz)
+slider3:5<0,17,1{8 bars,4 bars,2 bars,1 bar,1/2,1/4,1/4T,1/4.,1/8,1/8T,1/8.,1/16,1/16T,1/16.,1/32,1/32T,1/32.,1/64}>-Sync Rate
 slider4:0<0,1,0.001>-Output
-slider5:0<0,1,0.001>Phase
-slider6:1<0,1,0.01>Depth
+slider5:0<0,1,0.001>-Phase
+slider6:1<0,1,0.01>-Depth
 
 // Trigger
-slider20:0<0,3,1{Free,Transport,MIDI,Audio}>Trigger Mode
-slider21:0<0,1,1{This Track,MIDI Bus}>MIDI Source
-slider22:0<0,127,1>MIDI Note (0=any)
-slider23:0.5<0,1,0.01>Audio Threshold
-slider24:100<1,2000,1>Attack (ms)
-slider25:500<1,5000,1>Release (ms)
+slider20:0<0,3,1{Free,Transport,MIDI,Audio}>-Trigger Mode
+slider21:0<0,1,1{This Track,MIDI Bus}>-MIDI Source
+slider22:0<0,127,1>-MIDI Note (0=any)
+slider23:0.5<0,1,0.01>-Audio Threshold
+slider24:100<1,2000,1>-Attack (ms)
+slider25:500<1,5000,1>-Release (ms)
 
 // LFO Mode
-slider28:0<0,1,1{Loop,One Shot}>LFO Mode
+slider28:0<0,1,1{Loop,One Shot}>-LFO Mode
 
 // Editor
 slider26:2<0,4,1{Off,4,8,16,32}>Grid
@@ -128,7 +128,7 @@ function set_x(i, v) (
   (slider70 = v; slider_automate(slider70););
 );
 
-// Set Y value to slider  
+// Set Y value to slider
 function set_y(i, v) (
   i == 0 ? (slider41 = v; slider_automate(slider41);) :
   i == 1 ? (slider43 = v; slider_automate(slider43);) :
@@ -151,7 +151,7 @@ function set_y(i, v) (
 // Sort points and copy to temp arrays
 function sort_and_copy() local(i, j, min_idx, min_x, temp_x, temp_y, n) (
   n = slider30;
-  
+
   // Copy to temp
   i = 0;
   loop(n,
@@ -159,7 +159,7 @@ function sort_and_copy() local(i, j, min_idx, min_x, temp_x, temp_y, n) (
     mem_sorted_y[i] = get_y(i);
     i += 1;
   );
-  
+
   // Selection sort by X
   i = 0;
   loop(n - 1,
@@ -189,7 +189,7 @@ function sort_and_copy() local(i, j, min_idx, min_x, temp_x, temp_y, n) (
 function update_spline() local(i, dx, m, m_next, cm, dx_next, n) (
   n = slider30;
   sort_and_copy();
-  
+
   // Calculate slopes
   i = 0;
   loop(n - 1,
@@ -199,7 +199,7 @@ function update_spline() local(i, dx, m, m_next, cm, dx_next, n) (
     mem_tempx[i] = dx;
     i += 1;
   );
-  
+
   // First derivatives (c1)
   mem_c1[0] = mem_tempy[0];
   i = 1;
@@ -217,7 +217,7 @@ function update_spline() local(i, dx, m, m_next, cm, dx_next, n) (
     i += 1;
   );
   mem_c1[n - 1] = mem_tempy[n - 2];
-  
+
   // c2 and c3
   i = 0;
   loop(n - 1,
@@ -235,11 +235,11 @@ function update_spline() local(i, dx, m, m_next, cm, dx_next, n) (
 function eval_spline(x) local(i, diff, diff_sq, out, n) (
   n = slider30;
   x = max(0, min(1, x));
-  
+
   i = 0;
   while (i < n - 1 && mem_sorted_x[i + 1] < x) ( i += 1; );
   i = max(0, min(i, n - 2));
-  
+
   diff = x - mem_sorted_x[i];
   diff_sq = diff * diff;
   out = mem_sorted_y[i] + mem_c1[i] * diff + mem_c2[i] * diff_sq + mem_c3[i] * diff * diff_sq;
@@ -482,21 +482,21 @@ left_click ? (
   ) : cap_mode == 1 && drag_node >= 0 ? (
     new_x = max(0.001, min(0.999, norm_mx));
     new_y = max(0, min(1, norm_my));
-    
+
     // Shift = Y-only (lock X), Ctrl = X-only (lock Y)
     shift_held ? ( new_x = drag_start_x; );
     ctrl_held ? ( new_y = drag_start_y; );
-    
+
     // Snap to grid (slider27=On, unless Alt held)
     slider27 == 1 && !alt_held && grid_div > 0 ? (
       new_x = floor(new_x * grid_div + 0.5) / grid_div;
       new_y = floor(new_y * 4 + 0.5) / 4;
     );
-    
+
     // Lock endpoints
     drag_start_x < 0.01 ? ( new_x = 0; );
     drag_start_x > 0.99 ? ( new_x = 1; );
-    
+
     set_x(drag_node, new_x);
     set_y(drag_node, new_y);
     update_spline();
