@@ -826,6 +826,9 @@ function M.draw(ctx, fx, opts)
                         -- Get parameter values safely
                         local ok, param_count = pcall(function() return expanded_modulator:get_param_count() end)
                         if ok and param_count and param_count > 0 then
+                            -- Get available width for controls
+                            local control_width = ctx:get_content_region_avail() - 8  -- Small padding
+
                             -- Rate section
                             ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
                             ctx:text("RATE")
@@ -851,7 +854,7 @@ function M.draw(ctx, fx, opts)
                                 -- Free mode - show Hz slider (slider2)
                                 local ok_rate, rate_hz = pcall(function() return expanded_modulator:get_param(1) end)
                                 if ok_rate then
-                                    ctx:set_next_item_width(cfg.mod_slot_width * 2 + 8)
+                                    ctx:set_next_item_width(control_width)
                                     local changed, new_rate = ctx:slider_double("Hz##rate_" .. guid, rate_hz, 0.01, 20, "%.2f")
                                     if changed then
                                         expanded_modulator:set_param(1, new_rate)
@@ -864,7 +867,7 @@ function M.draw(ctx, fx, opts)
                                 if ok_sync then
                                     local sync_rates = {"8 bars", "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/4T", "1/4.", "1/8", "1/8T", "1/8.", "1/16", "1/16T", "1/16.", "1/32", "1/32T", "1/32.", "1/64"}
                                     local current_idx = math.floor(sync_rate_idx * 17 + 0.5)
-                                    ctx:set_next_item_width(cfg.mod_slot_width * 2 + 8)
+                                    ctx:set_next_item_width(control_width)
                                     if ctx:begin_combo("##sync_rate_" .. guid, sync_rates[current_idx + 1] or "1/4") then
                                         for i, rate_name in ipairs(sync_rates) do
                                             if ctx:selectable(rate_name, i - 1 == current_idx) then
@@ -882,7 +885,7 @@ function M.draw(ctx, fx, opts)
                             -- Phase (slider5)
                             local ok_phase, phase = pcall(function() return expanded_modulator:get_param(4) end)
                             if ok_phase then
-                                ctx:set_next_item_width(cfg.mod_slot_width * 2 + 8)
+                                ctx:set_next_item_width(control_width)
                                 local phase_deg = phase * 360
                                 local changed, new_phase_deg = ctx:slider_double("Phase##phase_" .. guid, phase_deg, 0, 360, "%.0f°")
                                 if changed then
@@ -894,7 +897,7 @@ function M.draw(ctx, fx, opts)
                             -- Depth (slider6)
                             local ok_depth, depth = pcall(function() return expanded_modulator:get_param(5) end)
                             if ok_depth then
-                                ctx:set_next_item_width(cfg.mod_slot_width * 2 + 8)
+                                ctx:set_next_item_width(control_width)
                                 local depth_pct = depth * 100
                                 local changed, new_depth_pct = ctx:slider_double("Depth##depth_" .. guid, depth_pct, 0, 100, "%.0f%%")
                                 if changed then
@@ -916,7 +919,7 @@ function M.draw(ctx, fx, opts)
                             if ok_trig then
                                 local trigger_modes = {"Free", "Transport", "MIDI", "Audio"}
                                 local trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
-                                ctx:set_next_item_width(cfg.mod_slot_width * 2 + 8)
+                                ctx:set_next_item_width(control_width)
                                 if ctx:begin_combo("##trigger_mode_" .. guid, trigger_modes[trig_idx + 1] or "Free") then
                                     for i, mode_name in ipairs(trigger_modes) do
                                         if ctx:selectable(mode_name, i - 1 == trig_idx) then
@@ -979,7 +982,7 @@ function M.draw(ctx, fx, opts)
                                     -- MIDI Note (slider22)
                                     local ok_note, midi_note = pcall(function() return expanded_modulator:get_param(21) end)
                                     if ok_note then
-                                        ctx:set_next_item_width(cfg.mod_slot_width * 2 + 8)
+                                        ctx:set_next_item_width(control_width)
                                         local note_val = math.floor(midi_note * 127 + 0.5)
                                         local changed, new_note_val = ctx:slider_int("MIDI Note##note_" .. guid, note_val, 0, 127, note_val == 0 and "Any" or tostring(note_val))
                                         if changed then
@@ -992,7 +995,7 @@ function M.draw(ctx, fx, opts)
                                     -- Audio Threshold (slider23)
                                     local ok_thresh, audio_thresh = pcall(function() return expanded_modulator:get_param(22) end)
                                     if ok_thresh then
-                                        ctx:set_next_item_width(cfg.mod_slot_width * 2 + 8)
+                                        ctx:set_next_item_width(control_width)
                                         local changed, new_thresh = ctx:slider_double("Threshold##thresh_" .. guid, audio_thresh, 0, 1, "%.2f")
                                         if changed then
                                             expanded_modulator:set_param(22, new_thresh)
@@ -1007,7 +1010,7 @@ function M.draw(ctx, fx, opts)
                                     local ok_atk, attack_ms = pcall(function() return expanded_modulator:get_param(23) end)
                                     if ok_atk then
                                         local atk_val = attack_ms * 1999 + 1  -- 1-2000ms
-                                        ctx:set_next_item_width(cfg.mod_slot_width * 2 + 8)
+                                        ctx:set_next_item_width(control_width)
                                         local changed, new_atk_val = ctx:slider_double("Attack##atk_" .. guid, atk_val, 1, 2000, "%.0f ms")
                                         if changed then
                                             expanded_modulator:set_param(23, (new_atk_val - 1) / 1999)
@@ -1019,7 +1022,7 @@ function M.draw(ctx, fx, opts)
                                     local ok_rel, release_ms = pcall(function() return expanded_modulator:get_param(24) end)
                                     if ok_rel then
                                         local rel_val = release_ms * 4999 + 1  -- 1-5000ms
-                                        ctx:set_next_item_width(cfg.mod_slot_width * 2 + 8)
+                                        ctx:set_next_item_width(control_width)
                                         local changed, new_rel_val = ctx:slider_double("Release##rel_" .. guid, rel_val, 1, 5000, "%.0f ms")
                                         if changed then
                                             expanded_modulator:set_param(24, (new_rel_val - 1) / 4999)
@@ -1137,7 +1140,7 @@ function M.draw(ctx, fx, opts)
                             -- Device selector
                             if #target_devices > 0 then
                                 local current_device_name = link_state.device_name or "Select Device..."
-                                ctx:set_next_item_width(cfg.mod_slot_width * 2 + 8)
+                                ctx:set_next_item_width(control_width)
                                 if ctx:begin_combo("##link_device_" .. guid, current_device_name) then
                                     for i, dev_info in ipairs(target_devices) do
                                         if ctx:selectable(dev_info.name, link_state.device_name == dev_info.name) then
@@ -1156,7 +1159,7 @@ function M.draw(ctx, fx, opts)
                                     local ok_params, param_count = pcall(function() return link_state.device_fx:get_param_count() end)
                                     if ok_params and param_count and param_count > 0 then
                                         local current_param_name = link_state.param_name or "Select Parameter..."
-                                        ctx:set_next_item_width(cfg.mod_slot_width * 2 + 8)
+                                        ctx:set_next_item_width(control_width)
                                         if ctx:begin_combo("##link_param_" .. guid, current_param_name) then
                                             for param_idx = 0, param_count - 1 do
                                                 local ok_pname, param_name = pcall(function() return link_state.device_fx:get_param_name(param_idx) end)
@@ -1173,7 +1176,7 @@ function M.draw(ctx, fx, opts)
 
                                         -- Add Link button
                                         if link_state.param_idx ~= nil then
-                                            if ctx:button("Add Link##" .. guid, cfg.mod_slot_width * 2 + 8, 0) then
+                                            if ctx:button("Add Link##" .. guid, control_width, 0) then
                                                 -- Create modulation link using REAPER's param.X.plink API
                                                 local target_fx = link_state.device_fx
                                                 local target_param = link_state.param_idx
@@ -1546,7 +1549,7 @@ function M.draw(ctx, fx, opts)
 
         if r.ImGui_BeginTable(ctx.ctx, "device_layout_" .. guid, 2, r.ImGui_TableFlags_BordersInnerV()) then
             r.ImGui_TableSetupColumn(ctx.ctx, "params", r.ImGui_TableColumnFlags_WidthFixed(), content_width)
-            r.ImGui_TableSetupColumn(ctx.ctx, "sidebar", r.ImGui_TableColumnFlags_WidthFixed(), sidebar_actual_w)
+            r.ImGui_TableSetupColumn(ctx.ctx, "sidebar", r.ImGui_TableColumnFlags_WidthStretch())  -- Stretch to fill remaining space
 
             r.ImGui_TableNextRow(ctx.ctx)
 
