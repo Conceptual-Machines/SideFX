@@ -5,6 +5,7 @@
 -- @license MIT
 
 local imgui = require('imgui')
+local r = reaper
 
 local M = {}
 
@@ -39,6 +40,54 @@ local SYNC_RATES = {
 
 local TRIGGER_MODES = {"Free", "Transport", "MIDI", "Audio"}
 local MIDI_SOURCES = {"This Track", "MIDI Bus"}
+
+--------------------------------------------------------------------------------
+-- UI Drawing Functions
+--------------------------------------------------------------------------------
+
+--- Draw a UI button icon (window/screen icon)
+-- @param ctx ImGui context
+-- @param label string Label for the button
+-- @param width number Button width
+-- @param height number Button height
+-- @return boolean True if clicked
+local function draw_ui_icon(ctx, label, width, height)
+    -- Invisible button for interaction
+    r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
+    local clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
+
+    -- Get button bounds for drawing
+    local item_min_x, item_min_y = r.ImGui_GetItemRectMin(ctx.ctx)
+    local item_max_x, item_max_y = r.ImGui_GetItemRectMax(ctx.ctx)
+
+    -- Draw window/screen icon using DrawList
+    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+    local center_x = (item_min_x + item_max_x) / 2
+    local center_y = (item_min_y + item_max_y) / 2
+    local icon_size = 12
+    local half_size = icon_size / 2
+
+    -- Draw a simple window icon: rectangle with a line in the middle (like a window)
+    local x1 = center_x - half_size
+    local y1 = center_y - half_size
+    local x2 = center_x + half_size
+    local y2 = center_y + half_size
+
+    -- Greyish color for the icon
+    local icon_color = 0xAAAAAAFF
+    -- Border color
+    local border_color = 0x666666FF
+
+    -- Draw border around the button
+    r.ImGui_DrawList_AddRect(draw_list, item_min_x, item_min_y, item_max_x, item_max_y, border_color, 0, 0, 1.0)
+
+    -- Outer rectangle (window frame) - signature: (draw_list, x1, y1, x2, y2, color, rounding, flags, thickness)
+    r.ImGui_DrawList_AddRect(draw_list, x1, y1, x2, y2, icon_color, 0, 0, 2)
+    -- Inner line (window pane divider)
+    r.ImGui_DrawList_AddLine(draw_list, center_x, y1, center_x, y2, icon_color, 1.5)
+
+    return clicked
+end
 
 --------------------------------------------------------------------------------
 -- Helper Functions
@@ -330,21 +379,22 @@ function M.draw(ctx, width, state, callbacks)
 
                 -- Header row: buttons first, then name
                 -- Show UI button
-                if ctx:small_button("UI##ui_" .. mod.fx_idx) then
+                if draw_ui_icon(ctx, "##ui_" .. mod.fx_idx, 24, 20) then
                     mod.fx:show(3)
                 end
                 ctx:same_line()
 
                 -- Delete button
-                ctx:push_style_color(imgui.Col.Button(), 0x993333FF)
+                ctx:push_style_color(imgui.Col.Button(), 0x663333FF)
+                ctx:push_style_color(imgui.Col.ButtonHovered(), 0x444444FF)
                 if ctx:small_button("X##del_" .. mod.fx_idx) then
-                    ctx:pop_style_color()
+                    ctx:pop_style_color(2)
                     ctx:pop_id()
                     callbacks.delete_modulator(mod.fx_idx)
                     ctx:end_child()
                     return
                 end
-                ctx:pop_style_color()
+                ctx:pop_style_color(2)
                 ctx:same_line()
 
                 -- Modulator name as collapsing header
