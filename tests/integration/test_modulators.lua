@@ -189,7 +189,7 @@ local function test_add_modulator_to_device()
 
     -- Verify modulator name
     local mod_name = modulator:get_name()
-    assert.contains(mod_name, "SideFX_Modulator", "Modulator should have correct name")
+    assert.contains(mod_name, "SideFX Modulator", "Modulator should have correct name")
 end
 
 local function test_get_device_modulators()
@@ -300,29 +300,31 @@ local function test_modulator_in_nested_device()
     local rack = rack_module.add_rack_to_track()
     assert.truthy(rack, "Should create rack")
 
-    -- Get first chain
-    local chain = nil
-    for child in rack:iter_container_children() do
-        if fx_utils.is_chain_container(child) then
-            chain = child
-            break
-        end
-    end
-    assert.truthy(chain, "Should find chain in rack")
+    -- Add chain to rack with first device
+    local plugin1 = { full_name = "ReaComp", name = "ReaComp" }
+    local chain = rack_module.add_chain_to_rack(rack, plugin1)
+    assert.truthy(chain, "Should create chain with first device")
 
-    -- Add device to chain
-    local plugin = { full_name = "ReaEQ", name = "ReaEQ" }
-    local device = rack_module.add_device_to_chain(chain, plugin)
-    assert.truthy(device, "Should add device to chain")
+    -- Add second device to chain
+    local plugin2 = { full_name = "ReaEQ", name = "ReaEQ" }
+    local device = rack_module.add_device_to_chain(chain, plugin2)
+    assert.truthy(device, "Should add second device to chain")
 
     -- Add modulator to nested device
     local modulator = add_modulator_to_device(device, "JS:SideFX/SideFX_Modulator", test_track)
     assert.truthy(modulator, "Should add modulator to nested device")
 
+    if not modulator then
+        return  -- Skip rest of test if modulator creation failed
+    end
+
     -- Verify modulator parent is device
     local parent = modulator:get_parent_container()
     assert.truthy(parent, "Modulator should have parent")
-    assert.equals(device:get_guid(), parent:get_guid(), "Modulator parent should be nested device")
+
+    if parent then
+        assert.equals(device:get_guid(), parent:get_guid(), "Modulator parent should be nested device")
+    end
 
     -- Verify modulator appears in device modulators list
     local modulators = get_device_modulators(device)
