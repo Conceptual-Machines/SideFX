@@ -85,6 +85,36 @@ local function draw_modulator_params(ctx, mod, state, width)
         ctx:pop_style_color()
     end
 
+    -- LFO Mode toggle buttons (underneath Rate mode buttons)
+    local ok_lfo, lfo_mode = pcall(function() return fx:get_param_normalized(PARAM_MAP.lfo_mode) end)
+    if ok_lfo then
+        local is_oneshot = lfo_mode > 0.5
+
+        ctx:text("LFO:")
+        ctx:same_line()
+
+        if not is_oneshot then
+            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+        end
+        if ctx:button("Loop##lfo_" .. mod.fx_idx, button_width, 0) then
+            pcall(function() fx:set_param_normalized(PARAM_MAP.lfo_mode, 0) end)
+        end
+        if not is_oneshot then
+            ctx:pop_style_color()
+        end
+
+        ctx:same_line()
+        if is_oneshot then
+            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+        end
+        if ctx:button("One Shot##lfo_" .. mod.fx_idx, button_width + 25, 0) then
+            pcall(function() fx:set_param_normalized(PARAM_MAP.lfo_mode, 1) end)
+        end
+        if is_oneshot then
+            ctx:pop_style_color()
+        end
+    end
+
     -- Rate control (Hz slider or Sync dropdown) - on next line for full width
     ctx:set_next_item_width(width - 20)
     if not is_sync then
@@ -160,36 +190,6 @@ local function draw_modulator_params(ctx, mod, state, width)
                 end
             end
             ctx:end_combo()
-        end
-
-        -- LFO Mode toggle buttons
-        local ok_lfo, lfo_mode = pcall(function() return fx:get_param_normalized(PARAM_MAP.lfo_mode) end)
-        if ok_lfo then
-            local is_oneshot = lfo_mode > 0.5
-
-            ctx:text("LFO:")
-            ctx:same_line()
-
-            if not is_oneshot then
-                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-            end
-            if ctx:button("Loop##lfo_" .. mod.fx_idx, 55, 0) then
-                pcall(function() fx:set_param_normalized(PARAM_MAP.lfo_mode, 0) end)
-            end
-            if not is_oneshot then
-                ctx:pop_style_color()
-            end
-
-            ctx:same_line()
-            if is_oneshot then
-                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-            end
-            if ctx:button("One Shot##lfo_" .. mod.fx_idx, 70, 0) then
-                pcall(function() fx:set_param_normalized(PARAM_MAP.lfo_mode, 1) end)
-            end
-            if is_oneshot then
-                ctx:pop_style_color()
-            end
         end
 
         -- Advanced section (collapsible) - only show if trigger mode needs it
