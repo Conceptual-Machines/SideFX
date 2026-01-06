@@ -647,18 +647,8 @@ function M.draw(ctx, fx, opts)
     end
     local is_mod_sidebar_collapsed = mod_sidebar_collapsed[state_guid]
 
-    -- Check if a modulator is expanded to make sidebar wider
-    local expanded_slot_idx = expanded_mod_slot[state_guid]
-    local mod_sidebar_expanded_w = 380  -- Wider width when modulator controls are shown
-
-    local mod_sidebar_w
-    if is_mod_sidebar_collapsed then
-        mod_sidebar_w = cfg.mod_sidebar_collapsed_width
-    elseif expanded_slot_idx ~= nil then
-        mod_sidebar_w = mod_sidebar_expanded_w
-    else
-        mod_sidebar_w = cfg.mod_sidebar_width
-    end
+    -- Modulator sidebar width (no expansion needed, controls go in modal)
+    local mod_sidebar_w = is_mod_sidebar_collapsed and cfg.mod_sidebar_collapsed_width or cfg.mod_sidebar_width
 
     -- Calculate dimensions based on collapsed state
     local panel_height, panel_width, content_width, num_columns, params_per_column
@@ -786,12 +776,9 @@ function M.draw(ctx, fx, opts)
                             end
 
                             if ctx:button(mod_name .. "##" .. slot_id, slot_width, slot_height) then
-                                -- Toggle expansion
-                                if expanded_mod_slot[state_guid] == slot_idx then
-                                    expanded_mod_slot[state_guid] = nil
-                                else
-                                    expanded_mod_slot[state_guid] = slot_idx
-                                end
+                                -- Open modal for modulator controls
+                                expanded_mod_slot[state_guid] = slot_idx
+                                ctx:open_popup("Modulator Controls##" .. guid)
                                 interacted = true
                             end
 
@@ -838,17 +825,17 @@ function M.draw(ctx, fx, opts)
                     end
                 end
 
-                -- Show expanded modulator parameters
-                if expanded_slot_idx ~= nil then
-                    local expanded_modulator = modulators[expanded_slot_idx + 1]
-                    if expanded_modulator then
-                        -- Get parameter values safely (ReaWrap uses get_num_params, not get_param_count)
-                        local ok, param_count = pcall(function() return expanded_modulator:get_num_params() end)
-                        if ok and param_count and param_count > 0 then
-                            ctx:separator()
-                            ctx:spacing()
-                            -- Get available width for controls
-                            local control_width = ctx:get_content_region_avail() - 8  -- Small padding
+                -- Modulator controls modal
+                local expanded_slot_idx = expanded_mod_slot[state_guid]
+                if ctx:begin_popup_modal("Modulator Controls##" .. guid, true, imgui.WindowFlags.AlwaysAutoResize()) then
+                    if expanded_slot_idx ~= nil then
+                        local expanded_modulator = modulators[expanded_slot_idx + 1]
+                        if expanded_modulator then
+                            -- Get parameter values safely (ReaWrap uses get_num_params, not get_param_count)
+                            local ok, param_count = pcall(function() return expanded_modulator:get_num_params() end)
+                            if ok and param_count and param_count > 0 then
+                                -- Modal content width
+                                local control_width = 300
 
                             -- Rate section
                             ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
@@ -1244,6 +1231,8 @@ function M.draw(ctx, fx, opts)
                             end
                         end
                     end
+                    end
+                    ctx:end_popup()
                 end
             end
 
