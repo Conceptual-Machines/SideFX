@@ -731,6 +731,9 @@ function M.draw(ctx, fx, opts)
                 end
             else
                 -- Expanded: show grid
+                -- Add right padding to sidebar content
+                ctx:push_style_var(imgui.StyleVar.ItemSpacing(), 8, 4)
+
                 if ctx:button("◀##collapse_mod_" .. guid, 24, 20) then
                     mod_sidebar_collapsed[state_guid] = true
                     interacted = true
@@ -841,9 +844,9 @@ function M.draw(ctx, fx, opts)
                         if ok and param_count and param_count > 0 then
                             ctx:separator()
                             ctx:spacing()
-                            -- Set control width to match 4 grid cells
-                            -- 4 cells × 60px + 3 gaps × 4px = 252px
-                            local control_width = 252
+                            -- Set control width slightly narrower than grid for right padding
+                            -- 4 cells × 60px + 3 gaps × 4px = 252px, minus 12px padding = 240px
+                            local control_width = 240
 
                             -- Rate section
                             ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
@@ -2022,6 +2025,8 @@ function M.draw(ctx, fx, opts)
                         end
                     end
                 end
+
+                ctx:pop_style_var()  -- Remove ItemSpacing padding
             end  -- end expanded sidebar
 
             r.ImGui_EndTable(ctx.ctx)
