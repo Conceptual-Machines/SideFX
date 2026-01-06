@@ -5,6 +5,7 @@
 -- @license MIT
 
 local r = reaper
+local imgui = require('imgui')
 local widgets = require('lib.ui.widgets')
 local fx_utils = require('lib.fx_utils')
 
@@ -706,8 +707,8 @@ function M.draw(ctx, fx, opts)
         colors.panel_border, cfg.border_radius, 0, 1)
 
     -- Begin child for panel content (hide scrollbars)
-    local child_flags = imgui.WindowFlags.NoScrollbar()
-    if ctx:begin_child("panel_" .. guid, panel_width, panel_height, child_flags) then
+    local window_flags = imgui.WindowFlags.NoScrollbar()
+    if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0, window_flags) then
 
         -- Wrapper table: [Modulator Sidebar | Main Content]
         -- (mod_sidebar_w already calculated above for panel width)
