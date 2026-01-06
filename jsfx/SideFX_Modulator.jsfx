@@ -91,6 +91,7 @@ cap_mode = 0;
 last_mouse_cap = 0;
 drag_start_x = 0;
 drag_start_y = 0;
+node_x = 0;
 
 // Get X value from slider
 function get_x(i) (
