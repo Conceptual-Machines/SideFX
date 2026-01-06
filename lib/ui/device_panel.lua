@@ -26,7 +26,7 @@ M.config = {
     fader_height = 70,         -- Fader height
     knob_size = 48,            -- Knob diameter
     -- Modulator sidebar (left side of device)
-    mod_sidebar_width = 240,   -- Width for modulator 2×4 grid
+    mod_sidebar_width = 260,   -- Width for modulator 4×2 grid
     mod_sidebar_collapsed_width = 24,  -- Collapsed width
     mod_slot_width = 60,
     mod_slot_height = 60,
@@ -761,10 +761,10 @@ function M.draw(ctx, fx, opts)
                 local slot_width = cfg.mod_slot_width
                 local slot_height = cfg.mod_slot_height
 
-                -- 2×4 grid of modulator slots
-                for row = 0, 3 do
-                    for col = 0, 1 do
-                        local slot_idx = row * 2 + col
+                -- 4×2 grid of modulator slots (4 columns, 2 rows)
+                for row = 0, 1 do
+                    for col = 0, 3 do
+                        local slot_idx = row * 4 + col
                         local modulator = modulators[slot_idx + 1]  -- Lua 1-based
 
                         if col > 0 then
