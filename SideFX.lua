@@ -22,22 +22,21 @@
 --   - Plugin browser with search
 --
 -- @changelog
---   v0.5.0 - Horizontal Device Chain UI
---     + New Ableton-style horizontal device layout
+--   v0.1.1 - Rack Header Layout & UI Polish
+--     + Hierarchical naming display for racks, chains, devices
+--     + Improved rack header layout with proper alignment
+--     + Collapsed rack view with controls (chain count, pan, fader)
+--     + Device header UI improvements (inline controls)
+--     + Add empty chain creation
+--     + Smaller, refined UI controls
+--   v0.1.0 - Initial Release
+--     + Horizontal device chain layout
 --     + Device panels with expand/collapse parameters
---     + Rack containers with stacked chains
---     + Donation link added
---   v0.4.1 - UI fixes
---     + Horizontal scrolling for nested columns
---     + Fixed container toggle behavior
---     + Improved tab sizing
---   v0.4.0 - Column-based UI
---     + Miller columns layout (FX Chain | Container | Details)
---     + Expandable containers
---     + FX detail panel with parameters
---   v0.3.0 - Rack UI rewrite
---   v0.2.0 - ReaWrap integration
---   v0.1.0 - Initial release
+--     + Parallel rack containers
+--     + Modulator routing with parameter links
+--     + Plugin browser with search
+--     + Drag and drop support
+--     + ReaWrap integration
 
 local r = reaper
 
@@ -269,7 +268,7 @@ local function add_chain_to_rack(rack, plugin)
     local rack_guid = rack:get_guid()
     local rack_parent = rack:get_parent_container()
     local is_nested = (rack_parent ~= nil)
-    
+
     local chain = rack_module.add_chain_to_rack(rack, plugin)
     if chain then
         -- Get chain GUID (stable identifier)
@@ -294,7 +293,7 @@ local function add_nested_rack_to_rack(parent_rack)
     local parent_rack_guid = parent_rack:get_guid()
     local parent_rack_parent = parent_rack:get_parent_container()
     local is_parent_nested = (parent_rack_parent ~= nil)
-    
+
     local nested_rack = rack_module.add_nested_rack_to_rack(parent_rack)
     if nested_rack then
         -- Get nested rack GUID (stable identifier)
@@ -303,10 +302,10 @@ local function add_nested_rack_to_rack(parent_rack)
             -- Find the chain that contains this nested rack
             local chain_container = nested_rack:get_parent_container()
             local chain_guid = chain_container and chain_container:get_guid()
-            
+
             -- Force the nested rack to be expanded so user can see it
             state.expanded_racks[nested_rack_guid] = true
-            
+
             -- Also select the chain that contains the nested rack
             if chain_guid then
                 if parent_rack_guid then
@@ -329,7 +328,7 @@ local function add_device_to_chain(chain, plugin)
     if not chain_guid then
         return nil
     end
-    
+
     -- Determine expansion state BEFORE adding device (while chain reference is still valid)
     local parent_rack = chain:get_parent_container()
     local is_nested = false
@@ -339,7 +338,7 @@ local function add_device_to_chain(chain, plugin)
         local rack_parent = parent_rack:get_parent_container()
         is_nested = (rack_parent ~= nil)
     end
-    
+
     local device = rack_module.add_device_to_chain(chain, plugin)
     if device then
         -- Force the chain to be expanded/selected so user can see the device that was just added
@@ -832,7 +831,7 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                     if is_rack_container(dev) then
                         -- It's a rack - draw using rack panel (mark as nested)
                         local rack_data = draw_rack_panel(ctx, dev, chain_content_h - 20, true)
-                        
+
                         -- If a chain in this nested rack is selected, show its chain column
                         -- Use the rack's GUID to look up which chain is expanded for this specific rack
                         local rack_guid = dev:get_guid()
@@ -846,7 +845,7 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                                     break
                                 end
                             end
-                            
+
                             if nested_chain then
                                 ctx:same_line()
                                 draw_chain_column(ctx, nested_chain, rack_data.rack_h)
@@ -944,7 +943,7 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
     -- Explicitly check if is_nested is true (not just truthy)
     is_nested = (is_nested == true)
     local rack_guid = rack:get_guid()
-    
+
     -- Use expanded_racks for ALL racks (both top-level and nested)
     -- This allows multiple top-level racks to be expanded independently
     local is_expanded = (state.expanded_racks[rack_guid] == true)
@@ -1000,10 +999,10 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                 local fader_w = 32
                 local meter_w = 12
                 local scale_w = 20
-                
+
                 -- Chain count
                 ctx:text_disabled(string.format("%d chains", #chains))
-                
+
                 -- Pan slider
                 local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(1) end)
                 if ok_pan and pan_norm then
@@ -1017,33 +1016,33 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                         pcall(function() mixer:set_param_normalized(1, (new_pan + 100) / 200) end)
                     end
                 end
-                
+
                 ctx:spacing()
-                
+
                 -- Calculate fader height
                 local _, remaining_h = ctx:get_content_region_avail()
                 local fader_h = remaining_h - 22  -- Leave room for dB label
                 fader_h = math.max(50, fader_h)
-                
+
                 -- Fader with meter and scale
                 local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
                 if ok_gain and gain_norm then
                     local gain_db = -24 + gain_norm * 36
                     local gain_format = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db))
-                    
+
                     local avail_w, _ = ctx:get_content_region_avail()
                     local total_w = scale_w + fader_w + meter_w + 4
                     local offset_x = math.max(0, (avail_w - total_w) / 2 - 8)  -- Shift 8px left from center
-                    
+
                     ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + offset_x)
-                    
+
                     local screen_x, screen_y = ctx:get_cursor_screen_pos()
                     local draw_list = ctx:get_window_draw_list()
-                    
+
                     local scale_x = screen_x
                     local fader_x = screen_x + scale_w + 2
                     local meter_x = fader_x + fader_w + 2
-                    
+
                     -- dB scale
                     local db_marks = {12, 6, 0, -6, -12, -18, -24}
                     for _, db in ipairs(db_marks) do
@@ -1055,7 +1054,7 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                             ctx:draw_list_add_text(draw_list, scale_x, mark_y - 5, 0x888888FF, label)
                         end
                     end
-                    
+
                     -- Fader background
                     ctx:draw_list_add_rect_filled(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x1A1A1AFF, 3)
                     -- Fader fill
@@ -1070,14 +1069,14 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                     local zero_db_norm = 24 / 36
                     local zero_y = screen_y + fader_h - (fader_h * zero_db_norm)
                     ctx:draw_list_add_line(draw_list, fader_x, zero_y, fader_x + fader_w, zero_y, 0xFFFFFF44, 1)
-                    
+
                     -- Stereo meters
                     local meter_l_x = meter_x
                     local meter_r_x = meter_x + meter_w / 2 + 1
                     local half_meter_w = meter_w / 2 - 1
                     ctx:draw_list_add_rect_filled(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
                     ctx:draw_list_add_rect_filled(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
-                    
+
                     if state.track and state.track.pointer then
                         local peak_l = r.Track_GetPeakInfo(state.track.pointer, 0)
                         local peak_r = r.Track_GetPeakInfo(state.track.pointer, 1)
@@ -1101,10 +1100,10 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                         draw_meter_bar(meter_l_x + 1, half_meter_w - 1, peak_l)
                         draw_meter_bar(meter_r_x + 1, half_meter_w - 1, peak_r)
                     end
-                    
+
                     ctx:draw_list_add_rect(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
                     ctx:draw_list_add_rect(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
-                    
+
                     -- Invisible slider for fader interaction
                     ctx:set_cursor_screen_pos(fader_x, screen_y)
                     ctx:push_style_color(imgui.Col.FrameBg(), 0x00000000)
@@ -1120,16 +1119,16 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
                         pcall(function() mixer:set_param_normalized(0, (0 + 24) / 36) end)
                     end
                     ctx:pop_style_color(5)
-                    
+
                     -- Advance cursor past the control
                     local label_y = screen_y + fader_h + 2
-                    
+
                     -- dB value label positioned under the fader
                     local db_text_w, _ = ctx:calc_text_size(gain_format)
                     local label_x = fader_x + (fader_w - db_text_w) / 2  -- Center under fader
                     ctx:set_cursor_screen_pos(label_x, label_y)
                     ctx:text(gain_format)
-                    
+
                     -- Double-click to edit
                     if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
                         ctx:open_popup("##gain_edit_popup_" .. rack_guid)
@@ -1664,7 +1663,7 @@ local function main()
     state.track, state.track_name = get_selected_track()
     refresh_fx_list()
     scan_plugins()
-    
+
     -- Load expansion state and display names for current track
     if state.track then
         state_module.load_expansion_state()
@@ -1676,7 +1675,7 @@ local function main()
         width = 1400,
         height = 800,
         dockable = true,
-        
+
         on_close = function(self)
             -- Save expansion state and display names when window closes
             if state.track then
@@ -1725,11 +1724,11 @@ local function main()
 
             -- Track change detection
             local track, name = get_selected_track()
-            
+
             -- Check if current state.track is still valid (not deleted)
             local state_track_valid = false
             if state.track then
-                local ok = pcall(function() 
+                local ok = pcall(function()
                     -- Try to access track info to validate pointer
                     return state.track:get_info_value("IP_TRACKNUMBER")
                 end)
@@ -1746,7 +1745,7 @@ local function main()
                     clear_multi_select()
                 end
             end
-            
+
             local track_changed = (track and state.track and track.pointer ~= state.track.pointer)
                 or (track and not state.track)
                 or (not track and state.track)
@@ -1757,7 +1756,7 @@ local function main()
                     state_module.save_expansion_state()
                     state_module.save_display_names()
                 end
-                
+
                 state.track, state.track_name = track, name
                 state.expanded_path = {}
                 state.expanded_racks = {}
@@ -1766,7 +1765,7 @@ local function main()
                 state.selected_fx = nil
                 clear_multi_select()
                 refresh_fx_list()
-                
+
                 -- Load expansion state for new track
             if state.track then
                 state_module.load_expansion_state()
@@ -1811,7 +1810,7 @@ local function main()
                     local msg_h = 60
                     local msg_x = (avail_w - msg_w) / 2
                     local msg_y = (avail_h - msg_h) / 2
-                    
+
                     -- Position using dummy spacing
                     if msg_y > 0 then
                         ctx:dummy(0, msg_y)
@@ -1820,7 +1819,7 @@ local function main()
                         ctx:dummy(msg_x, 0)
                         ctx:same_line()
                     end
-                    
+
                     -- Red border using child window with manual border drawing
                     ctx:push_style_color(imgui.Col.ChildBg(), 0x2A1A1AFF)  -- Slightly red-tinted background
                     ctx:push_style_var(imgui.StyleVar.WindowPadding(), 20, 15)
@@ -1831,10 +1830,10 @@ local function main()
                         local window_max_y = window_min_y + r.ImGui_GetWindowHeight(ctx.ctx)
                         local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
                         local border_thickness = 2.0
-                        
+
                         -- Draw red border rectangle around the child window
                         r.ImGui_DrawList_AddRect(draw_list, window_min_x, window_min_y, window_max_x, window_max_y, 0xFF0000FF, 0, 0, border_thickness)
-                        
+
                         -- Center the text using available space
                         local text = "Select a track"
                         local text_w, text_h = ctx:calc_text_size(text)
@@ -1888,7 +1887,7 @@ local function main()
             if default_font then
                 ctx:pop_font()
             end
-            
+
             -- Periodically save state (every 60 frames ~= 1 second at 60fps)
             -- Only save if there are actual display names to avoid clearing saved data
             if state.track and (not state.last_save_frame or (ctx.frame_count - state.last_save_frame) > 60) then
@@ -1909,5 +1908,3 @@ local function main()
 end
 
 main()
-
-
