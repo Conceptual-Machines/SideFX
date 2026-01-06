@@ -773,6 +773,26 @@ function M.draw(ctx, fx, opts)
                                 interacted = true
                             end
 
+                            -- Right-click context menu for modulator
+                            if ctx:begin_popup_context_item("mod_ctx_" .. slot_id) then
+                                if ctx:selectable("Delete Modulator") then
+                                    -- Delete modulator
+                                    local ok_del = pcall(function()
+                                        modulator:delete()
+                                    end)
+                                    if ok_del then
+                                        -- Clear expansion state for this slot
+                                        expanded_mod_slot[state_guid] = nil
+                                        -- Refresh FX list
+                                        if opts.refresh_fx_list then
+                                            opts.refresh_fx_list()
+                                        end
+                                        interacted = true
+                                    end
+                                end
+                                ctx:end_popup()
+                            end
+
                             if is_expanded then
                                 ctx:pop_style_color()
                             end
