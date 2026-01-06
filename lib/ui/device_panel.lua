@@ -646,7 +646,19 @@ function M.draw(ctx, fx, opts)
         mod_sidebar_collapsed[state_guid] = true
     end
     local is_mod_sidebar_collapsed = mod_sidebar_collapsed[state_guid]
-    local mod_sidebar_w = is_mod_sidebar_collapsed and cfg.mod_sidebar_collapsed_width or cfg.mod_sidebar_width
+
+    -- Check if a modulator is expanded to make sidebar wider
+    local expanded_slot_idx = expanded_mod_slot[state_guid]
+    local mod_sidebar_expanded_w = 380  -- Wider width when modulator controls are shown
+
+    local mod_sidebar_w
+    if is_mod_sidebar_collapsed then
+        mod_sidebar_w = cfg.mod_sidebar_collapsed_width
+    elseif expanded_slot_idx ~= nil then
+        mod_sidebar_w = mod_sidebar_expanded_w
+    else
+        mod_sidebar_w = cfg.mod_sidebar_width
+    end
 
     -- Calculate dimensions based on collapsed state
     local panel_height, panel_width, content_width, num_columns, params_per_column
