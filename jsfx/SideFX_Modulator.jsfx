@@ -505,7 +505,11 @@ left_click ? (
 
 right_click && !last_right && mouse_in_area ? (
   click_node = find_nearest(norm_mx, norm_my, node_threshold);
-  click_node > 0 && click_node < slider30 - 1 && slider30 > 2 ? remove_node(click_node);
+  // Allow deletion if: not at visual endpoints (X=0 or X=1) and have more than 2 points
+  click_node >= 0 && slider30 > 2 ? (
+    node_x = get_x(click_node);
+    node_x > 0.01 && node_x < 0.99 ? remove_node(click_node);
+  );
 );
 
 last_mouse_cap = mouse_cap;
