@@ -844,8 +844,9 @@ function M.draw(ctx, fx, opts)
                         if ok and param_count and param_count > 0 then
                             ctx:separator()
                             ctx:spacing()
-                            -- Get available width for controls
-                            local control_width = ctx:get_content_region_avail() - 8  -- Small padding
+                            -- Set control width to match 4 grid cells
+                            -- 4 cells × 60px + 3 gaps × 4px = 252px
+                            local control_width = 252
 
                             -- Rate section
                             ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
