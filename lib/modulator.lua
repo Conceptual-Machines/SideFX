@@ -75,14 +75,12 @@ function M.get_linkable_fx()
     for fx_info in state.track:iter_all_fx_flat() do
         local fx = fx_info.fx
         local name = fx:get_name()
-        -- Skip SideFX internal components (modulators, containers, utilities, mixers)
-        -- Match any variation: "JS: SideFX/...", "JS:SideFX/...", "SideFX_...", etc.
-        local is_internal = name and (
-            name:find("SideFX") or  -- Catches all SideFX JSFX
-            name:find("Container") or
-            name:find("Rack") or
-            name:find("Chain")
-        )
+        -- Skip SideFX internal JSFX (all start with "JS:SideFX/" or "JS: SideFX/")
+        -- and REAPER containers
+        local is_sidefx_jsfx = name and (name:match("^JS:%s?SideFX/") ~= nil)
+        local is_container = fx:is_container()
+        local is_internal = is_sidefx_jsfx or is_container
+
         if name and not is_internal then
             local params = {}
             local param_count = fx:get_num_params()
