@@ -12,19 +12,20 @@ local M = {}
 -- Parameter Mapping
 --------------------------------------------------------------------------------
 
+-- Parameters are indexed by declaration order in JSFX, not slider number!
 local PARAM_MAP = {
-    tempo_mode = 0,    -- slider1
-    rate_hz = 1,       -- slider2
-    sync_rate = 2,     -- slider3
-    phase = 4,         -- slider5
-    depth = 5,         -- slider6
-    trigger_mode = 19, -- slider20
-    midi_source = 20,  -- slider21
-    midi_note = 21,    -- slider22
-    audio_thresh = 22, -- slider23
-    attack_ms = 23,    -- slider24
-    release_ms = 24,   -- slider25
-    lfo_mode = 27,     -- slider28
+    tempo_mode = 0,    -- slider1 (param 0)
+    rate_hz = 1,       -- slider2 (param 1)
+    sync_rate = 2,     -- slider3 (param 2)
+    phase = 4,         -- slider5 (param 4)
+    depth = 5,         -- slider6 (param 5)
+    trigger_mode = 6,  -- slider20 (param 6 - 7th declared param)
+    midi_source = 7,   -- slider21 (param 7)
+    midi_note = 8,     -- slider22 (param 8)
+    audio_thresh = 9,  -- slider23 (param 9)
+    attack_ms = 10,    -- slider24 (param 10)
+    release_ms = 11,   -- slider25 (param 11)
+    lfo_mode = 12,     -- slider28 (param 12 - 13th declared param)
 }
 
 local SYNC_RATES = {
