@@ -91,8 +91,12 @@ function M.get_linkable_fx()
                 local pname = fx:get_param_name(p)
                 table.insert(params, {idx = p, name = pname})
             end
+            -- Use custom display name if available, otherwise use FX name
+            local guid = fx:get_guid()
+            local custom_name = state.display_names[guid]
+            local base_name = custom_name or name
             -- Add depth indicator to name for nested FX
-            local display_name = fx_info.depth > 0 and string.rep("  ", fx_info.depth) .. "↳ " .. name or name
+            local display_name = fx_info.depth > 0 and string.rep("  ", fx_info.depth) .. "↳ " .. base_name or base_name
             table.insert(linkable, {fx = fx, fx_idx = fx.pointer, name = display_name, params = params})
         end
     end
