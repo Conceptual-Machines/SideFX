@@ -855,8 +855,9 @@ function M.draw(ctx, fx, opts)
                         if ok and param_count and param_count > 0 then
                             ctx:separator()
                             ctx:spacing()
-                            -- Set control width shorter than grid
-                            local control_width = 180
+                            -- Set control width slightly narrower than grid for right padding
+                            -- 4 cells × 60px + 3 gaps × 4px = 252px, minus 12px padding = 240px
+                            local control_width = 240
 
                             -- Rate section
                             ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
@@ -891,18 +892,20 @@ function M.draw(ctx, fx, opts)
                                     end
                                 end
                             else
-                                -- Sync mode - show sync rate slider (slider3)
-                                local ok_sync, sync_rate_norm = pcall(function() return expanded_modulator:get_param_normalized(2) end)
+                                -- Sync mode - show sync rate dropdown (slider3)
+                                local ok_sync, sync_rate_idx = pcall(function() return expanded_modulator:get_param_normalized(2) end)
                                 if ok_sync then
                                     local sync_rates = {"8 bars", "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/4T", "1/4.", "1/8", "1/8T", "1/8.", "1/16", "1/16T", "1/16.", "1/32", "1/32T", "1/32.", "1/64"}
-                                    local current_idx = math.floor(sync_rate_norm * 17 + 0.5)
-                                    local current_label = sync_rates[current_idx + 1] or "1/4"
-
+                                    local current_idx = math.floor(sync_rate_idx * 17 + 0.5)
                                     ctx:set_next_item_width(control_width)
-                                    local changed, new_idx = ctx:slider_int("##sync_rate_" .. guid, current_idx, 0, 17, current_label)
-                                    if changed then
-                                        expanded_modulator:set_param_normalized(2, new_idx / 17)
-                                        interacted = true
+                                    if ctx:begin_combo("##sync_rate_" .. guid, sync_rates[current_idx + 1] or "1/4") then
+                                        for i, rate_name in ipairs(sync_rates) do
+                                            if ctx:selectable(rate_name, i - 1 == current_idx) then
+                                                expanded_modulator:set_param_normalized(2, (i - 1) / 17)
+                                                interacted = true
+                                            end
+                                        end
+                                        ctx:end_combo()
                                     end
                                 end
                             end
@@ -941,18 +944,20 @@ function M.draw(ctx, fx, opts)
                             ctx:pop_style_color()
                             ctx:spacing()
 
-                            -- Trigger Mode slider (slider20)
-                            local ok_trig, trigger_mode_norm = pcall(function() return expanded_modulator:get_param_normalized(19) end)
+                            -- Trigger Mode dropdown (slider20)
+                            local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(19) end)
                             if ok_trig then
                                 local trigger_modes = {"Free", "Transport", "MIDI", "Audio"}
-                                local trig_idx = math.floor(trigger_mode_norm * 3 + 0.5)
-                                local current_label = trigger_modes[trig_idx + 1] or "Free"
-
+                                local trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
                                 ctx:set_next_item_width(control_width)
-                                local changed, new_idx = ctx:slider_int("##trigger_mode_" .. guid, trig_idx, 0, 3, current_label)
-                                if changed then
-                                    expanded_modulator:set_param_normalized(19, new_idx / 3)
-                                    interacted = true
+                                if ctx:begin_combo("##trigger_mode_" .. guid, trigger_modes[trig_idx + 1] or "Free") then
+                                    for i, mode_name in ipairs(trigger_modes) do
+                                        if ctx:selectable(mode_name, i - 1 == trig_idx) then
+                                            expanded_modulator:set_param_normalized(19, (i - 1) / 3)
+                                            interacted = true
+                                        end
+                                    end
+                                    ctx:end_combo()
                                 end
                             end
 
