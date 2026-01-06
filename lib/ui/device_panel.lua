@@ -1010,7 +1010,8 @@ function M.draw(ctx, fx, opts)
                 -- UI button
                 r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
                 -- Draw custom UI icon (border is drawn inside the function)
-                if draw_ui_icon(ctx, "##ui_" .. state_guid, -1, 24) then
+                local ui_avail_w = ctx:get_content_region_avail()
+                if ui_avail_w > 0 and draw_ui_icon(ctx, "##ui_" .. state_guid, ui_avail_w, 24) then
                     fx:show(3)
                     interacted = true
                 end
@@ -1022,7 +1023,7 @@ function M.draw(ctx, fx, opts)
                 r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
                 -- Draw custom circle indicator with colored background
                 local avail_w, avail_h = ctx:get_content_region_avail()
-                if draw_on_off_circle(ctx, "##on_off_" .. state_guid, enabled, avail_w, 24, colors.bypass_on, colors.bypass_off) then
+                if avail_w > 0 and draw_on_off_circle(ctx, "##on_off_" .. state_guid, enabled, avail_w, 24, colors.bypass_on, colors.bypass_off) then
                     fx:set_enabled(not enabled)
                     interacted = true
                 end
