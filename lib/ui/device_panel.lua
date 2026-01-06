@@ -776,9 +776,12 @@ function M.draw(ctx, fx, opts)
                             end
 
                             if ctx:button(mod_name .. "##" .. slot_id, slot_width, slot_height) then
-                                -- Open modal for modulator controls
-                                expanded_mod_slot[state_guid] = slot_idx
-                                ctx:open_popup("Modulator Controls##" .. guid)
+                                -- Toggle modulator controls window
+                                if expanded_mod_slot[state_guid] == slot_idx then
+                                    expanded_mod_slot[state_guid] = nil
+                                else
+                                    expanded_mod_slot[state_guid] = slot_idx
+                                end
                                 interacted = true
                             end
 
@@ -825,10 +828,13 @@ function M.draw(ctx, fx, opts)
                     end
                 end
 
-                -- Modulator controls modal
+                -- Modulator controls window
                 local expanded_slot_idx = expanded_mod_slot[state_guid]
-                if ctx:begin_popup_modal("Modulator Controls##" .. guid, true, imgui.WindowFlags.AlwaysAutoResize()) then
-                    if expanded_slot_idx ~= nil then
+                if expanded_slot_idx ~= nil then
+                    local window_open = true
+                    local window_flags = imgui.WindowFlags.AlwaysAutoResize()
+                    local visible, should_close = ctx:begin_window("Modulator Controls##" .. guid, window_open, window_flags)
+                    if visible then
                         local expanded_modulator = modulators[expanded_slot_idx + 1]
                         if expanded_modulator then
                             -- Get parameter values safely (ReaWrap uses get_num_params, not get_param_count)
@@ -1232,7 +1238,12 @@ function M.draw(ctx, fx, opts)
                         end
                     end
                     end
-                    ctx:end_popup()
+                    ctx:end_window()
+
+                    -- Handle window close button
+                    if should_close == false then
+                        expanded_mod_slot[state_guid] = nil
+                    end
                 end
             end
 
