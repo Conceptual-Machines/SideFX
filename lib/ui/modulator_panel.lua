@@ -192,13 +192,14 @@ local function draw_modulator_params(ctx, mod, state, width)
             end
         end
 
-        -- Advanced section (collapsible)
-        local is_advanced = state.modulator_advanced[mod.fx_idx] or false
-        if ctx:small_button(is_advanced and "▼ Advanced##adv_" .. mod.fx_idx or "▶ Advanced##adv_" .. mod.fx_idx) then
-            state.modulator_advanced[mod.fx_idx] = not is_advanced
-        end
+        -- Advanced section (collapsible) - only show if trigger mode needs it
+        if trigger_idx == 2 or trigger_idx == 3 then
+            local is_advanced = state.modulator_advanced[mod.fx_idx] or false
+            if ctx:small_button(is_advanced and "▼ Advanced##adv_" .. mod.fx_idx or "▶ Advanced##adv_" .. mod.fx_idx) then
+                state.modulator_advanced[mod.fx_idx] = not is_advanced
+            end
 
-        if is_advanced then
+            if is_advanced then
             ctx:indent(10)
 
             -- MIDI controls (show only if Trigger=MIDI)
@@ -276,7 +277,8 @@ local function draw_modulator_params(ctx, mod, state, width)
                 end
             end
 
-            ctx:unindent(10)
+                ctx:unindent(10)
+            end
         end
     end
 
