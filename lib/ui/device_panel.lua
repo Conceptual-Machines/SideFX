@@ -830,6 +830,9 @@ function M.draw(ctx, fx, opts)
                             end
                         end
                     end
+                    -- Add spacing at end of each row for right padding
+                    ctx:same_line()
+                    ctx:dummy(8, 1)  -- 8px right margin
                 end
 
                 -- Show expanded modulator parameters
