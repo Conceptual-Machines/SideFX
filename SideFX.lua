@@ -795,7 +795,8 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
     ctx:push_style_var(imgui.StyleVar.WindowPadding(), 12, 8)
 
     ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
-    if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, 0, rack_h, wrapper_flags) then
+    local window_flags = imgui.WindowFlags.NoScrollbar()
+    if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, 0, rack_h, wrapper_flags, window_flags) then
         -- Use table layout so header width matches content width
         local table_flags = imgui.TableFlags.SizingStretchSame()
         if ctx:begin_table("chain_table_" .. selected_chain_guid, 1, table_flags) then
@@ -1008,7 +1009,8 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
     ctx:push_style_color(imgui.Col.ChildBg(), 0x252535FF)
     -- Use unique child ID that includes nested flag to ensure no state conflicts
     local child_id = is_nested and ("rack_nested_" .. rack_guid) or ("rack_" .. rack_guid)
-    if ctx:begin_child(child_id, rack_w, rack_h, imgui.ChildFlags.Border()) then
+    local rack_window_flags = imgui.WindowFlags.NoScrollbar()
+    if ctx:begin_child(child_id, rack_w, rack_h, imgui.ChildFlags.Border(), rack_window_flags) then
 
         -- Draw rack header using widget
         rack_ui.draw_rack_header(ctx, rack, is_nested, state, {
