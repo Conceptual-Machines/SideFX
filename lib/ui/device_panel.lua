@@ -830,6 +830,11 @@ function M.draw(ctx, fx, opts)
 
                 -- Show expanded modulator parameters
                 if expanded_slot_idx ~= nil then
+                    ctx:separator()
+                    ctx:spacing()
+                    ctx:text(string.format("Expanded: Slot %d", expanded_slot_idx))
+                    ctx:spacing()
+
                     local expanded_modulator = modulators[expanded_slot_idx + 1]
                     if expanded_modulator then
                         ctx:separator()
