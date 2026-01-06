@@ -1046,6 +1046,75 @@ function M.draw(ctx, fx, opts)
                             -- Get modulator GUID for tracking links
                             local mod_guid = expanded_modulator:get_guid()
 
+                            -- Find existing links for this modulator
+                            local existing_links = {}
+                            local mod_fx_idx = expanded_modulator.pointer
+                            if container and container:is_container() then
+                                for child in container:iter_container_children() do
+                                    local ok_check, is_mod = pcall(function() return fx_utils.is_modulator_fx(child) end)
+                                    if not (ok_check and is_mod) then
+                                        -- Check each parameter of this device
+                                        local ok_params, param_count = pcall(function() return child:get_param_count() end)
+                                        if ok_params and param_count then
+                                            for param_idx = 0, param_count - 1 do
+                                                -- Query if this param is linked to our modulator
+                                                local ok_query, link_fx_str = pcall(function()
+                                                    local plink_str = string.format("param.%d.plink.active", param_idx)
+                                                    return child:get_named_config_param(plink_str)
+                                                end)
+                                                if ok_query and link_fx_str then
+                                                    local link_fx_idx = tonumber(link_fx_str)
+                                                    if link_fx_idx == mod_fx_idx then
+                                                        -- This parameter is linked to our modulator
+                                                        local ok_pname, param_name = pcall(function() return child:get_param_name(param_idx) end)
+                                                        local ok_fname, fx_name = pcall(function() return child:get_name() end)
+                                                        if ok_pname and ok_fname then
+                                                            table.insert(existing_links, {
+                                                                fx = child,
+                                                                fx_name = fx_name,
+                                                                param_idx = param_idx,
+                                                                param_name = param_name
+                                                            })
+                                                        end
+                                                    end
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+
+                            -- Show existing links
+                            if #existing_links > 0 then
+                                ctx:push_style_color(imgui.Col.Text(), 0x88FF88FF)
+                                ctx:text(string.format("Active Links: %d", #existing_links))
+                                ctx:pop_style_color()
+                                ctx:spacing()
+
+                                for i, link in ipairs(existing_links) do
+                                    local link_label = string.format("%s → %s", link.fx_name, link.param_name)
+                                    ctx:text("• " .. link_label)
+                                    ctx:same_line()
+                                    if ctx:button("X##remove_link_" .. i .. "_" .. guid, 20, 0) then
+                                        -- Remove this link
+                                        local ok_remove = pcall(function()
+                                            local plink_str = string.format("param.%d.plink.active", link.param_idx)
+                                            link.fx:set_named_config_param(plink_str, "-1")  -- -1 disables the link
+                                        end)
+                                        if ok_remove then
+                                            interacted = true
+                                        end
+                                    end
+                                    if ctx:is_item_hovered() then
+                                        ctx:set_tooltip("Remove link")
+                                    end
+                                end
+
+                                ctx:spacing()
+                                ctx:separator()
+                                ctx:spacing()
+                            end
+
                             -- Link selection state (device + parameter)
                             local link_state_key = "mod_link_" .. guid .. "_" .. expanded_slot_idx
                             state.mod_selected_target[link_state_key] = state.mod_selected_target[link_state_key] or {}
