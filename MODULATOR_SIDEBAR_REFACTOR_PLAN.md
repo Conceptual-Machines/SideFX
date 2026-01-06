@@ -1,5 +1,78 @@
 # Modulator Sidebar Refactor Plan
 
+## ✅ STATUS: Restored Old Version (Commit 9658e97)
+
+**What we did:**
+- Restored `lib/ui/device_panel.lua` from commit `8de6598` (before modal was added)
+- This brings back the inline controls in the sidebar
+
+**What needs to be done:** Re-apply fixes and enhancements (see checklist below)
+
+---
+
+## 🔧 Fixes to Re-Apply (Priority Order)
+
+### High Priority (Core Functionality)
+- [ ] **Fix parameter API**: Change `get_param()` / `set_param()` to `get_param_normalized()` / `set_param_normalized()`
+  - Location: All control rendering code (~lines 840-1200 in restored version)
+  - Why: `get_param()` returns Parameter object, not value (causes errors)
+  - Example: `expanded_modulator:get_param(0)` → `expanded_modulator:get_param_normalized(0)`
+
+- [ ] **Add hierarchical naming**: Apply naming to new modulators
+  - Location: `add_modulator_to_device()` function (after modulator is moved to container)
+  - Code to add (from commit c3cc09d):
+    ```lua
+    local naming = require('lib.naming')
+    local device_path_str = naming.extract_path_from_name(fresh_container:get_name())
+    if device_path_str then
+        local modulator_count = 0
+        for child in fresh_container:iter_container_children() do
+            if fx_utils.is_modulator_fx(child) then
+                modulator_count = modulator_count + 1
+            end
+        end
+        local mod_name = naming.build_hierarchical_name(device_path_str, "modulator", modulator_count, "SideFX Modulator")
+        moved_modulator:set_named_config_param("renamed_name", mod_name)
+    end
+    ```
+
+- [ ] **Fix grid display names**: Show "LFO1", "LFO2" instead of full names
+  - Location: Grid rendering loop where modulator names are displayed
+  - Code to add (from commit c3cc09d):
+    ```lua
+    local naming = require('lib.naming')
+    local mod_idx = naming.parse_modulator_index(mod_name)
+    local display_name = mod_idx and ("LFO" .. mod_idx) or "LFO"
+    ```
+
+### Medium Priority (UI Polish)
+- [ ] **Merge sidebars**: Combine modulator and utility sidebars (if needed)
+  - Restored version has separate sidebars
+  - Commit `1863280` had merged layout
+  - Decision: Keep separate or merge? (Can defer)
+
+- [ ] **Default sidebar expanded**: Set modulator sidebar to expanded by default
+  - Change initialization: `sidebar_expanded[guid] = true` instead of `false`
+
+- [ ] **Add "UI" button**: For opening curve editor
+  - Location: In controls section header or near grid slot
+  - Button opens JSFX window: `expanded_modulator:show(3)`
+
+- [ ] **Fix button styling**: Use styled buttons instead of radio buttons for Free/Sync
+  - Current: `ctx:radio_button("Free", ...)`
+  - Target: `ctx:button("Free", ...)` with active state coloring (0x4488AAFF)
+
+### Low Priority (Nice to Have)
+- [ ] **Fix bullet_text**: If parameter links section uses it
+  - Search for `ctx:bullet_text()` calls
+  - Replace with: `ctx:text("• " .. text)`
+
+- [ ] **Adjust spacing**: Compact layout for narrow sidebar
+  - Review spacing between controls
+  - Reduce padding if needed
+
+---
+
 ## Overview
 Revert from floating modal window back to left sidebar design with:
 - Top: 2×4 modulator grid (8 slots)
