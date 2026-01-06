@@ -102,6 +102,7 @@ local fx_detail_panel = require('lib.ui.fx_detail_panel')
 local toolbar = require('lib.ui.toolbar')
 local drag_drop = require('lib.ui.drag_drop')
 local rack_ui = require('lib.ui.rack_ui')
+local modulator_grid_panel = require('lib.ui.modulator_grid_panel')
 
 --------------------------------------------------------------------------------
 -- Icons (using OpenMoji font)
@@ -675,6 +676,35 @@ end
 local function delete_modulator(fx_idx)
     modulator_module.delete_modulator(fx_idx)
     refresh_fx_list()
+end
+
+--- Add a modulator inside a device container
+-- @param device_container TrackFX D-container
+-- @param modulator_type table {id, name, jsfx}
+-- @return TrackFX|nil Created modulator FX
+local function add_modulator_to_device(device_container, modulator_type)
+    if not state.track or not device_container then return nil end
+
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+
+    -- Add the modulator JSFX at track level first
+    local modulator = state.track:add_fx_by_name(modulator_type.jsfx, false, -1)
+
+    if modulator and modulator.pointer >= 0 then
+        -- Move the modulator into the device container
+        device_container:add_fx_to_container(modulator, -1)  -- Add at end
+
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Modulator to Device", -1)
+
+        refresh_fx_list()
+        return modulator
+    end
+
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Add Modulator to Device", -1)
+    return nil
 end
 
 -- Use fx_utils module for is_modulator_fx
@@ -1770,7 +1800,6 @@ local function main()
             -- Layout dimensions
             local browser_w = 260
             local avail_w, avail_h = ctx:get_content_region_avail()
-            local chain_w = avail_w - browser_w - 10
 
             -- Plugin Browser (fixed left)
             ctx:push_style_color(imgui.Col.ChildBg(), 0x1E1E22FF)
@@ -1783,6 +1812,20 @@ local function main()
             ctx:pop_style_color()
 
             ctx:same_line()
+
+            -- Modulator Grid Panel (between browser and device chain)
+            local modulator_panel_w = modulator_grid_panel.draw(ctx, state, {
+                add_modulator_to_device = add_modulator_to_device,
+                delete_modulator = function(modulator)
+                    modulator:delete()
+                end,
+                refresh_fx_list = refresh_fx_list,
+            })
+
+            ctx:same_line()
+
+            -- Calculate remaining width for device chain
+            local chain_w = avail_w - browser_w - modulator_panel_w - 20
 
             -- Device Chain (horizontal scroll, center area)
             ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1EFF)
