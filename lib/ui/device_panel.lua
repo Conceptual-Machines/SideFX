@@ -830,22 +830,23 @@ function M.draw(ctx, fx, opts)
 
                 -- Show expanded modulator parameters
                 if expanded_slot_idx ~= nil then
-                    ctx:separator()
-                    ctx:spacing()
-                    ctx:text(string.format("Expanded: Slot %d", expanded_slot_idx))
-                    ctx:spacing()
+                    r.ShowConsoleMsg(string.format("\n=== MODULATOR DEBUG ===\n"))
+                    r.ShowConsoleMsg(string.format("Expanded slot: %d\n", expanded_slot_idx))
+                    r.ShowConsoleMsg(string.format("Modulators table size: %d\n", #modulators))
 
                     local expanded_modulator = modulators[expanded_slot_idx + 1]
-                    if expanded_modulator then
-                        ctx:text("Has modulator")
-                        ctx:separator()
-                        ctx:spacing()
+                    r.ShowConsoleMsg(string.format("expanded_modulator exists: %s\n", tostring(expanded_modulator ~= nil)))
 
+                    if expanded_modulator then
                         -- Get parameter values safely
                         local ok, param_count = pcall(function() return expanded_modulator:get_param_count() end)
-                        ctx:text(string.format("Param check: ok=%s, count=%s", tostring(ok), tostring(param_count)))
+                        r.ShowConsoleMsg(string.format("get_param_count ok: %s\n", tostring(ok)))
+                        r.ShowConsoleMsg(string.format("param_count: %s\n", tostring(param_count)))
+
                         if ok and param_count and param_count > 0 then
-                            ctx:text("SHOULD SEE CONTROLS BELOW")
+                            r.ShowConsoleMsg(">>> RENDERING CONTROLS\n")
+
+                            ctx:separator()
                             ctx:spacing()
                             -- Get available width for controls
                             local control_width = ctx:get_content_region_avail() - 8  -- Small padding
