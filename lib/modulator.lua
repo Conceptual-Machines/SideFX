@@ -171,14 +171,33 @@ function M.create_param_link(mod_fx, target_fx, target_param_idx)
     local mod_fx_idx = mod_fx_obj.pointer
     local target_fx_idx = target_fx_obj.pointer
 
-    r.ShowConsoleMsg(string.format("Creating plink: mod_idx=%d, target_idx=%d, param=%d\n",
-        mod_fx_idx, target_fx_idx, target_param_idx))
+    -- Determine the plink effect index to use
+    -- If both FX are in the same container, use LOCAL index (position within container)
+    -- Otherwise, use the global encoded index
+    local plink_effect_idx = mod_fx_idx
+
+    if target_parent then
+        -- Both FX are now in the same container - find modulator's LOCAL position
+        local children = target_parent:get_container_children()
+        local mod_guid = mod_fx_obj:get_guid()
+
+        for i, child in ipairs(children) do
+            if child:get_guid() == mod_guid then
+                plink_effect_idx = i - 1  -- Convert to 0-based index
+                r.ShowConsoleMsg(string.format("Using LOCAL index %d for modulator in container\n", plink_effect_idx))
+                break
+            end
+        end
+    end
+
+    r.ShowConsoleMsg(string.format("Creating plink: mod_idx=%d (plink_effect=%d), target_idx=%d, param=%d\n",
+        mod_fx_idx, plink_effect_idx, target_fx_idx, target_param_idx))
 
     local plink_prefix = string.format("param.%d.plink.", target_param_idx)
 
     -- Create the parameter link
     local ok1 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "active", "1")
-    local ok2 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "effect", tostring(mod_fx_idx))
+    local ok2 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "effect", tostring(plink_effect_idx))
     local ok3 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "param", tostring(M.MOD_OUTPUT_PARAM))
 
     r.ShowConsoleMsg(string.format("Plink result: ok1=%s ok2=%s ok3=%s\n",
@@ -189,7 +208,7 @@ function M.create_param_link(mod_fx, target_fx, target_param_idx)
         local _, actual_effect = r.TrackFX_GetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "effect")
         local _, actual_param = r.TrackFX_GetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "param")
         r.ShowConsoleMsg(string.format("Plink verification: effect=%s, param=%s (expected effect=%d, param=%d)\n",
-            actual_effect or "nil", actual_param or "nil", mod_fx_idx, M.MOD_OUTPUT_PARAM))
+            actual_effect or "nil", actual_param or "nil", plink_effect_idx, M.MOD_OUTPUT_PARAM))
 
         -- Also verify the target FX and parameter after moving
         local final_target_fx = state.track:get_track_fx(target_fx_idx)
