@@ -67,7 +67,7 @@ end
 --------------------------------------------------------------------------------
 
 --- Get list of FX that can be modulated.
--- Excludes modulators and containers.
+-- Excludes modulators, containers, and internal SideFX components.
 -- @return table Array of {fx, fx_idx, name, params}
 function M.get_linkable_fx()
     if not state.track then return {} end
@@ -75,8 +75,15 @@ function M.get_linkable_fx()
     for fx_info in state.track:iter_all_fx_flat() do
         local fx = fx_info.fx
         local name = fx:get_name()
-        -- Skip modulators and containers
-        if name and not name:find(M.MODULATOR_JSFX) and not name:find("SideFX Modulator") and not name:find("Container") then
+        -- Skip SideFX internal components (modulators, containers, utilities, mixers)
+        local is_internal = name and (
+            name:find("SideFX Modulator") or
+            name:find("SideFX_Modulator") or
+            name:find("SideFX_Utility") or
+            name:find("SideFX_Mixer") or
+            name:find("Container")
+        )
+        if name and not is_internal then
             local params = {}
             local param_count = fx:get_num_params()
             for p = 0, param_count - 1 do
@@ -102,26 +109,26 @@ end
 -- @return boolean Success
 function M.create_param_link(mod_fx, target_fx, target_param_idx)
     if not state.track then return false end
-    
+
     -- Support both TrackFX objects and raw indices for backwards compatibility
     local mod_fx_idx = type(mod_fx) == "number" and mod_fx or mod_fx.pointer
     local target_fx_obj = type(target_fx) == "number" and state.track:get_track_fx(target_fx) or target_fx
-    
+
     if not target_fx_obj then return false end
-    
+
     local plink_prefix = string.format("param.%d.plink.", target_param_idx)
-    
+
     -- Use ReaWrap methods
     local ok1 = target_fx_obj:set_named_config_param(plink_prefix .. "active", "1")
     local ok2 = target_fx_obj:set_named_config_param(plink_prefix .. "effect", tostring(mod_fx_idx))
     local ok3 = target_fx_obj:set_named_config_param(plink_prefix .. "param", tostring(M.MOD_OUTPUT_PARAM))
-    
+
     if not (ok1 and ok2 and ok3) then
-        r.ShowConsoleMsg(string.format("Plink failed: mod=%d param=%d (ok: %s %s %s)\n", 
-            mod_fx_idx, target_param_idx, 
+        r.ShowConsoleMsg(string.format("Plink failed: mod=%d param=%d (ok: %s %s %s)\n",
+            mod_fx_idx, target_param_idx,
             tostring(ok1), tostring(ok2), tostring(ok3)))
     end
-    
+
     return ok1 and ok2 and ok3
 end
 
@@ -130,10 +137,10 @@ end
 -- @param target_param_idx number Target parameter index
 function M.remove_param_link(target_fx, target_param_idx)
     if not state.track then return end
-    
+
     local target_fx_obj = type(target_fx) == "number" and state.track:get_track_fx(target_fx) or target_fx
     if not target_fx_obj then return end
-    
+
     local plink_prefix = string.format("param.%d.plink.", target_param_idx)
     target_fx_obj:set_named_config_param(plink_prefix .. "active", "0")
 end
@@ -145,7 +152,7 @@ function M.get_modulator_links(mod_fx)
     if not state.track then return {} end
     local links = {}
     local mod_fx_idx = type(mod_fx) == "number" and mod_fx or mod_fx.pointer
-    
+
     for fx_info in state.track:iter_all_fx_flat() do
         local fx = fx_info.fx
         local fx_name = fx:get_name()
@@ -186,4 +193,3 @@ function M.is_modulator_fx(fx)
 end
 
 return M
-
