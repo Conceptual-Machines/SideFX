@@ -1,5 +1,10 @@
 # SideFX
 
+[![Release](https://github.com/Conceptual-Machines/SideFX/actions/workflows/release.yml/badge.svg)](https://github.com/Conceptual-Machines/SideFX/actions/workflows/release.yml)
+[![Tests](https://github.com/Conceptual-Machines/SideFX/actions/workflows/tests.yml/badge.svg)](https://github.com/Conceptual-Machines/SideFX/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](https://github.com/Conceptual-Machines/SideFX/releases)
+
 Smart FX container management for REAPER 7+.
 
 ## Features
@@ -11,9 +16,12 @@ Smart FX container management for REAPER 7+.
 
 ## Requirements
 
-- REAPER 7.0+
-- [ReaImGui](https://forum.cockos.com/showthread.php?t=250419) extension
-- [ReaWrap](https://github.com/Conceptual-Machines/ReaWrap) library
+- **REAPER 7.0+**
+- **[ReaWrap](https://github.com/Conceptual-Machines/ReaWrap) >= 0.7.3** - OOP wrapper for ReaScript
+- **[ReaImGui](https://forum.cockos.com/showthread.php?t=250419)** - ImGui bindings for REAPER
+- **[EmojImGui](https://github.com/talagan/EmojImGui)** (talagan_EmojImGui) - Emoji/icon support for ReaImGui
+
+All dependencies are available via ReaPack and will be installed automatically.
 
 ## Installation
 
