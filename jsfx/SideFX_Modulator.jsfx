@@ -91,7 +91,13 @@ cap_mode = 0;
 last_mouse_cap = 0;
 drag_start_x = 0;
 drag_start_y = 0;
+
+// Delete state
 node_x = 0;
+min_x_idx = 0;
+max_x_idx = 0;
+min_x_val = 0;
+max_x_val = 0;
 
 // Get X value from slider
 function get_x(i) (
@@ -506,10 +512,27 @@ left_click ? (
 
 right_click && !last_right && mouse_in_area ? (
   click_node = find_nearest(norm_mx, norm_my, node_threshold);
-  // Allow deletion if: not at visual endpoints (X=0 or X=1) and have more than 2 points
   click_node >= 0 && slider30 > 2 ? (
-    node_x = get_x(click_node);
-    node_x > 0.01 && node_x < 0.99 ? remove_node(click_node);
+    // Find indices of leftmost and rightmost points
+    min_x_idx = 0;
+    max_x_idx = 0;
+    min_x_val = get_x(0);
+    max_x_val = get_x(0);
+    i = 1;
+    loop(slider30 - 1,
+      node_x = get_x(i);
+      node_x < min_x_val ? (
+        min_x_val = node_x;
+        min_x_idx = i;
+      );
+      node_x > max_x_val ? (
+        max_x_val = node_x;
+        max_x_idx = i;
+      );
+      i += 1;
+    );
+    // Allow deletion if not leftmost or rightmost point
+    click_node != min_x_idx && click_node != max_x_idx ? remove_node(click_node);
   );
 );
 
