@@ -485,58 +485,72 @@ end
 -- @param track Track object
 -- @return TrackFX|nil Modulator FX object or nil on failure
 local function add_modulator_to_device(device_container, modulator_type, track)
-    if not track or not device_container then
-        r.ShowConsoleMsg("SideFX: add_modulator_to_device - missing track or container\n")
-        return nil
-    end
-
-    -- Verify it's a container
-    if not device_container:is_container() then
-        r.ShowConsoleMsg("SideFX: add_modulator_to_device - device_container is not a container\n")
-        return nil
-    end
+    if not track or not device_container then return nil end
+    if not device_container:is_container() then return nil end
 
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
 
-    -- Add the modulator JSFX at track level first
-    local modulator = track:add_fx_by_name(modulator_type.jsfx, false, -1)
-
-    if modulator and modulator.pointer >= 0 then
-        -- Save the GUID before moving (pointer will change)
-        local mod_guid = modulator:get_guid()
-        r.ShowConsoleMsg("SideFX: Adding modulator " .. mod_guid .. " to container\n")
-
-        -- Move the modulator into the device container
-        local ok_move = pcall(function()
-            device_container:add_fx_to_container(modulator, -1)
-        end)
-
-        if not ok_move then
-            r.ShowConsoleMsg("SideFX: Failed to move modulator into container\n")
-            r.PreventUIRefresh(-1)
-            r.Undo_EndBlock("SideFX: Add Modulator to Device", -1)
-            return nil
-        end
-
-        -- Refind the modulator by GUID after moving (pointer changed)
-        local moved_modulator = track:find_fx_by_guid(mod_guid)
-
-        if moved_modulator then
-            r.ShowConsoleMsg("SideFX: Modulator added successfully, new pointer: " .. moved_modulator.pointer .. "\n")
-        else
-            r.ShowConsoleMsg("SideFX: Could not refind modulator after move\n")
-        end
-
+    -- Get container GUID before operations (GUID is stable)
+    local container_guid = device_container:get_guid()
+    if not container_guid then
         r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Modulator to Device", -1)
-
-        return moved_modulator
+        r.Undo_EndBlock("SideFX: Add Modulator to Device (failed)", -1)
+        return nil
     end
+
+    -- Add modulator JSFX at track level first
+    local modulator = track:add_fx_by_name(modulator_type.jsfx, false, -1)
+    if not modulator or modulator.pointer < 0 then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Modulator to Device (failed)", -1)
+        return nil
+    end
+
+    local mod_guid = modulator:get_guid()
+
+    -- Refind container by GUID (important for nested containers)
+    local fresh_container = track:find_fx_by_guid(container_guid)
+    if not fresh_container then
+        if modulator then modulator:delete() end
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Modulator to Device (container lost)", -1)
+        return nil
+    end
+
+    -- Refresh pointer for deeply nested containers
+    if fresh_container.pointer and fresh_container.pointer >= 0x2000000 and fresh_container.refresh_pointer then
+        fresh_container:refresh_pointer()
+    end
+
+    -- Refind modulator by GUID
+    modulator = track:find_fx_by_guid(mod_guid)
+    if not modulator then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Modulator to Device (modulator lost)", -1)
+        return nil
+    end
+
+    -- Get insert position (append to end of container)
+    local insert_pos = fresh_container:get_container_child_count()
+
+    -- Move modulator into container
+    local success = fresh_container:add_fx_to_container(modulator, insert_pos)
+
+    if not success then
+        if modulator then modulator:delete() end
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Modulator to Device (move failed)", -1)
+        return nil
+    end
+
+    -- Refind modulator after move (pointer changed)
+    local moved_modulator = track:find_fx_by_guid(mod_guid)
 
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Add Modulator to Device", -1)
-    return nil
+
+    return moved_modulator
 end
 
 --------------------------------------------------------------------------------
