@@ -135,6 +135,28 @@ local function add_modulator_to_device(device_container, modulator_jsfx_name, tr
     -- Refind modulator after move
     local moved_modulator = track:find_fx_by_guid(mod_guid)
 
+    -- Name the modulator with hierarchical convention
+    if moved_modulator then
+        local naming = require('lib.naming')
+
+        -- Extract hierarchical path from device container
+        local device_path_str = naming.extract_path_from_name(fresh_container:get_name())
+
+        if device_path_str then
+            -- Count existing modulators in this device to get next index
+            local modulator_count = 0
+            for child in fresh_container:iter_container_children() do
+                if fx_utils.is_modulator_fx(child) then
+                    modulator_count = modulator_count + 1
+                end
+            end
+
+            -- Build modulator name using general hierarchical function
+            local mod_name = naming.build_hierarchical_name(device_path_str, "modulator", modulator_count, "SideFX Modulator")
+            moved_modulator:set_named_config_param("renamed_name", mod_name)
+        end
+    end
+
     r.PreventUIRefresh(-1)
 
     return moved_modulator
@@ -331,6 +353,55 @@ local function test_modulator_in_nested_device()
     assert.equals(1, #modulators, "Should find 1 modulator in nested device")
 end
 
+local function test_modulator_hierarchical_naming()
+    assert.section("Modulator hierarchical naming")
+
+    clear_track_fx()
+
+    -- Test 1: Standalone device modulator naming
+    local device = test_track:add_fx_by_name("Container", false, -1)
+    device:set_named_config_param("renamed_name", "D1: TestDevice")
+    local plugin = test_track:add_fx_by_name("ReaEQ", false, -1)
+    device:add_fx_to_container(plugin, 0)
+
+    local mod1 = add_modulator_to_device(device, "JS:SideFX/SideFX_Modulator", test_track)
+    assert.truthy(mod1, "Should create first modulator")
+
+    if mod1 then
+        local mod_name = mod1:get_name()
+        assert.contains(mod_name, "D1_M1", "First modulator should be named D1_M1")
+        assert.contains(mod_name, "SideFX Modulator", "Modulator name should contain 'SideFX Modulator'")
+
+        -- Add second modulator
+        local mod2 = add_modulator_to_device(device, "JS:SideFX/SideFX_Modulator", test_track)
+        assert.truthy(mod2, "Should create second modulator")
+
+        if mod2 then
+            local mod2_name = mod2:get_name()
+            assert.contains(mod2_name, "D1_M2", "Second modulator should be named D1_M2")
+        end
+    end
+
+    clear_track_fx()
+
+    -- Test 2: Nested device modulator naming (in rack chain)
+    local rack = rack_module.add_rack_to_track()
+    local chain_plugin = { full_name = "ReaComp", name = "ReaComp" }
+    local chain = rack_module.add_chain_to_rack(rack, chain_plugin)
+    local device_plugin = { full_name = "ReaEQ", name = "ReaEQ" }
+    local nested_device = rack_module.add_device_to_chain(chain, device_plugin)
+
+    local nested_mod = add_modulator_to_device(nested_device, "JS:SideFX/SideFX_Modulator", test_track)
+    assert.truthy(nested_mod, "Should create modulator in nested device")
+
+    if nested_mod then
+        local nested_mod_name = nested_mod:get_name()
+        -- Should be something like "R1_C1_D2_M1: SideFX Modulator"
+        assert.contains(nested_mod_name, "_M1", "Nested modulator should have _M1 suffix")
+        assert.contains(nested_mod_name, "SideFX Modulator", "Nested modulator name should contain 'SideFX Modulator'")
+    end
+end
+
 --------------------------------------------------------------------------------
 -- Main Test Runner
 --------------------------------------------------------------------------------
@@ -349,6 +420,7 @@ local function run_all_tests()
     test_modulator_not_at_track_level()
     test_delete_modulator()
     test_modulator_in_nested_device()
+    test_modulator_hierarchical_naming()
 
     cleanup_test_track()
 

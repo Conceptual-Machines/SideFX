@@ -41,6 +41,7 @@ These tests use mocked ReaWrap classes and don't require REAPER to be running.
 
 **Test Coverage:**
 - Naming conventions and parsing
+- **Hierarchical naming functions** (general path extraction and name building)
 - Pattern matching
 - Basic rack operations
 - **Recursive container operations** (path building, nested additions)
@@ -91,6 +92,7 @@ Integration tests must be run inside REAPER as ReaScript actions. They test actu
 - Modulator in nested device (Rack → Chain → Device)
 - GUID-based refinding after container operations
 - Parent-child relationship verification
+- Hierarchical naming convention (D1_M1, R1_C1_D1_M1, etc.)
 
 ## Test Utilities
 

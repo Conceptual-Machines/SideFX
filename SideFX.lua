@@ -691,14 +691,41 @@ local function add_modulator_to_device(device_container, modulator_type)
     local modulator = state.track:add_fx_by_name(modulator_type.jsfx, false, -1)
 
     if modulator and modulator.pointer >= 0 then
+        local mod_guid = modulator:get_guid()
+
         -- Move the modulator into the device container
         device_container:add_fx_to_container(modulator, -1)  -- Add at end
+
+        -- Refind modulator after move
+        local moved_modulator = state.track:find_fx_by_guid(mod_guid)
+
+        -- Name the modulator with hierarchical convention
+        if moved_modulator then
+            local naming = require('lib.naming')
+
+            -- Extract hierarchical path from device container
+            local device_path_str = naming.extract_path_from_name(device_container:get_name())
+
+            if device_path_str then
+                -- Count existing modulators in this device to get next index
+                local modulator_count = 0
+                for child in device_container:iter_container_children() do
+                    if fx_utils.is_modulator_fx(child) then
+                        modulator_count = modulator_count + 1
+                    end
+                end
+
+                -- Build modulator name using general hierarchical function
+                local mod_name = naming.build_hierarchical_name(device_path_str, "modulator", modulator_count, "SideFX Modulator")
+                moved_modulator:set_named_config_param("renamed_name", mod_name)
+            end
+        end
 
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Modulator to Device", -1)
 
         refresh_fx_list()
-        return modulator
+        return moved_modulator or modulator
     end
 
     r.PreventUIRefresh(-1)

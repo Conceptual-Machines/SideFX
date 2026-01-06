@@ -547,6 +547,28 @@ local function add_modulator_to_device(device_container, modulator_type, track)
     -- Refind modulator after move (pointer changed)
     local moved_modulator = track:find_fx_by_guid(mod_guid)
 
+    -- Name the modulator with hierarchical convention
+    if moved_modulator then
+        local naming = require('lib.naming')
+
+        -- Extract hierarchical path from device container
+        local device_path_str = naming.extract_path_from_name(fresh_container:get_name())
+
+        if device_path_str then
+            -- Count existing modulators in this device to get next index
+            local modulator_count = 0
+            for child in fresh_container:iter_container_children() do
+                if fx_utils.is_modulator_fx(child) then
+                    modulator_count = modulator_count + 1
+                end
+            end
+
+            -- Build modulator name using general hierarchical function
+            local mod_name = naming.build_hierarchical_name(device_path_str, "modulator", modulator_count, "SideFX Modulator")
+            moved_modulator:set_named_config_param("renamed_name", mod_name)
+        end
+    end
+
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Add Modulator to Device", -1)
 
@@ -579,6 +601,11 @@ local function render_modulator_controls_window(ctx, guid, state_guid, modulator
     -- Render modulator controls window
     local window_open = true
     local window_flags = imgui.WindowFlags.AlwaysAutoResize()
+    -- Add NoDocking flag if available (prevents flickering when docking)
+    local ok, no_docking_flag = pcall(function() return r.ImGui_WindowFlags_NoDocking() end)
+    if ok and no_docking_flag then
+        window_flags = window_flags | no_docking_flag
+    end
     local visible, should_close = ctx:begin_window("Modulator Controls##" .. guid, window_open, window_flags)
 
     if visible then
@@ -595,22 +622,45 @@ local function render_modulator_controls_window(ctx, guid, state_guid, modulator
                 ctx:pop_style_color()
                 ctx:separator()
 
-                -- Get Rate Hz and Sync Rate parameter values
-                local tempo_mode = expanded_modulator:get_param(0)  -- slider1: Tempo Mode (0=Free, 1=Sync)
-                local rate_hz = expanded_modulator:get_param(1)     -- slider2: Rate (Hz)
-                local sync_rate = expanded_modulator:get_param(2)   -- slider3: Sync Rate
+                -- Get Rate Hz and Sync Rate parameter values (safely)
+                local ok_t, tempo_mode = pcall(function() return expanded_modulator:get_param_normalized(0) end)  -- slider1: Tempo Mode (0=Free, 1=Sync)
+                local ok_r, rate_hz = pcall(function() return expanded_modulator:get_param_normalized(1) end)     -- slider2: Rate (Hz)
+                local ok_s, sync_rate = pcall(function() return expanded_modulator:get_param_normalized(2) end)   -- slider3: Sync Rate
+
+                if not ok_t then tempo_mode = 0 end
+                if not ok_r then rate_hz = 0.5 end
+                if not ok_s then sync_rate = 5 / 17 end  -- Default to 1/4
 
                 -- Tempo Mode toggle (Free/Sync)
                 local is_sync_mode = (tempo_mode > 0.5)
-                if ctx:button(is_sync_mode and "Sync" or "Free", control_width / 2 - 2, 24) then
-                    expanded_modulator:set_param(0, is_sync_mode and 0.0 or 1.0)
+
+                -- Style the active button differently
+                local imgui = require('imgui')
+                -- Free button: highlight when NOT in sync mode
+                if not is_sync_mode then
+                    ctx:push_style_color(imgui.Col.Button(), 0x4488AAFF)
+                else
+                    ctx:push_style_color(imgui.Col.Button(), 0x333333FF)
+                end
+                if ctx:button("Free", control_width / 2 - 2, 24) then
+                    expanded_modulator:set_param_normalized(0, 0.0)
                     interacted = true
                 end
+                ctx:pop_style_color()
+
                 ctx:same_line()
-                if ctx:button(is_sync_mode and "Free" or "Sync", control_width / 2 - 2, 24) then
-                    expanded_modulator:set_param(0, is_sync_mode and 0.0 or 1.0)
+
+                -- Sync button: highlight when in sync mode
+                if is_sync_mode then
+                    ctx:push_style_color(imgui.Col.Button(), 0x4488AAFF)
+                else
+                    ctx:push_style_color(imgui.Col.Button(), 0x333333FF)
+                end
+                if ctx:button("Sync", control_width / 2 - 2, 24) then
+                    expanded_modulator:set_param_normalized(0, 1.0)
                     interacted = true
                 end
+                ctx:pop_style_color()
 
                 -- Conditional controls based on mode
                 if is_sync_mode then
@@ -627,11 +677,8 @@ local function render_modulator_controls_window(ctx, guid, state_guid, modulator
                         for i, name in ipairs(sync_rate_names) do
                             local is_selected = (i - 1 == current_sync_idx)
                             if ctx:selectable(name, is_selected) then
-                                expanded_modulator:set_param(2, (i - 1) / (#sync_rate_names - 1))
+                                expanded_modulator:set_param_normalized(2, (i - 1) / (#sync_rate_names - 1))
                                 interacted = true
-                            end
-                            if is_selected then
-                                ctx:set_item_default_focus()
                             end
                         end
                         ctx:end_combo()
@@ -644,7 +691,7 @@ local function render_modulator_controls_window(ctx, guid, state_guid, modulator
                     local rate_hz_actual = rate_hz_min + rate_hz * (rate_hz_max - rate_hz_min)
                     local changed, new_hz = ctx:slider_double("Rate (Hz)##rate_hz", rate_hz_actual, rate_hz_min, rate_hz_max, "%.2f Hz")
                     if changed then
-                        expanded_modulator:set_param(1, (new_hz - rate_hz_min) / (rate_hz_max - rate_hz_min))
+                        expanded_modulator:set_param_normalized(1, (new_hz - rate_hz_min) / (rate_hz_max - rate_hz_min))
                         interacted = true
                     end
                 end
@@ -658,12 +705,13 @@ local function render_modulator_controls_window(ctx, guid, state_guid, modulator
                 ctx:pop_style_color()
                 ctx:separator()
 
-                local phase = expanded_modulator:get_param(4)  -- slider5: Phase
+                local ok_p, phase = pcall(function() return expanded_modulator:get_param_normalized(4) end)  -- slider5: Phase
+                if not ok_p then phase = 0 end
                 ctx:set_next_item_width(control_width)
                 local phase_deg = phase * 360.0
                 local changed, new_phase = ctx:slider_double("##phase", phase_deg, 0, 360, "%.0f°")
                 if changed then
-                    expanded_modulator:set_param(4, new_phase / 360.0)
+                    expanded_modulator:set_param_normalized(4, new_phase / 360.0)
                     interacted = true
                 end
 
@@ -676,12 +724,13 @@ local function render_modulator_controls_window(ctx, guid, state_guid, modulator
                 ctx:pop_style_color()
                 ctx:separator()
 
-                local depth = expanded_modulator:get_param(5)  -- slider6: Depth
+                local ok_d, depth = pcall(function() return expanded_modulator:get_param_normalized(5) end)  -- slider6: Depth
+                if not ok_d then depth = 1.0 end
                 ctx:set_next_item_width(control_width)
                 local depth_pct = depth * 100.0
                 local changed, new_depth = ctx:slider_double("##depth", depth_pct, 0, 100, "%.0f%%")
                 if changed then
-                    expanded_modulator:set_param(5, new_depth / 100.0)
+                    expanded_modulator:set_param_normalized(5, new_depth / 100.0)
                     interacted = true
                 end
 
@@ -694,7 +743,8 @@ local function render_modulator_controls_window(ctx, guid, state_guid, modulator
                 ctx:pop_style_color()
                 ctx:separator()
 
-                local trigger_mode = expanded_modulator:get_param(19)  -- slider20: Trigger Mode
+                local ok_tm, trigger_mode = pcall(function() return expanded_modulator:get_param_normalized(19) end)  -- slider20: Trigger Mode
+                if not ok_tm then trigger_mode = 0 end
                 ctx:set_next_item_width(control_width)
                 local trigger_names = {"Free", "Transport", "MIDI", "Audio"}
                 local current_trigger_idx = math.floor(trigger_mode * 3 + 0.5)
@@ -703,11 +753,8 @@ local function render_modulator_controls_window(ctx, guid, state_guid, modulator
                     for i, name in ipairs(trigger_names) do
                         local is_selected = (i - 1 == current_trigger_idx)
                         if ctx:selectable(name, is_selected) then
-                            expanded_modulator:set_param(19, (i - 1) / 3)
+                            expanded_modulator:set_param_normalized(19, (i - 1) / 3)
                             interacted = true
-                        end
-                        if is_selected then
-                            ctx:set_item_default_focus()
                         end
                     end
                     ctx:end_combo()
@@ -722,17 +769,35 @@ local function render_modulator_controls_window(ctx, guid, state_guid, modulator
                 ctx:pop_style_color()
                 ctx:separator()
 
-                local lfo_mode = expanded_modulator:get_param(27)  -- slider28: LFO Mode
+                local ok_lfo, lfo_mode = pcall(function() return expanded_modulator:get_param_normalized(27) end)  -- slider28: LFO Mode
+                if not ok_lfo then lfo_mode = 0 end
                 local is_one_shot = (lfo_mode > 0.5)
-                if ctx:button(is_one_shot and "One Shot" or "Loop", control_width / 2 - 2, 24) then
-                    expanded_modulator:set_param(27, is_one_shot and 0.0 or 1.0)
+
+                -- Style Loop button
+                if not is_one_shot then
+                    ctx:push_style_color(imgui.Col.Button(), 0x4488AAFF)
+                else
+                    ctx:push_style_color(imgui.Col.Button(), 0x333333FF)
+                end
+                if ctx:button("Loop", control_width / 2 - 2, 24) then
+                    expanded_modulator:set_param_normalized(27, 0.0)
                     interacted = true
                 end
+                ctx:pop_style_color()
+
                 ctx:same_line()
-                if ctx:button(is_one_shot and "Loop" or "One Shot", control_width / 2 - 2, 24) then
-                    expanded_modulator:set_param(27, is_one_shot and 0.0 or 1.0)
+
+                -- Style One Shot button
+                if is_one_shot then
+                    ctx:push_style_color(imgui.Col.Button(), 0x4488AAFF)
+                else
+                    ctx:push_style_color(imgui.Col.Button(), 0x333333FF)
+                end
+                if ctx:button("One Shot", control_width / 2 - 2, 24) then
+                    expanded_modulator:set_param_normalized(27, 1.0)
                     interacted = true
                 end
+                ctx:pop_style_color()
 
                 ctx:spacing()
                 ctx:spacing()
@@ -748,32 +813,35 @@ local function render_modulator_controls_window(ctx, guid, state_guid, modulator
 
                     if current_trigger == 2 then  -- MIDI trigger mode
                         -- MIDI Note param (slider21)
-                        local midi_note_val = expanded_modulator:get_param(20)
+                        local ok_mn, midi_note_val = pcall(function() return expanded_modulator:get_param_normalized(20) end)
+                        if not ok_mn then midi_note_val = 60 / 127 end  -- Default to middle C
                         ctx:set_next_item_width(control_width)
                         local midi_note = math.floor(midi_note_val * 127 + 0.5)
                         local changed, new_note = ctx:slider_double("MIDI Note##midi_note", midi_note, 0, 127, "%.0f")
                         if changed then
-                            expanded_modulator:set_param(20, math.floor(new_note + 0.5) / 127.0)
+                            expanded_modulator:set_param_normalized(20, math.floor(new_note + 0.5) / 127.0)
                             interacted = true
                         end
 
                         -- MIDI Channel param (slider22)
-                        local midi_chan_val = expanded_modulator:get_param(21)
+                        local ok_mc, midi_chan_val = pcall(function() return expanded_modulator:get_param_normalized(21) end)
+                        if not ok_mc then midi_chan_val = 0 end  -- Default to channel 1
                         ctx:set_next_item_width(control_width)
                         local midi_chan = math.floor(midi_chan_val * 15 + 0.5) + 1
                         local changed, new_chan = ctx:slider_double("MIDI Channel##midi_chan", midi_chan, 1, 16, "%.0f")
                         if changed then
-                            expanded_modulator:set_param(21, (math.floor(new_chan + 0.5) - 1) / 15.0)
+                            expanded_modulator:set_param_normalized(21, (math.floor(new_chan + 0.5) - 1) / 15.0)
                             interacted = true
                         end
                     elseif current_trigger == 3 then  -- Audio trigger mode
                         -- Audio Threshold param (slider23)
-                        local audio_thresh_val = expanded_modulator:get_param(22)
+                        local ok_at, audio_thresh_val = pcall(function() return expanded_modulator:get_param_normalized(22) end)
+                        if not ok_at then audio_thresh_val = 0.5 end  -- Default to -30dB
                         ctx:set_next_item_width(control_width)
                         local audio_thresh_db = -60 + audio_thresh_val * 60
                         local changed, new_thresh = ctx:slider_double("Threshold##audio_thresh", audio_thresh_db, -60, 0, "%.1f dB")
                         if changed then
-                            expanded_modulator:set_param(22, (new_thresh + 60) / 60.0)
+                            expanded_modulator:set_param_normalized(22, (new_thresh + 60) / 60.0)
                             interacted = true
                         end
                     end
@@ -829,7 +897,7 @@ local function render_modulator_controls_window(ctx, guid, state_guid, modulator
                                 end)
 
                                 if ok_name and ok_pname then
-                                    ctx:bullet_text(string.format("%s → %s", target_fx_name, target_param_name))
+                                    ctx:text("• " .. string.format("%s → %s", target_fx_name, target_param_name))
                                     ctx:same_line()
                                     if ctx:button("X##remove_link_" .. i, 20, 20) then
                                         -- Remove link
@@ -1820,17 +1888,21 @@ function M.draw(ctx, fx, opts)
                         -- Draw slot
                         local slot_id = "slot_" .. slot_idx .. "_" .. guid
                         if modulator then
-                            -- Slot has modulator - show name
+                            -- Slot has modulator - show short name (LFO1, LFO2, etc.)
                             local ok_name, mod_name = pcall(function() return modulator:get_name() end)
                             if not ok_name then mod_name = "Modulator" end
-                            mod_name = mod_name:gsub("^JS: SideFX/", "")  -- Strip prefix
+
+                            -- Extract modulator index from hierarchical name (e.g., "R1_C1_D1_M1: ..." -> "LFO1")
+                            local naming = require('lib.naming')
+                            local mod_idx = naming.parse_modulator_index(mod_name)
+                            local display_name = mod_idx and ("LFO" .. mod_idx) or "LFO"
 
                             local is_expanded = (expanded_slot_idx == slot_idx)
                             if is_expanded then
                                 ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                             end
 
-                            if ctx:button(mod_name .. "##" .. slot_id, slot_width, slot_height) then
+                            if ctx:button(display_name .. "##" .. slot_id, slot_width, slot_height) then
                                 -- Toggle modulator controls window
                                 if expanded_mod_slot[state_guid] == slot_idx then
                                     expanded_mod_slot[state_guid] = nil
