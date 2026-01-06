@@ -855,9 +855,8 @@ function M.draw(ctx, fx, opts)
                         if ok and param_count and param_count > 0 then
                             ctx:separator()
                             ctx:spacing()
-                            -- Set control width slightly narrower than grid for right padding
-                            -- 4 cells × 60px + 3 gaps × 4px = 252px, minus 12px padding = 240px
-                            local control_width = 240
+                            -- Set control width shorter for compact layout
+                            local control_width = 180
 
                             -- Rate section
                             ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
