@@ -394,6 +394,7 @@ phase >= 1 ? phase -= 1;
 raw_lfo = eval_spline(phase);
 final_output = raw_lfo * slider6 * env_value;
 slider4 = final_output;
+slider_automate(slider4);
 
 @gfx 500 400
 gfx_clear = 0x1a1a1a;
