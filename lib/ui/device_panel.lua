@@ -737,6 +737,9 @@ function M.draw(ctx, fx, opts)
                 local modulators = get_device_modulators(container)
                 local expanded_slot_idx = expanded_mod_slot[state_guid]
 
+                -- Require imgui for Col constants
+                local imgui = require('imgui')
+
                 -- 2×4 grid of modulator slots
                 for row = 0, 3 do
                     for col = 0, 1 do
