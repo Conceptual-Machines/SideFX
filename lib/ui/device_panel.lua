@@ -756,6 +756,12 @@ function M.draw(ctx, fx, opts)
                 local state_module = require('lib.state')
                 local state = state_module.state
 
+                -- Calculate slot dimensions to use available width
+                local avail_width = ctx:get_content_region_avail()
+                local slot_padding = 4  -- Padding between slots
+                local slot_width = (avail_width - slot_padding) / 2  -- 2 columns
+                local slot_height = cfg.mod_slot_height
+
                 -- 2×4 grid of modulator slots
                 for row = 0, 3 do
                     for col = 0, 1 do
@@ -779,7 +785,7 @@ function M.draw(ctx, fx, opts)
                                 ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                             end
 
-                            if ctx:button(mod_name .. "##" .. slot_id, cfg.mod_slot_width, cfg.mod_slot_height) then
+                            if ctx:button(mod_name .. "##" .. slot_id, slot_width, slot_height) then
                                 -- Toggle expansion
                                 if expanded_mod_slot[state_guid] == slot_idx then
                                     expanded_mod_slot[state_guid] = nil
@@ -814,7 +820,7 @@ function M.draw(ctx, fx, opts)
                             end
                         else
                             -- Empty slot - show + button
-                            if ctx:button("+##" .. slot_id, cfg.mod_slot_width, cfg.mod_slot_height) then
+                            if ctx:button("+##" .. slot_id, slot_width, slot_height) then
                                 -- Show modulator type dropdown (simplified for now - just add Bezier LFO)
                                 local track = opts.track or state.track
                                 if track and container then
@@ -834,22 +840,11 @@ function M.draw(ctx, fx, opts)
 
                 -- Show expanded modulator parameters
                 if expanded_slot_idx ~= nil then
-                    r.ShowConsoleMsg(string.format("\n=== MODULATOR DEBUG ===\n"))
-                    r.ShowConsoleMsg(string.format("Expanded slot: %d\n", expanded_slot_idx))
-                    r.ShowConsoleMsg(string.format("Modulators table size: %d\n", #modulators))
-
                     local expanded_modulator = modulators[expanded_slot_idx + 1]
-                    r.ShowConsoleMsg(string.format("expanded_modulator exists: %s\n", tostring(expanded_modulator ~= nil)))
-
                     if expanded_modulator then
                         -- Get parameter values safely (ReaWrap uses get_num_params, not get_param_count)
                         local ok, param_count = pcall(function() return expanded_modulator:get_num_params() end)
-                        r.ShowConsoleMsg(string.format("get_num_params ok: %s\n", tostring(ok)))
-                        r.ShowConsoleMsg(string.format("param_count: %s\n", tostring(param_count)))
-
                         if ok and param_count and param_count > 0 then
-                            r.ShowConsoleMsg(">>> RENDERING CONTROLS\n")
-
                             ctx:separator()
                             ctx:spacing()
                             -- Get available width for controls
