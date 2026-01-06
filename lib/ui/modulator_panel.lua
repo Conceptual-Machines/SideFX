@@ -90,7 +90,7 @@ local function draw_modulator_params(ctx, mod, state, width)
     if ok_lfo then
         local is_oneshot = lfo_mode > 0.5
 
-        ctx:text("LFO:")
+        ctx:text("Mode:")
         ctx:same_line()
 
         if not is_oneshot then
