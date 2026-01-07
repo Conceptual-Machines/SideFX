@@ -6,6 +6,7 @@ local M = {}
 local r = reaper
 local imgui = require('imgui')
 local state_module = require('lib.state')
+local PARAM = require('lib.modulator_constants')
 
 -- Modulator types
 local MODULATOR_TYPES = {
@@ -332,8 +333,8 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     ctx:pop_style_color()
                     ctx:spacing()
 
-                    -- Trigger Mode dropdown (slider20)
-                    local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(19) end)
+                    -- Trigger Mode dropdown
+                    local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_TRIGGER_MODE) end)
                     if ok_trig then
                         local trigger_modes = {"Free", "Transport", "MIDI", "Audio"}
                         local trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
@@ -341,7 +342,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         if ctx:begin_combo("##trigger_mode_" .. guid, trigger_modes[trig_idx + 1] or "Free") then
                             for i, mode_name in ipairs(trigger_modes) do
                                 if ctx:selectable(mode_name, i - 1 == trig_idx) then
-                                    expanded_modulator:set_param_normalized(19, (i - 1) / 3)
+                                    expanded_modulator:set_param_normalized(PARAM.PARAM_TRIGGER_MODE, (i - 1) / 3)
                                     interacted = true
                                 end
                             end
@@ -357,16 +358,16 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     ctx:pop_style_color()
                     ctx:spacing()
 
-                    -- LFO Mode: Loop/One Shot (slider28)
-                    local ok_lfo_mode, lfo_mode = pcall(function() return expanded_modulator:get_param_normalized(27) end)
+                    -- LFO Mode: Loop/One Shot
+                    local ok_lfo_mode, lfo_mode = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_LFO_MODE) end)
                     if ok_lfo_mode then
                         if ctx:radio_button("Loop##lfo_" .. guid, lfo_mode < 0.5) then
-                            expanded_modulator:set_param_normalized(27, 0)
+                            expanded_modulator:set_param_normalized(PARAM.PARAM_LFO_MODE, 0)
                             interacted = true
                         end
                         ctx:same_line()
                         if ctx:radio_button("One Shot##lfo_" .. guid, lfo_mode >= 0.5) then
-                            expanded_modulator:set_param_normalized(27, 1)
+                            expanded_modulator:set_param_normalized(PARAM.PARAM_LFO_MODE, 1)
                             interacted = true
                         end
                     end
@@ -384,39 +385,39 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         if ok_trig and trig_idx == 2 then
                             -- MIDI trigger mode
                             -- MIDI Source (slider21)
-                            local ok_midi_src, midi_src = pcall(function() return expanded_modulator:get_param_normalized(20) end)
+                            local ok_midi_src, midi_src = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_MIDI_SOURCE) end)
                             if ok_midi_src then
                                 if ctx:radio_button("This Track##midi_src_" .. guid, midi_src < 0.5) then
-                                    expanded_modulator:set_param_normalized(20, 0)
+                                    expanded_modulator:set_param_normalized(PARAM.PARAM_MIDI_SOURCE, 0)
                                     interacted = true
                                 end
                                 ctx:same_line()
                                 if ctx:radio_button("MIDI Bus##midi_src_" .. guid, midi_src >= 0.5) then
-                                    expanded_modulator:set_param_normalized(20, 1)
+                                    expanded_modulator:set_param_normalized(PARAM.PARAM_MIDI_SOURCE, 1)
                                     interacted = true
                                 end
                             end
 
                             -- MIDI Note (slider22)
-                            local ok_note, midi_note = pcall(function() return expanded_modulator:get_param_normalized(21) end)
+                            local ok_note, midi_note = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_MIDI_NOTE) end)
                             if ok_note then
                                 ctx:set_next_item_width(control_width)
                                 local note_val = math.floor(midi_note * 127 + 0.5)
                                 local changed, new_note_val = ctx:slider_int("MIDI Note##note_" .. guid, note_val, 0, 127, note_val == 0 and "Any" or tostring(note_val))
                                 if changed then
-                                    expanded_modulator:set_param_normalized(21, new_note_val / 127)
+                                    expanded_modulator:set_param_normalized(PARAM.PARAM_MIDI_NOTE, new_note_val / 127)
                                     interacted = true
                                 end
                             end
                         elseif ok_trig and trig_idx == 3 then
                             -- Audio trigger mode
                             -- Audio Threshold (slider23)
-                            local ok_thresh, audio_thresh = pcall(function() return expanded_modulator:get_param_normalized(22) end)
+                            local ok_thresh, audio_thresh = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD) end)
                             if ok_thresh then
                                 ctx:set_next_item_width(control_width)
                                 local changed, new_thresh = ctx:slider_double("Threshold##thresh_" .. guid, audio_thresh, 0, 1, "%.2f")
                                 if changed then
-                                    expanded_modulator:set_param_normalized(22, new_thresh)
+                                    expanded_modulator:set_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD, new_thresh)
                                     interacted = true
                                 end
                             end
@@ -425,25 +426,25 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         -- Attack/Release (always show in advanced)
                         if ok_trig and trig_idx > 0 then
                             -- Attack (slider24)
-                            local ok_atk, attack_ms = pcall(function() return expanded_modulator:get_param_normalized(23) end)
+                            local ok_atk, attack_ms = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_ATTACK) end)
                             if ok_atk then
                                 local atk_val = attack_ms * 1999 + 1  -- 1-2000ms
                                 ctx:set_next_item_width(control_width)
                                 local changed, new_atk_val = ctx:slider_double("Attack##atk_" .. guid, atk_val, 1, 2000, "%.0f ms")
                                 if changed then
-                                    expanded_modulator:set_param_normalized(23, (new_atk_val - 1) / 1999)
+                                    expanded_modulator:set_param_normalized(PARAM.PARAM_ATTACK, (new_atk_val - 1) / 1999)
                                     interacted = true
                                 end
                             end
 
                             -- Release (slider25)
-                            local ok_rel, release_ms = pcall(function() return expanded_modulator:get_param_normalized(24) end)
+                            local ok_rel, release_ms = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_RELEASE) end)
                             if ok_rel then
                                 local rel_val = release_ms * 4999 + 1  -- 1-5000ms
                                 ctx:set_next_item_width(control_width)
                                 local changed, new_rel_val = ctx:slider_double("Release##rel_" .. guid, rel_val, 1, 5000, "%.0f ms")
                                 if changed then
-                                    expanded_modulator:set_param_normalized(24, (new_rel_val - 1) / 4999)
+                                    expanded_modulator:set_param_normalized(PARAM.PARAM_RELEASE, (new_rel_val - 1) / 4999)
                                     interacted = true
                                 end
                             end
@@ -482,14 +483,17 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         end
                     end
 
-                    if expected_mod_idx then
+                    if expected_mod_idx ~= nil then
                         -- Check each parameter using ReaWrap's get_param_link_info
                         local ok_params, param_count = pcall(function() return fx:get_num_params() end)
                         if ok_params and param_count then
                             for param_idx = 0, param_count - 1 do
                                 local link_info = fx:get_param_link_info(param_idx)
-                                if link_info and link_info.effect == expected_mod_idx then
-                                    -- This parameter is linked to our modulator
+                                -- Check if linked to our modulator AND using the Output parameter
+                                if link_info and
+                                   link_info.effect == expected_mod_idx and
+                                   link_info.param == PARAM.PARAM_OUTPUT then
+                                    -- This parameter is linked to our modulator's output
                                     local ok_pname, param_name = pcall(function() return fx:get_param_name(param_idx) end)
                                     if ok_pname and param_name then
                                         table.insert(existing_links, {
@@ -563,12 +567,11 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                 if ctx:button("Add Link##" .. guid, control_width, 0) then
                                     -- Create modulation link using ReaWrap's high-level API
                                     local target_param = link_state.param_idx
-                                    local modulator_output_param = 3  -- slider4 (Output) in SideFX_Modulator.jsfx
 
                                     -- Use ReaWrap's create_param_link - it handles all the complexity
                                     local success = target_device:create_param_link(
                                         expanded_modulator,
-                                        modulator_output_param,
+                                        PARAM.PARAM_OUTPUT,  -- Modulator output parameter
                                         target_param,
                                         1.0  -- 100% modulation scale
                                     )
