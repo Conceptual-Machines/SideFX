@@ -9,6 +9,73 @@ local imgui = require('imgui')
 local M = {}
 
 --------------------------------------------------------------------------------
+-- Helper Functions
+--------------------------------------------------------------------------------
+
+--- Draw a single parameter control (label + slider)
+-- @param ctx ImGui context
+-- @param fx ReaWrap FX object
+-- @param param_idx number Parameter index (0-based)
+-- @param precision string Format string for slider (e.g., "%.2f")
+local function draw_param_control(ctx, fx, param_idx, precision)
+    local name = fx:get_param_name(param_idx)
+    local val = fx:get_param_normalized(param_idx) or 0
+    local display_name = (name and name ~= "") and name or ("P" .. (param_idx + 1))
+
+    ctx:push_id(param_idx)
+    ctx:text(display_name)
+    ctx:set_next_item_width(-1)
+    local changed, new_val = ctx:slider_double("##p", val, 0.0, 1.0, precision)
+    if changed then
+        fx:set_param_normalized(param_idx, new_val)
+    end
+    ctx:pop_id()
+end
+
+--- Draw parameters in two-column table layout
+-- @param ctx ImGui context
+-- @param fx ReaWrap FX object
+-- @param param_count number Total number of parameters
+local function draw_params_two_columns(ctx, fx, param_count)
+    local half = math.ceil(param_count / 2)
+
+    if ctx:begin_table("ParamTable", 2) then
+        ctx:table_setup_column("Col1", imgui.TableColumnFlags.WidthStretch())
+        ctx:table_setup_column("Col2", imgui.TableColumnFlags.WidthStretch())
+
+        for row = 0, half - 1 do
+            ctx:table_next_row()
+
+            -- Column 1
+            ctx:table_set_column_index(0)
+            if row < param_count then
+                draw_param_control(ctx, fx, row, "%.2f")
+            end
+
+            -- Column 2
+            ctx:table_set_column_index(1)
+            local j = row + half
+            if j < param_count then
+                draw_param_control(ctx, fx, j, "%.2f")
+            end
+        end
+
+        ctx:end_table()
+    end
+end
+
+--- Draw parameters in single-column layout
+-- @param ctx ImGui context
+-- @param fx ReaWrap FX object
+-- @param param_count number Total number of parameters
+local function draw_params_single_column(ctx, fx, param_count)
+    for i = 0, param_count - 1 do
+        draw_param_control(ctx, fx, i, "%.3f")
+        ctx:spacing()
+    end
+end
+
+--------------------------------------------------------------------------------
 -- FX Detail Panel
 --------------------------------------------------------------------------------
 
@@ -58,68 +125,9 @@ function M.draw(ctx, width, selected_fx_guid, get_fx, get_fx_display_name)
                 local use_two_cols = param_count > 8 and width > 350
 
                 if use_two_cols then
-                    local half = math.ceil(param_count / 2)
-
-                    if ctx:begin_table("ParamTable", 2) then
-                        ctx:table_setup_column("Col1", imgui.TableColumnFlags.WidthStretch())
-                        ctx:table_setup_column("Col2", imgui.TableColumnFlags.WidthStretch())
-
-                        for row = 0, half - 1 do
-                            ctx:table_next_row()
-
-                            ctx:table_set_column_index(0)
-                            local i = row
-                            if i < param_count then
-                                local name = fx:get_param_name(i)
-                                local val = fx:get_param_normalized(i) or 0
-                                local display_name = (name and name ~= "") and name or ("P" .. (i + 1))
-
-                                ctx:push_id(i)
-                                ctx:text(display_name)
-                                ctx:set_next_item_width(-1)
-                                local changed, new_val = ctx:slider_double("##p", val, 0.0, 1.0, "%.2f")
-                                if changed then
-                                    fx:set_param_normalized(i, new_val)
-                                end
-                                ctx:pop_id()
-                            end
-
-                            ctx:table_set_column_index(1)
-                            local j = row + half
-                            if j < param_count then
-                                local name = fx:get_param_name(j)
-                                local val = fx:get_param_normalized(j) or 0
-                                local display_name = (name and name ~= "") and name or ("P" .. (j + 1))
-
-                                ctx:push_id(j)
-                                ctx:text(display_name)
-                                ctx:set_next_item_width(-1)
-                                local changed, new_val = ctx:slider_double("##p", val, 0.0, 1.0, "%.2f")
-                                if changed then
-                                    fx:set_param_normalized(j, new_val)
-                                end
-                                ctx:pop_id()
-                            end
-                        end
-
-                        ctx:end_table()
-                    end
+                    draw_params_two_columns(ctx, fx, param_count)
                 else
-                    for i = 0, param_count - 1 do
-                        local name = fx:get_param_name(i)
-                        local val = fx:get_param_normalized(i) or 0
-                        local display_name = (name and name ~= "") and name or ("Param " .. (i + 1))
-
-                        ctx:push_id(i)
-                        ctx:text(display_name)
-                        ctx:set_next_item_width(-1)
-                        local changed, new_val = ctx:slider_double("##p", val, 0.0, 1.0, "%.3f")
-                        if changed then
-                            fx:set_param_normalized(i, new_val)
-                        end
-                        ctx:spacing()
-                        ctx:pop_id()
-                    end
+                    draw_params_single_column(ctx, fx, param_count)
                 end
                 ctx:end_child()
             end
@@ -130,5 +138,3 @@ function M.draw(ctx, width, selected_fx_guid, get_fx, get_fx_display_name)
 end
 
 return M
-
-
