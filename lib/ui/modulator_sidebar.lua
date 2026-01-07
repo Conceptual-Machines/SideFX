@@ -283,7 +283,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         -- Column 2: Free/Sync buttons
                         ctx:table_set_column_index(1)
                         local ok_tempo, tempo_mode = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_TEMPO_MODE) end)
-                        if ok_tempo and tempo_mode then
+                        if ok_tempo and tempo_mode ~= nil then
                             if ctx:radio_button("Free##tempo_" .. guid, tempo_mode < 0.5) then
                                 expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 0)
                                 interacted = true
@@ -402,7 +402,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
                     -- LFO Mode: Loop/One Shot (discrete parameter)
                     local ok_lfo, lfo_mode = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_LFO_MODE) end)
-                    if ok_lfo and lfo_mode then
+                    if ok_lfo and lfo_mode ~= nil then
                         if ctx:radio_button("Loop##lfo_" .. guid, lfo_mode < 0.5) then
                             expanded_modulator:set_param(PARAM.PARAM_LFO_MODE, 0)
                             interacted = true
@@ -428,7 +428,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             -- MIDI trigger mode
                             -- MIDI Source (slider21 - discrete parameter)
                             local ok_midi, midi_src = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_MIDI_SOURCE) end)
-                            if ok_midi and midi_src then
+                            if ok_midi and midi_src ~= nil then
                                 if ctx:radio_button("This Track##midi_src_" .. guid, midi_src < 0.5) then
                                     expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 0)
                                     interacted = true
