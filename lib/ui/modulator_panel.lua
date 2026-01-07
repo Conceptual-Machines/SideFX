@@ -93,6 +93,113 @@ end
 -- Helper Functions
 --------------------------------------------------------------------------------
 
+--- Draw a dropdown combo control for selecting from options
+-- @param ctx ImGui context
+-- @param fx ReaWrap FX object
+-- @param label string Label to display
+-- @param param_idx number Parameter index in PARAM_MAP
+-- @param options table Array of option labels
+-- @param current_idx number Current selected index (0-based)
+-- @param id_suffix string Unique ID suffix
+-- @param width number Control width
+-- @param normalize_fn function Optional: convert index to normalized value (default: index / #options-1)
+-- @param denormalize_fn function Optional: convert normalized value to index
+local function draw_combo_control(ctx, fx, label, param_idx, options, current_idx, id_suffix, width, normalize_fn, denormalize_fn)
+    ctx:text(label .. ":")
+    ctx:same_line()
+    ctx:set_next_item_width(width)
+    if ctx:begin_combo("##" .. label .. "_" .. id_suffix, options[current_idx + 1]) then
+        for i, option_label in ipairs(options) do
+            if ctx:selectable(option_label, i - 1 == current_idx) then
+                local norm_val = normalize_fn and normalize_fn(i - 1) or ((i - 1) / (#options - 1))
+                pcall(function() fx:set_param_normalized(param_idx, norm_val) end)
+            end
+        end
+        ctx:end_combo()
+    end
+end
+
+--- Draw a slider control with value conversion
+-- @param ctx ImGui context
+-- @param fx ReaWrap FX object
+-- @param label string Label to display
+-- @param param_idx number Parameter index in PARAM_MAP
+-- @param display_val number Current display value
+-- @param min_val number Minimum display value
+-- @param max_val number Maximum display value
+-- @param format string Format string for display (e.g., "%.0f")
+-- @param id_suffix string Unique ID suffix
+-- @param width number Control width
+-- @param convert_to_norm function Convert display value to normalized (0-1)
+local function draw_slider_control(ctx, fx, label, param_idx, display_val, min_val, max_val, format, id_suffix, width, convert_to_norm)
+    ctx:text(label .. ":")
+    ctx:same_line()
+    ctx:set_next_item_width(width)
+    local changed, new_val = ctx:slider_double("##" .. label .. "_" .. id_suffix, display_val, min_val, max_val, format)
+    if changed then
+        pcall(function() fx:set_param_normalized(param_idx, convert_to_norm(new_val)) end)
+    end
+end
+
+--- Draw MIDI trigger controls (source + note)
+-- @param ctx ImGui context
+-- @param fx ReaWrap FX object
+-- @param mod_fx_idx number Modulator FX index
+-- @param width number Control width
+local function draw_midi_controls(ctx, fx, mod_fx_idx, width)
+    -- MIDI Source
+    local ok_src, midi_src = pcall(function() return fx:get_param_normalized(PARAM_MAP.midi_source) end)
+    if ok_src then
+        local src_idx = midi_src > 0.5 and 1 or 0
+        draw_combo_control(ctx, fx, "MIDI Source", PARAM_MAP.midi_source, MIDI_SOURCES, src_idx, "midi_src_" .. mod_fx_idx, width - 130,
+            function(idx) return idx > 0.5 and 1 or 0 end,
+            function(norm) return norm > 0.5 and 1 or 0 end)
+    end
+
+    -- MIDI Note
+    local ok_note, midi_note = pcall(function() return fx:get_param_normalized(PARAM_MAP.midi_note) end)
+    if ok_note then
+        local note_val = math.floor(midi_note * 127 + 0.5)
+        draw_slider_control(ctx, fx, "MIDI Note", PARAM_MAP.midi_note, note_val, 0, 127, "%.0f", "midi_note_" .. mod_fx_idx, width - 130,
+            function(display_val) return display_val / 127 end)
+    end
+end
+
+--- Draw audio trigger controls (threshold)
+-- @param ctx ImGui context
+-- @param fx ReaWrap FX object
+-- @param mod_fx_idx number Modulator FX index
+-- @param width number Control width
+local function draw_audio_controls(ctx, fx, mod_fx_idx, width)
+    local ok_thresh, audio_thresh = pcall(function() return fx:get_param_normalized(PARAM_MAP.audio_thresh) end)
+    if ok_thresh then
+        local thresh_pct = audio_thresh * 100
+        draw_slider_control(ctx, fx, "Audio Threshold", PARAM_MAP.audio_thresh, thresh_pct, 0, 100, "%.0f%%", "audio_thresh_" .. mod_fx_idx, width - 150,
+            function(display_val) return display_val / 100 end)
+    end
+end
+
+--- Draw attack/release controls
+-- @param ctx ImGui context
+-- @param fx ReaWrap FX object
+-- @param mod_fx_idx number Modulator FX index
+-- @param width number Control width
+local function draw_attack_release_controls(ctx, fx, mod_fx_idx, width)
+    local ok_atk, attack_ms = pcall(function() return fx:get_param_normalized(PARAM_MAP.attack_ms) end)
+    if ok_atk then
+        local atk_val = 1 + attack_ms * 1999
+        draw_slider_control(ctx, fx, "Attack", PARAM_MAP.attack_ms, atk_val, 1, 2000, "%.0f ms", "attack_" .. mod_fx_idx, width - 130,
+            function(display_val) return (display_val - 1) / 1999 end)
+    end
+
+    local ok_rel, release_ms = pcall(function() return fx:get_param_normalized(PARAM_MAP.release_ms) end)
+    if ok_rel then
+        local rel_val = 1 + release_ms * 4999
+        draw_slider_control(ctx, fx, "Release", PARAM_MAP.release_ms, rel_val, 1, 5000, "%.0f ms", "release_" .. mod_fx_idx, width - 130,
+            function(display_val) return (display_val - 1) / 4999 end)
+    end
+end
+
 --- Draw modulator parameter controls
 -- @param ctx ImGui context wrapper
 -- @param mod table Modulator data {fx, fx_idx, name}
@@ -228,18 +335,8 @@ local function draw_modulator_params(ctx, mod, state, width)
         local trigger_idx = math.floor(trigger_mode * 3 + 0.5)
         trigger_idx = math.max(0, math.min(3, trigger_idx))
 
-        ctx:text("Trigger:")
-        ctx:same_line()
-        ctx:set_next_item_width(width - 100)
-        if ctx:begin_combo("##trigger_" .. mod.fx_idx, TRIGGER_MODES[trigger_idx + 1]) then
-            for i, label in ipairs(TRIGGER_MODES) do
-                if ctx:selectable(label, i - 1 == trigger_idx) then
-                    local norm_val = (i - 1) / 3
-                    pcall(function() fx:set_param_normalized(PARAM_MAP.trigger_mode, norm_val) end)
-                end
-            end
-            ctx:end_combo()
-        end
+        draw_combo_control(ctx, fx, "Trigger", PARAM_MAP.trigger_mode, TRIGGER_MODES, trigger_idx, "trigger_" .. mod.fx_idx, width - 100,
+            function(idx) return idx / 3 end)
 
         -- Advanced section (collapsible) - only show if trigger mode needs it
         if trigger_idx == 2 or trigger_idx == 3 then
@@ -249,82 +346,22 @@ local function draw_modulator_params(ctx, mod, state, width)
             end
 
             if is_advanced then
-            ctx:indent(10)
+                ctx:indent(10)
 
-            -- MIDI controls (show only if Trigger=MIDI)
-            if trigger_idx == 2 then
-                -- MIDI Source
-                local ok_src, midi_src = pcall(function() return fx:get_param_normalized(PARAM_MAP.midi_source) end)
-                if ok_src then
-                    local src_idx = midi_src > 0.5 and 1 or 0
-                    ctx:text("MIDI Source:")
-                    ctx:same_line()
-                    ctx:set_next_item_width(width - 130)
-                    if ctx:begin_combo("##midi_src_" .. mod.fx_idx, MIDI_SOURCES[src_idx + 1]) then
-                        for i, label in ipairs(MIDI_SOURCES) do
-                            if ctx:selectable(label, i - 1 == src_idx) then
-                                pcall(function() fx:set_param_normalized(PARAM_MAP.midi_source, i - 1) end)
-                            end
-                        end
-                        ctx:end_combo()
-                    end
+                -- MIDI controls (show only if Trigger=MIDI)
+                if trigger_idx == 2 then
+                    draw_midi_controls(ctx, fx, mod.fx_idx, width)
                 end
 
-                -- MIDI Note
-                local ok_note, midi_note = pcall(function() return fx:get_param_normalized(PARAM_MAP.midi_note) end)
-                if ok_note then
-                    local note_val = math.floor(midi_note * 127 + 0.5)
-                    ctx:text("MIDI Note:")
-                    ctx:same_line()
-                    ctx:set_next_item_width(width - 130)
-                    local changed, new_note = ctx:slider_double("##midi_note_" .. mod.fx_idx, note_val, 0, 127, "%.0f")
-                    if changed then
-                        pcall(function() fx:set_param_normalized(PARAM_MAP.midi_note, new_note / 127) end)
-                    end
-                end
-            end
-
-            -- Audio Threshold (show only if Trigger=Audio)
-            if trigger_idx == 3 then
-                local ok_thresh, audio_thresh = pcall(function() return fx:get_param_normalized(PARAM_MAP.audio_thresh) end)
-                if ok_thresh then
-                    local thresh_pct = audio_thresh * 100
-                    ctx:text("Audio Threshold:")
-                    ctx:same_line()
-                    ctx:set_next_item_width(width - 150)
-                    local changed, new_pct = ctx:slider_double("##audio_thresh_" .. mod.fx_idx, thresh_pct, 0, 100, "%.0f%%")
-                    if changed then
-                        pcall(function() fx:set_param_normalized(PARAM_MAP.audio_thresh, new_pct / 100) end)
-                    end
-                end
-            end
-
-            -- Attack/Release (show if Trigger=MIDI or Audio)
-            if trigger_idx == 2 or trigger_idx == 3 then
-                local ok_atk, attack_ms = pcall(function() return fx:get_param_normalized(PARAM_MAP.attack_ms) end)
-                if ok_atk then
-                    local atk_val = 1 + attack_ms * 1999
-                    ctx:text("Attack:")
-                    ctx:same_line()
-                    ctx:set_next_item_width(width - 130)
-                    local changed, new_atk = ctx:slider_double("##attack_" .. mod.fx_idx, atk_val, 1, 2000, "%.0f ms")
-                    if changed then
-                        pcall(function() fx:set_param_normalized(PARAM_MAP.attack_ms, (new_atk - 1) / 1999) end)
-                    end
+                -- Audio Threshold (show only if Trigger=Audio)
+                if trigger_idx == 3 then
+                    draw_audio_controls(ctx, fx, mod.fx_idx, width)
                 end
 
-                local ok_rel, release_ms = pcall(function() return fx:get_param_normalized(PARAM_MAP.release_ms) end)
-                if ok_rel then
-                    local rel_val = 1 + release_ms * 4999
-                    ctx:text("Release:")
-                    ctx:same_line()
-                    ctx:set_next_item_width(width - 130)
-                    local changed, new_rel = ctx:slider_double("##release_" .. mod.fx_idx, rel_val, 1, 5000, "%.0f ms")
-                    if changed then
-                        pcall(function() fx:set_param_normalized(PARAM_MAP.release_ms, (new_rel - 1) / 4999) end)
-                    end
+                -- Attack/Release (show if Trigger=MIDI or Audio)
+                if trigger_idx == 2 or trigger_idx == 3 then
+                    draw_attack_release_controls(ctx, fx, mod.fx_idx, width)
                 end
-            end
 
                 ctx:unindent(10)
             end
