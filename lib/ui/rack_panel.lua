@@ -111,6 +111,46 @@ local function draw_chain_fx_list(ctx, chain, colors)
     return interacted
 end
 
+--- Draw "Add Chain" button (header right side)
+-- @param ctx ImGui context
+-- @param rack_width number Total rack width
+-- @param colors table Color configuration
+-- @param container ReaWrap container FX object
+-- @param opts table Options with on_add_chain callback
+-- @return boolean True if clicked
+local function draw_add_chain_button(ctx, rack_width, colors, container, opts)
+    ctx:same_line(rack_width - 100)
+    ctx:push_style_color(r.ImGui_Col_Button(), colors.add_chain)
+    local clicked = ctx:small_button("+ Chain")
+    ctx:pop_style_color()
+
+    if clicked and opts.on_add_chain then
+        opts.on_add_chain(container)
+    end
+
+    return clicked
+end
+
+--- Draw close button (header right side)
+-- @param ctx ImGui context
+-- @param rack_width number Total rack width
+-- @param container ReaWrap container FX object
+-- @param opts table Options with on_delete callback
+-- @return boolean True if clicked
+local function draw_close_button(ctx, rack_width, container, opts)
+    ctx:same_line(rack_width - 30)
+    ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+    ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x663333FF)
+    local clicked = ctx:small_button("×##close_rack")
+    ctx:pop_style_color(2)
+
+    if clicked and opts.on_delete then
+        opts.on_delete(container)
+    end
+
+    return clicked
+end
+
 --- Draw a single chain row
 -- @param ctx ImGui context
 -- @param draw_list ImGui draw list
@@ -230,27 +270,14 @@ function M.draw(ctx, container, chains, opts)
         ctx:text(rack_name)
 
         -- Add Chain button (right side)
-        ctx:same_line(rack_width - 100)
-        ctx:push_style_color(r.ImGui_Col_Button(), colors.add_chain)
-        if ctx:small_button("+ Chain") then
-            if opts.on_add_chain then
-                opts.on_add_chain(container)
-            end
+        if draw_add_chain_button(ctx, rack_width, colors, container, opts) then
             interacted = true
         end
-        ctx:pop_style_color()
 
         -- Close button
-        ctx:same_line(rack_width - 30)
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x663333FF)
-        if ctx:small_button("×##close_rack") then
-            if opts.on_delete then
-                opts.on_delete(container)
-            end
+        if draw_close_button(ctx, rack_width, container, opts) then
             interacted = true
         end
-        ctx:pop_style_color(2)
 
         ctx:separator()
 
