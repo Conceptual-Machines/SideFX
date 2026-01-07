@@ -229,6 +229,16 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                     if opts.refresh_fx_list then
                                         opts.refresh_fx_list()
                                     end
+
+                                    -- Auto-select the newly added modulator
+                                    local new_mod_guid = new_mod:get_guid()
+                                    local updated_modulators = get_device_modulators(container)
+                                    for idx, mod in ipairs(updated_modulators) do
+                                        if mod:get_guid() == new_mod_guid then
+                                            state.expanded_mod_slot[state_guid] = idx - 1  -- 0-based slot index
+                                            break
+                                        end
+                                    end
                                 end
                             end
                             interacted = true
