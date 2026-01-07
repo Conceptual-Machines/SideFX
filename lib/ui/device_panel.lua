@@ -1094,12 +1094,16 @@ function M.draw(ctx, fx, opts)
                                     local ok_params, param_count = pcall(function() return fx:get_num_params() end)
                                     if ok_params and param_count then
                                         for param_idx = 0, param_count - 1 do
-                                            -- Query if this param is linked to our modulator
-                                            local link_fx_str = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
+                                            -- Query if this param is linked (check plink.active first)
+                                            local retval, active_str = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
                                                 string.format("param.%d.plink.active", param_idx))
 
-                                            if link_fx_str and link_fx_str ~= "" then
-                                                local link_fx_idx = tonumber(link_fx_str)
+                                            if retval and active_str == "1" then
+                                                -- Link is active, check if it's from our modulator
+                                                local _, effect_str = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
+                                                    string.format("param.%d.plink.effect", param_idx))
+
+                                                local link_fx_idx = tonumber(effect_str)
                                                 if link_fx_idx == mod_track_idx then
                                                     -- This parameter is linked to our modulator
                                                     local ok_pname, param_name = pcall(function() return fx:get_param_name(param_idx) end)
@@ -1134,10 +1138,10 @@ function M.draw(ctx, fx, opts)
                                                 local track_ptr = track_remove.pointer
                                                 local target_track_idx = get_track_fx_index_by_guid(track_ptr, fx:get_guid())
                                                 if target_track_idx then
-                                                    -- -1 disables the link
+                                                    -- Set plink.active to "0" to disable the link
                                                     r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
                                                         string.format("param.%d.plink.active", link.param_idx),
-                                                        "-1")
+                                                        "0")
                                                 end
                                             end)
                                             if ok_remove then
@@ -1200,26 +1204,23 @@ function M.draw(ctx, fx, opts)
                                                     local target_track_idx = get_track_fx_index_by_guid(track_ptr, target_device:get_guid())
 
                                                     if mod_track_idx and target_track_idx then
-                                                        -- Enable parameter link from modulator output (slider4=param 3) to target parameter
-                                                        -- Use track-level FX index for plink
+                                                        -- Enable parameter link from modulator output to target parameter
+                                                        -- REAPER plink format:
+                                                        -- - plink.active = "1" to enable
+                                                        -- - plink.effect = modulator FX index (track-level)
+                                                        -- - plink.param = modulator output parameter index (slider4 = param 3)
+
                                                         r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
                                                             string.format("param.%d.plink.active", target_param),
+                                                            "1")
+
+                                                        r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
+                                                            string.format("param.%d.plink.effect", target_param),
                                                             tostring(mod_track_idx))
 
-                                                        -- Set which modulator parameter to use (slider4 = Output = param index 3)
                                                         r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
                                                             string.format("param.%d.plink.param", target_param),
                                                             "3")
-
-                                                        -- Set modulation amount to 100%
-                                                        r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
-                                                            string.format("param.%d.plink.scale", target_param),
-                                                            "1.0")
-
-                                                        -- Set offset to 0 (full range modulation)
-                                                        r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
-                                                            string.format("param.%d.plink.offset", target_param),
-                                                            "0.0")
                                                     end
                                                 end)
 
