@@ -267,6 +267,9 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     local control_width = 180
 
                     -- Rate section: RATE label | Free/Sync buttons | UI icon
+                    -- Read tempo mode BEFORE table so it's accessible inside and outside
+                    local ok_tempo, tempo_mode = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_TEMPO_MODE) end)
+
                     if ctx:begin_table("##rate_table_" .. guid, 3, imgui.TableFlags.SizingStretchProp()) then
                         ctx:table_setup_column("Label", imgui.TableColumnFlags.WidthFixed(), 45)
                         ctx:table_setup_column("Mode", imgui.TableColumnFlags.WidthStretch())
@@ -282,7 +285,6 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
                         -- Column 2: Free/Sync buttons
                         ctx:table_set_column_index(1)
-                        local ok_tempo, tempo_mode = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_TEMPO_MODE) end)
                         if ok_tempo and tempo_mode ~= nil then
                             if ctx:radio_button("Free##tempo_" .. guid, tempo_mode < 0.5) then
                                 expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 0)
