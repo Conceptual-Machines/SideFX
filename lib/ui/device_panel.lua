@@ -375,6 +375,108 @@ local function draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opt
 end
 
 --------------------------------------------------------------------------------
+-- Column Drawing Functions
+--------------------------------------------------------------------------------
+
+--- Draw modulator sidebar column
+local function draw_modulator_column(ctx, fx, container, guid, state_guid, cfg, opts)
+    local modulator_sidebar = require('lib.ui.modulator_sidebar')
+    return modulator_sidebar.draw(ctx, fx, container, guid, state_guid, cfg, opts)
+end
+
+
+--- Module requires
+local params_column = require('lib.ui.device_panel.params')
+local sidebar_column = require('lib.ui.device_panel.sidebar')
+
+--- Filter FX parameters, excluding sidebar controls (wet, delta, bypass)
+local function get_visible_params(fx)
+    local r = reaper
+    local visible_params = {}
+
+    local ok_count, param_count = pcall(function() return fx:get_num_params() end)
+    if not ok_count then param_count = 0 end
+
+    for i = 0, param_count - 1 do
+        local ok_pn, pname = pcall(function() return fx:get_param_name(i) end)
+        local skip = false
+        if ok_pn and pname then
+            local lower = pname:lower()
+            if lower == "wet" or lower == "delta" or lower == "bypass" then
+                skip = true
+            end
+        end
+        if not skip then
+            table.insert(visible_params, i)
+        end
+    end
+
+    return visible_params
+end
+
+--- Draw panel frame (background + border)
+local function draw_panel_frame(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg)
+    local r = reaper
+
+    -- Draw panel background (filled rectangle)
+    r.ImGui_DrawList_AddRectFilled(draw_list,
+        cursor_x, cursor_y,
+        cursor_x + panel_width, cursor_y + panel_height,
+        colors.panel_bg, cfg.border_radius)
+
+    -- Draw panel border
+    r.ImGui_DrawList_AddRect(draw_list,
+        cursor_x, cursor_y,
+        cursor_x + panel_width, cursor_y + panel_height,
+        colors.panel_border, cfg.border_radius, 0, 1)
+end
+
+--- Calculate panel dimensions based on collapsed state
+local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w)
+    local panel_height, panel_width, content_width, num_columns, params_per_column
+
+    if is_panel_collapsed then
+        -- Collapsed: full height but narrow width
+        panel_height = avail_height
+        panel_width = 140  -- Minimal width for collapsed panel
+        content_width = 0
+        num_columns = 0
+        params_per_column = 0
+    else
+        -- Expanded: full panel
+        panel_height = avail_height
+
+        -- Calculate how many params fit per column based on available height
+        local usable_height = panel_height - cfg.header_height - cfg.padding * 2
+        params_per_column = math.floor(usable_height / cfg.param_height)
+        params_per_column = math.max(1, params_per_column)
+
+        -- Calculate columns needed to show visible params only
+        num_columns = math.ceil(visible_count / params_per_column)
+        num_columns = math.max(1, num_columns)
+
+        -- Calculate panel width: columns + sidebar (if visible) + modulator sidebar + padding
+        content_width = cfg.column_width * num_columns
+        local sidebar_w = is_sidebar_collapsed and collapsed_sidebar_w or (cfg.sidebar_width + cfg.sidebar_padding)
+
+        panel_width = content_width + sidebar_w + mod_sidebar_w + cfg.padding * 2
+    end
+
+    return {
+        panel_height = panel_height,
+        panel_width = panel_width,
+        content_width = content_width,
+        num_columns = num_columns,
+        params_per_column = params_per_column
+    }
+end
+
+--- Draw chain sidebar column wrapper
+local function draw_sidebar_column(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors)
+    return sidebar_column.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors)
+end
+
+--------------------------------------------------------------------------------
 -- Device Panel Component
 --------------------------------------------------------------------------------
 
@@ -429,24 +531,8 @@ function M.draw(ctx, fx, opts)
     local ok3, enabled = pcall(function() return fx:get_enabled() end)
     if not ok3 then enabled = false end
 
-    local ok4, param_count = pcall(function() return fx:get_num_params() end)
-    if not ok4 then param_count = 0 end
-
     -- Build list of visible params (exclude sidebar controls: wet, delta, bypass)
-    local visible_params = {}
-    for i = 0, param_count - 1 do
-        local ok_pn, pname = pcall(function() return fx:get_param_name(i) end)
-        local skip = false
-        if ok_pn and pname then
-            local lower = pname:lower()
-            if lower == "wet" or lower == "delta" or lower == "bypass" then
-                skip = true
-            end
-        end
-        if not skip then
-            table.insert(visible_params, i)
-        end
-    end
+    local visible_params = get_visible_params(fx)
     local visible_count = #visible_params
 
     -- Use available height passed in opts, or default
@@ -482,52 +568,23 @@ function M.draw(ctx, fx, opts)
     end
 
     -- Calculate dimensions based on collapsed state
-    local panel_height, panel_width, content_width, num_columns, params_per_column
-
-    if is_panel_collapsed then
-        -- Collapsed: full height but narrow width
-        panel_height = avail_height
-        panel_width = 140  -- Minimal width for collapsed panel
-        content_width = 0
-        num_columns = 0
-        params_per_column = 0
-    else
-        -- Expanded: full panel
-        panel_height = avail_height
-
-        -- Calculate how many params fit per column based on available height
-        local usable_height = panel_height - cfg.header_height - cfg.padding * 2
-        params_per_column = math.floor(usable_height / cfg.param_height)
-        params_per_column = math.max(1, params_per_column)
-
-        -- Calculate columns needed to show visible params only
-        num_columns = math.ceil(visible_count / params_per_column)
-        num_columns = math.max(1, num_columns)
-
-        -- Calculate panel width: columns + sidebar (if visible) + modulator sidebar + padding
-        content_width = cfg.column_width * num_columns
-        local sidebar_w = is_sidebar_collapsed and collapsed_sidebar_w or (cfg.sidebar_width + cfg.sidebar_padding)
-
-        panel_width = content_width + sidebar_w + mod_sidebar_w + cfg.padding * 2
-    end
+    local dims = calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w)
+    local panel_height = dims.panel_height
+    local panel_width = dims.panel_width
+    local content_width = dims.content_width
+    local num_columns = dims.num_columns
+    local params_per_column = dims.params_per_column
 
     local interacted = false
 
     ctx:push_id(guid)
 
-    -- Panel background
+    -- Panel background and frame
     local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
     local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
 
-    -- Draw panel frame
-    r.ImGui_DrawList_AddRectFilled(draw_list,
-        cursor_x, cursor_y,
-        cursor_x + panel_width, cursor_y + panel_height,
-        colors.panel_bg, cfg.border_radius)
-    r.ImGui_DrawList_AddRect(draw_list,
-        cursor_x, cursor_y,
-        cursor_x + panel_width, cursor_y + panel_height,
-        colors.panel_border, cfg.border_radius, 0, 1)
+    -- Draw panel frame (background + border)
+    draw_panel_frame(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg)
 
     -- Begin child for panel content (hide scrollbars)
     local window_flags = imgui.WindowFlags.NoScrollbar()
@@ -564,466 +621,21 @@ function M.draw(ctx, fx, opts)
 
             -- === COLUMN 1: MODULATOR SIDEBAR ===
             r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
-
-            local mod_interacted = modulator_sidebar.draw(ctx, fx, container, guid, state_guid, cfg, opts)
-            if mod_interacted then
+            if draw_modulator_column(ctx, fx, container, guid, state_guid, cfg, opts) then
                 interacted = true
             end
 
             -- === COLUMN 2: DEVICE PARAMS ===
             r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-
-            if visible_count > 0 then
-                -- Use nested table for parameter columns
-                if r.ImGui_BeginTable(ctx.ctx, "params_" .. guid, num_columns, r.ImGui_TableFlags_SizingStretchSame()) then
-
-                    for col = 0, num_columns - 1 do
-                        r.ImGui_TableSetupColumn(ctx.ctx, "col" .. col, r.ImGui_TableColumnFlags_WidthStretch())
-                    end
-
-                    -- Draw parameters row by row across columns (using pre-filtered visible_params)
-                    for row = 0, params_per_column - 1 do
-                        r.ImGui_TableNextRow(ctx.ctx)
-
-                        for col = 0, num_columns - 1 do
-                            local visible_idx = col * params_per_column + row + 1  -- +1 for Lua 1-based
-
-                            r.ImGui_TableSetColumnIndex(ctx.ctx, col)
-
-                            if visible_idx <= visible_count then
-                                local param_idx = visible_params[visible_idx]
-
-                                -- Safely get param info (FX might have been deleted)
-                                local ok_name, param_name = pcall(function() return fx:get_param_name(param_idx) end)
-                                local ok_val, param_val = pcall(function() return fx:get_param_normalized(param_idx) end)
-
-                                if ok_name and ok_val then
-                                    param_val = param_val or 0
-                                    local display_label = (param_name and param_name ~= "") and fx_naming.truncate(param_name, 14) or ("P" .. (param_idx + 1))
-
-                                    ctx:push_id(param_idx)
-
-                                    -- Parameter label
-                                    ctx:push_style_color(r.ImGui_Col_Text(), colors.param_label)
-                                    ctx:text(display_label)
-                                    ctx:pop_style_color()
-
-                                    -- Smart detection: switch vs continuous
-                                    local is_switch = param_utils.is_switch_param(fx, param_idx)
-
-                                    if is_switch then
-                                        -- Draw as toggle button
-                                        local is_on = param_val > 0.5
-                                        if is_on then
-                                            ctx:push_style_color(r.ImGui_Col_Button(), 0x5588AAFF)
-                                        else
-                                            ctx:push_style_color(r.ImGui_Col_Button(), 0x333333FF)
-                                        end
-                                        if ctx:button(is_on and "ON" or "OFF", -cfg.padding, 0) then
-                                            pcall(function() fx:set_param_normalized(param_idx, is_on and 0 or 1) end)
-                                            interacted = true
-                                        end
-                                        ctx:pop_style_color()
-                                    else
-                                        -- Draw as slider
-                                        ctx:set_next_item_width(-cfg.padding)
-                                        local changed, new_val = ctx:slider_double("##p", param_val, 0, 1, "%.2f")
-                                        if changed then
-                                            pcall(function() fx:set_param_normalized(param_idx, new_val) end)
-                                            interacted = true
-                                        end
-                                    end
-
-                                    ctx:pop_id()
-                                end
-                            end
-                        end
-                    end
-
-                    r.ImGui_EndTable(ctx.ctx)
-                end
-            else
-                ctx:text_disabled("No parameters")
+            if params_column.draw(ctx, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts) then
+                interacted = true
             end
 
             -- === COLUMN 3: CHAIN SIDEBAR ===
             r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
-
-            -- Get column starting X position for centering calculations
-            local col_start_x = r.ImGui_GetCursorPosX(ctx.ctx)
-            local sidebar_w = sidebar_actual_w
-
-            -- Helper to center an item of given width within sidebar
-            local function center_item(item_w)
-                local offset = (sidebar_w - item_w) / 2
-                if offset > 0 then
-                    r.ImGui_SetCursorPosX(ctx.ctx, col_start_x + offset)
-                end
+            if draw_sidebar_column(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors) then
+                interacted = true
             end
-
-            if is_sidebar_collapsed then
-                -- Collapsed: just empty space (expand button is in header)
-                -- Nothing to render
-            else
-                -- Expanded sidebar
-                local ctrl_w = cfg.sidebar_width - cfg.padding * 2  -- Full width controls
-                local btn_w = 70  -- Narrower buttons (for pan slider)
-
-                -- Mix and Delta on the same line using a table with bottom border
-                local container = opts.container
-                local has_mix = false
-                local mix_val, mix_idx
-                if container then
-                    local ok_mix
-                    ok_mix, mix_idx = pcall(function() return container:get_param_from_ident(":wet") end)
-                    if ok_mix and mix_idx and mix_idx >= 0 then
-                        local ok_mv
-                        ok_mv, mix_val = pcall(function() return container:get_param_normalized(mix_idx) end)
-                        has_mix = ok_mv and mix_val
-                    end
-                end
-
-                local has_delta = false
-                local delta_val, delta_idx
-                local ok_delta
-                ok_delta, delta_idx = pcall(function() return fx:get_param_from_ident(":delta") end)
-                if ok_delta and delta_idx and delta_idx >= 0 then
-                    local ok_dv
-                    ok_dv, delta_val = pcall(function() return fx:get_param_normalized(delta_idx) end)
-                    has_delta = ok_dv and delta_val
-                end
-
-                -- Only show table if we have mix or delta
-                if has_mix or has_delta then
-                    local imgui = require('imgui')
-                    local table_flags = imgui.TableFlags.BordersH()
-                    if ctx:begin_table("mix_delta_" .. state_guid, 2, table_flags) then
-                        ctx:table_setup_column("mix", imgui.TableColumnFlags.WidthStretch())
-                        ctx:table_setup_column("delta", imgui.TableColumnFlags.WidthStretch())
-
-                        ctx:table_next_row()
-
-                        -- Mix column
-                        ctx:table_set_column_index(0)
-                        if has_mix then
-                            -- "Mix" label (centered)
-                            local mix_text = "Mix"
-                            local mix_text_w = r.ImGui_CalcTextSize(ctx.ctx, mix_text)
-                            local col_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
-                            r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - mix_text_w) / 2)
-                            ctx:push_style_color(r.ImGui_Col_Text(), 0xCC88FFFF)  -- Purple for container
-                            ctx:text(mix_text)
-                            ctx:pop_style_color()
-
-                            -- Smaller knob (30px)
-                            local mix_knob_size = 30
-                            r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - mix_knob_size) / 2)
-                            local mix_changed, new_mix = drawing.draw_knob(ctx, "##mix_knob", mix_val, mix_knob_size)
-                            if mix_changed then
-                                pcall(function() container:set_param_normalized(mix_idx, new_mix) end)
-                                interacted = true
-                            end
-
-                            -- Value below knob (centered)
-                            local mix_val_text = string.format("%.0f%%", mix_val * 100)
-                            local mix_val_text_w = r.ImGui_CalcTextSize(ctx.ctx, mix_val_text)
-                            r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - mix_val_text_w) / 2)
-                            ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAAAAFF)
-                            ctx:text(mix_val_text)
-                            ctx:pop_style_color()
-
-                            if r.ImGui_IsItemHovered(ctx.ctx) then
-                                ctx:set_tooltip(string.format("Device Mix: %.0f%% (parallel blend)", mix_val * 100))
-                            end
-                        end
-
-                        -- Delta column
-                        ctx:table_set_column_index(1)
-                        if has_delta then
-                            -- "Delta" label (centered horizontally)
-                            local delta_text = "Delta"
-                            local delta_text_w = r.ImGui_CalcTextSize(ctx.ctx, delta_text)
-                            local col_start_x = r.ImGui_GetCursorPosX(ctx.ctx)
-                            local col_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
-                            r.ImGui_SetCursorPosX(ctx.ctx, col_start_x + (col_w - delta_text_w) / 2)
-                            ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAACCFF)
-                            ctx:text(delta_text)
-                            ctx:pop_style_color()
-
-                            -- Center button vertically with mix knob
-                            -- Mix column: label (~20px) + spacing (~5px) + knob (30px) + spacing (~5px) + value (~20px) = ~80px total
-                            -- Knob center is at: label (20px) + spacing (5px) + knob_radius (15px) = ~40px from top
-                            -- Delta column: label (~20px) + button (18px) = ~38px minimum
-                            -- To center button with knob: button center should be at ~40px
-                            -- Button center is 9px from button top, so button top should be at 40 - 9 = 31px
-                            -- After label (~20px), we need 31 - 20 = 11px spacing
-                            ctx:spacing()  -- Small spacing after label
-                            r.ImGui_Dummy(ctx.ctx, 0, 6)  -- Additional spacing to align with knob center
-
-                            local delta_on = delta_val > 0.5
-                            if delta_on then
-                                ctx:push_style_color(r.ImGui_Col_Button(), 0x6666CCFF)
-                            else
-                                ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
-                            end
-
-                            -- Delta button (centered horizontally)
-                            local delta_btn_w = 36
-                            local delta_btn_h = 18
-                            local col_w_btn = r.ImGui_GetContentRegionAvail(ctx.ctx)
-                            r.ImGui_SetCursorPosX(ctx.ctx, col_start_x + (col_w_btn - delta_btn_w) / 2)
-                            if ctx:button(delta_on and "∆" or "—", delta_btn_w, delta_btn_h) then
-                                pcall(function() fx:set_param_normalized(delta_idx, delta_on and 0 or 1) end)
-                                interacted = true
-                            end
-                            ctx:pop_style_color()
-
-                            if r.ImGui_IsItemHovered(ctx.ctx) then
-                                ctx:set_tooltip(delta_on and "Delta Solo: ON (wet - dry)" or "Delta Solo: OFF")
-                            end
-                        end
-
-                        ctx:end_table()
-                    end
-                end
-
-                -- Gain control as FADER (from paired utility)
-                local utility = opts.utility
-                if utility then
-                    local ok_g, gain_val = pcall(function() return utility:get_param_normalized(0) end)
-                    local ok_p, pan_val = pcall(function() return utility:get_param_normalized(1) end)
-
-                    -- Pan slider first (above fader)
-                    if ok_p then
-                        pan_val = pan_val or 0.5
-                        local pan_pct = (pan_val - 0.5) * 200
-
-                        ctx:spacing()
-
-                        -- Use collapsed rack pan slider (with label underneath)
-                        local avail_w, _ = ctx:get_content_region_avail()
-                        local pan_w = math.min(avail_w - 4, 80)
-                        local pan_offset = math.max(0, (avail_w - pan_w) / 2)
-                        ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + pan_offset)
-                        local pan_changed, new_pan = widgets.draw_pan_slider(ctx, "##utility_pan", pan_pct, pan_w)
-                        if pan_changed then
-                            local new_norm = (new_pan + 100) / 200
-                            pcall(function() utility:set_param_normalized(1, new_norm) end)
-                            interacted = true
-                        end
-                    end
-
-                    if ok_g then
-                        gain_val = gain_val or 0.5
-                        local gain_norm = gain_val
-                        local gain_db = (gain_val - 0.5) * 48
-
-                        ctx:spacing()
-
-                        -- Fader with meter and scale (same as collapsed rack)
-                        local fader_w = 32
-                        local meter_w = 12
-                        local scale_w = 20
-
-                        -- Calculate fader height (accounting for pan slider above)
-                        local _, remaining_h = ctx:get_content_region_avail()
-                        local fader_h = remaining_h - 22  -- Leave room for dB label
-                        fader_h = math.max(50, fader_h)  -- Minimum 50px, but can extend
-
-                        local avail_w, _ = ctx:get_content_region_avail()
-                        local total_w = scale_w + fader_w + meter_w + 4
-                        local offset_x = math.max(0, (avail_w - total_w) / 2)
-
-                        ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + offset_x)
-
-                        local screen_x, screen_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-                        local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-
-                        local scale_x = screen_x
-                        local fader_x = screen_x + scale_w + 2
-                        local meter_x = fader_x + fader_w + 2
-
-                        -- dB scale
-                        local db_marks = {24, 12, 0, -12, -24}
-                        for _, db in ipairs(db_marks) do
-                            local mark_norm = (db + 24) / 48
-                            local mark_y = screen_y + fader_h - (fader_h * mark_norm)
-                            r.ImGui_DrawList_AddLine(draw_list, scale_x + scale_w - 6, mark_y, scale_x + scale_w, mark_y, 0x666666FF, 1)
-                            if db == 0 or db == -12 or db == 12 or db == 24 then
-                                local label = db == 0 and "0" or tostring(db)
-                                r.ImGui_DrawList_AddText(draw_list, scale_x, mark_y - 5, 0x888888FF, label)
-                            end
-                        end
-
-                        -- Fader background
-                        r.ImGui_DrawList_AddRectFilled(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x1A1A1AFF, 3)
-                        -- Fader fill
-                        local fill_h = fader_h * gain_norm
-                        if fill_h > 2 then
-                            local fill_top = screen_y + fader_h - fill_h
-                            r.ImGui_DrawList_AddRectFilled(draw_list, fader_x + 2, fill_top, fader_x + fader_w - 2, screen_y + fader_h - 2, 0x5588AACC, 2)
-                        end
-                        -- Fader border
-                        r.ImGui_DrawList_AddRect(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x555555FF, 3)
-                        -- 0dB line (at center since range is -24 to +24)
-                        local zero_db_norm = 24 / 48
-                        local zero_y = screen_y + fader_h - (fader_h * zero_db_norm)
-                        r.ImGui_DrawList_AddLine(draw_list, fader_x, zero_y, fader_x + fader_w, zero_y, 0xFFFFFF44, 1)
-
-                        -- Stereo meters
-                        local meter_l_x = meter_x
-                        local meter_r_x = meter_x + meter_w / 2 + 1
-                        local half_meter_w = meter_w / 2 - 1
-                        r.ImGui_DrawList_AddRectFilled(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
-                        r.ImGui_DrawList_AddRectFilled(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
-
-                        -- Get track for meters (if available)
-                        local state_module = require('lib.state')
-                        local sidefx_state = state_module.state
-                        if sidefx_state.track and sidefx_state.track.pointer then
-                            local peak_l = r.Track_GetPeakInfo(sidefx_state.track.pointer, 0)
-                            local peak_r = r.Track_GetPeakInfo(sidefx_state.track.pointer, 1)
-                            local function draw_meter_bar(x, w, peak)
-                                if peak > 0 then
-                                    local peak_db = 20 * math.log(peak, 10)
-                                    peak_db = math.max(-60, math.min(24, peak_db))
-                                    local peak_norm = (peak_db + 60) / 84
-                                    local meter_fill_h = fader_h * peak_norm
-                                    if meter_fill_h > 1 then
-                                        local meter_top = screen_y + fader_h - meter_fill_h
-                                        local meter_color
-                                        if peak_db > 0 then meter_color = 0xFF4444FF
-                                        elseif peak_db > -6 then meter_color = 0xFFAA44FF
-                                        elseif peak_db > -18 then meter_color = 0x44FF44FF
-                                        else meter_color = 0x44AA44FF end
-                                        r.ImGui_DrawList_AddRectFilled(draw_list, x, meter_top, x + w, screen_y + fader_h - 1, meter_color, 0)
-                                    end
-                                end
-                            end
-                            draw_meter_bar(meter_l_x + 1, half_meter_w - 1, peak_l)
-                            draw_meter_bar(meter_r_x + 1, half_meter_w - 1, peak_r)
-                        end
-
-                        r.ImGui_DrawList_AddRect(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
-                        r.ImGui_DrawList_AddRect(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
-
-                        -- Invisible slider for fader interaction
-                        r.ImGui_SetCursorScreenPos(ctx.ctx, fader_x, screen_y)
-                        local imgui = require('imgui')
-                        ctx:push_style_color(imgui.Col.FrameBg(), 0x00000000)
-                        ctx:push_style_color(imgui.Col.FrameBgHovered(), 0x00000000)
-                        ctx:push_style_color(imgui.Col.FrameBgActive(), 0x00000000)
-                        ctx:push_style_color(imgui.Col.SliderGrab(), 0xAAAAAAFF)
-                        ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
-                        local gain_changed, new_gain_db = ctx:v_slider_double("##gain_fader_v", fader_w, fader_h, gain_db, -24, 24, "")
-                        if gain_changed then
-                            local new_norm = (new_gain_db + 24) / 48
-                            pcall(function() utility:set_param_normalized(0, new_norm) end)
-                            interacted = true
-                        end
-                        if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-                            pcall(function() utility:set_param_normalized(0, 0.5) end)  -- Reset to 0dB
-                            interacted = true
-                        end
-                        ctx:pop_style_color(5)
-
-                        -- dB label below fader (with double-click editing)
-                        local label_h = 16
-                        local label_y = screen_y + fader_h + 2
-                        local label_x = fader_x
-                        r.ImGui_DrawList_AddRectFilled(draw_list, label_x, label_y, label_x + fader_w, label_y + label_h, 0x222222FF, 2)
-                        local db_label = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db))
-                        local text_w = r.ImGui_CalcTextSize(ctx.ctx, db_label)
-                        r.ImGui_DrawList_AddText(draw_list, label_x + (fader_w - text_w) / 2, label_y + 1, 0xCCCCCCFF, db_label)
-
-                        -- Invisible button for dB label (for double-click editing)
-                        r.ImGui_SetCursorScreenPos(ctx.ctx, label_x, label_y)
-                        ctx:invisible_button("##gain_db_label", fader_w, label_h)
-
-                        -- Double-click on dB label to edit value
-                        if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-                            ctx:open_popup("##gain_edit_popup")
-                        end
-
-                        -- Edit popup for gain
-                        if ctx:begin_popup("##gain_edit_popup") then
-                            local imgui = require('imgui')
-                            ctx:set_next_item_width(60)
-                            ctx:set_keyboard_focus_here()
-                            local input_changed, input_val = ctx:input_double("##gain_input", gain_db, 0, 0, "%.1f")
-                            if input_changed then
-                                local new_norm = (math.max(-24, math.min(24, input_val)) + 24) / 48
-                                pcall(function() utility:set_param_normalized(0, new_norm) end)
-                                interacted = true
-                            end
-                            if ctx:is_key_pressed(imgui.Key.Enter()) or ctx:is_key_pressed(imgui.Key.Escape()) then
-                                ctx:close_current_popup()
-                            end
-                            ctx:end_popup()
-                        end
-
-                        -- Advance cursor past fader
-                        r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, label_y + label_h)
-                    end
-
-                    -- Phase Invert controls
-                    local ok_phase_l, phase_l = pcall(function() return utility:get_param_normalized(2) end)
-                    local ok_phase_r, phase_r = pcall(function() return utility:get_param_normalized(3) end)
-
-                    if ok_phase_l and ok_phase_r then
-                        ctx:spacing()
-
-                        -- Center "Phase" label
-                        local phase_text = "Phase"
-                        local phase_text_w = r.ImGui_CalcTextSize(ctx.ctx, phase_text)
-                        center_item(phase_text_w)
-                        ctx:push_style_color(r.ImGui_Col_Text(), 0xCC8888FF)
-                        ctx:text(phase_text)
-                        ctx:pop_style_color()
-
-                        local phase_btn_w = 28
-                        local phase_gap = 4
-                        local phase_total_w = phase_btn_w * 2 + phase_gap
-
-                        -- Center the pair of phase buttons
-                        center_item(phase_total_w)
-
-                        -- Phase L button
-                        local phase_l_on = phase_l > 0.5
-                        if phase_l_on then
-                            ctx:push_style_color(r.ImGui_Col_Button(), 0xCC6666FF)
-                        else
-                            ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
-                        end
-                        if ctx:button(phase_l_on and "ØL" or "L", phase_btn_w, 20) then
-                            pcall(function() utility:set_param_normalized(2, phase_l_on and 0 or 1) end)
-                            interacted = true
-                        end
-                        ctx:pop_style_color()
-                        if r.ImGui_IsItemHovered(ctx.ctx) then
-                            ctx:set_tooltip(phase_l_on and "Left Phase: Inverted" or "Left Phase: Normal")
-                        end
-
-                        ctx:same_line(0, phase_gap)
-
-                        -- Phase R button
-                        local phase_r_on = phase_r > 0.5
-                        if phase_r_on then
-                            ctx:push_style_color(r.ImGui_Col_Button(), 0xCC6666FF)
-                        else
-                            ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
-                        end
-                        if ctx:button(phase_r_on and "ØR" or "R", phase_btn_w, 20) then
-                            pcall(function() utility:set_param_normalized(3, phase_r_on and 0 or 1) end)
-                            interacted = true
-                        end
-                        ctx:pop_style_color()
-                        if r.ImGui_IsItemHovered(ctx.ctx) then
-                            ctx:set_tooltip(phase_r_on and "Right Phase: Inverted" or "Right Phase: Normal")
-                        end
-                    end
-                end
-            end  -- end expanded sidebar
         end)  -- end with_table (device_wrapper)
 
         ctx:end_child()  -- end panel
