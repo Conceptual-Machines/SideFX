@@ -389,6 +389,11 @@ end
 local params_column = require('lib.ui.device_panel.params')
 local sidebar_column = require('lib.ui.device_panel.sidebar')
 
+--- Draw chain sidebar column wrapper
+local function draw_sidebar_column(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors)
+    return sidebar_column.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors)
+end
+
 --- Filter FX parameters, excluding sidebar controls (wet, delta, bypass)
 local function get_visible_params(fx)
     local r = reaper
@@ -507,11 +512,6 @@ local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg,
         num_columns = num_columns,
         params_per_column = params_per_column
     }
-end
-
---- Draw chain sidebar column wrapper
-local function draw_sidebar_column(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors)
-    return sidebar_column.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors)
 end
 
 --- Extract FX display name and device identifier
