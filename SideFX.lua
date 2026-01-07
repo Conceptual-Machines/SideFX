@@ -990,6 +990,11 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
     is_nested = (is_nested == true)
     local rack_guid = rack:get_guid()
 
+    -- Safety check: if rack was deleted, guid may be nil
+    if not rack_guid then
+        return
+    end
+
     -- Use expanded_racks for ALL racks (both top-level and nested)
     -- This allows multiple top-level racks to be expanded independently
     local is_expanded = (state.expanded_racks[rack_guid] == true)
