@@ -7,6 +7,7 @@ local r = reaper
 local imgui = require('imgui')
 local state_module = require('lib.state')
 local PARAM = require('lib.modulator_constants')
+local drawing = require('lib.ui.drawing')
 
 -- Modulator types
 local MODULATOR_TYPES = {
@@ -266,9 +267,12 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     local control_width = 180
 
                     -- UI button to open JSFX editor
-                    if ctx:button("Curve Editor##ui_" .. guid, control_width, 0) then
+                    if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20) then
                         r.TrackFX_Show(expanded_modulator.track.pointer, expanded_modulator.pointer, 3)
                         interacted = true
+                    end
+                    if ctx:is_item_hovered() then
+                        ctx:set_tooltip("Open Curve Editor")
                     end
                     ctx:spacing()
 
