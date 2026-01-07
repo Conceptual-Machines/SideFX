@@ -538,6 +538,32 @@ local function extract_fx_display_info(fx, container)
     return name, device_id
 end
 
+--- Setup modulator sidebar state and calculate width
+-- @param state_guid string GUID for state lookup
+-- @param cfg table Configuration table
+-- @return boolean is_collapsed, number width
+local function setup_modulator_sidebar_state(state_guid, cfg)
+    local state_module = require('lib.state')
+    local state = state_module.state
+
+    -- Initialize modulator sidebar state tables if needed
+    state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
+    state.expanded_mod_slot = state.expanded_mod_slot or {}
+
+    -- Check modulator sidebar state early for panel width calculation
+    -- Default to false (expanded) to match modulator_sidebar.lua
+    local is_mod_sidebar_collapsed = state.mod_sidebar_collapsed[state_guid] or false
+
+    local mod_sidebar_w
+    if is_mod_sidebar_collapsed then
+        mod_sidebar_w = cfg.mod_sidebar_collapsed_width
+    else
+        mod_sidebar_w = cfg.mod_sidebar_width
+    end
+
+    return is_mod_sidebar_collapsed, mod_sidebar_w
+end
+
 --- Draw right-click context menu for device panel
 local function draw_context_menu(ctx, fx, guid, name, enabled, opts)
     local r = reaper
@@ -681,24 +707,8 @@ function M.draw(ctx, fx, opts)
     local is_sidebar_collapsed = sidebar_collapsed[state_guid] or false
     local collapsed_sidebar_w = 8  -- Minimal width when collapsed (button is in header)
 
-    -- Get state module for modulator sidebar state
-    local state_module = require('lib.state')
-    local state = state_module.state
-
-    -- Initialize modulator sidebar state tables if needed
-    state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
-    state.expanded_mod_slot = state.expanded_mod_slot or {}
-
-    -- Check modulator sidebar state early for panel width calculation
-    -- Default to false (expanded) to match modulator_sidebar.lua
-    local is_mod_sidebar_collapsed = state.mod_sidebar_collapsed[state_guid] or false
-
-    local mod_sidebar_w
-    if is_mod_sidebar_collapsed then
-        mod_sidebar_w = cfg.mod_sidebar_collapsed_width
-    else
-        mod_sidebar_w = cfg.mod_sidebar_width
-    end
+    -- Setup modulator sidebar state and calculate width
+    local is_mod_sidebar_collapsed, mod_sidebar_w = setup_modulator_sidebar_state(state_guid, cfg)
 
     local interacted = false
 
