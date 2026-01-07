@@ -1069,39 +1069,33 @@ function M.draw(ctx, fx, opts)
                             ctx:pop_style_color()
                             ctx:spacing()
 
-                            -- Get modulator GUID for tracking links
-                            local mod_guid = expanded_modulator:get_guid()
-
-                            -- Find existing links for this modulator
+                            -- Find existing links for this modulator on the parent device
                             local existing_links = {}
-                            local mod_fx_idx = expanded_modulator.pointer
-                            if container and container:is_container() then
-                                for child in container:iter_container_children() do
-                                    local ok_check, is_mod = pcall(function() return fx_utils.is_modulator_fx(child) end)
-                                    if not (ok_check and is_mod) then
-                                        -- Check each parameter of this device
-                                        local ok_params, param_count = pcall(function() return child:get_num_params() end)
-                                        if ok_params and param_count then
-                                            for param_idx = 0, param_count - 1 do
-                                                -- Query if this param is linked to our modulator
-                                                local ok_query, link_fx_str = pcall(function()
-                                                    local plink_str = string.format("param.%d.plink.active", param_idx)
-                                                    return child:get_named_config_param(plink_str)
-                                                end)
-                                                if ok_query and link_fx_str then
-                                                    local link_fx_idx = tonumber(link_fx_str)
-                                                    if link_fx_idx == mod_fx_idx then
-                                                        -- This parameter is linked to our modulator
-                                                        local ok_pname, param_name = pcall(function() return child:get_param_name(param_idx) end)
-                                                        local ok_fname, fx_name = pcall(function() return child:get_name() end)
-                                                        if ok_pname and ok_fname then
-                                                            table.insert(existing_links, {
-                                                                fx = child,
-                                                                fx_name = fx_name,
-                                                                param_idx = param_idx,
-                                                                param_name = param_name
-                                                            })
-                                                        end
+                            local track = opts.track or state.track
+                            if track and track.pointer then
+                                local track_ptr = track.pointer
+                                local mod_track_idx = r.TrackFX_GetByGUID(track_ptr, expanded_modulator:get_guid())
+                                local target_track_idx = r.TrackFX_GetByGUID(track_ptr, fx:get_guid())
+
+                                if mod_track_idx and target_track_idx and mod_track_idx >= 0 and target_track_idx >= 0 then
+                                    -- Check each parameter of parent device for links to this modulator
+                                    local ok_params, param_count = pcall(function() return fx:get_num_params() end)
+                                    if ok_params and param_count then
+                                        for param_idx = 0, param_count - 1 do
+                                            -- Query if this param is linked to our modulator
+                                            local link_fx_str = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
+                                                string.format("param.%d.plink.active", param_idx))
+
+                                            if link_fx_str and link_fx_str ~= "" then
+                                                local link_fx_idx = tonumber(link_fx_str)
+                                                if link_fx_idx == mod_track_idx then
+                                                    -- This parameter is linked to our modulator
+                                                    local ok_pname, param_name = pcall(function() return fx:get_param_name(param_idx) end)
+                                                    if ok_pname and param_name then
+                                                        table.insert(existing_links, {
+                                                            param_idx = param_idx,
+                                                            param_name = param_name
+                                                        })
                                                     end
                                                 end
                                             end
@@ -1118,17 +1112,25 @@ function M.draw(ctx, fx, opts)
                                 ctx:spacing()
 
                                 for i, link in ipairs(existing_links) do
-                                    local link_label = string.format("%s → %s", link.fx_name, link.param_name)
-                                    ctx:text("• " .. link_label)
+                                    ctx:text("• " .. link.param_name)
                                     ctx:same_line()
                                     if ctx:button("X##remove_link_" .. i .. "_" .. guid, 20, 0) then
-                                        -- Remove this link
-                                        local ok_remove = pcall(function()
-                                            local plink_str = string.format("param.%d.plink.active", link.param_idx)
-                                            link.fx:set_named_config_param(plink_str, "-1")  -- -1 disables the link
-                                        end)
-                                        if ok_remove then
-                                            interacted = true
+                                        -- Remove this link using track-level API
+                                        local track = opts.track or state.track
+                                        if track and track.pointer then
+                                            local ok_remove = pcall(function()
+                                                local track_ptr = track.pointer
+                                                local target_track_idx = r.TrackFX_GetByGUID(track_ptr, fx:get_guid())
+                                                if target_track_idx and target_track_idx >= 0 then
+                                                    -- -1 disables the link
+                                                    r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
+                                                        string.format("param.%d.plink.active", link.param_idx),
+                                                        "-1")
+                                                end
+                                            end)
+                                            if ok_remove then
+                                                interacted = true
+                                            end
                                         end
                                     end
                                     if ctx:is_item_hovered() then
@@ -1141,99 +1143,79 @@ function M.draw(ctx, fx, opts)
                                 ctx:spacing()
                             end
 
-                            -- Link selection state (device + parameter)
+                            -- Link selection state (parameter only - device is implicit)
                             local link_state_key = "mod_link_" .. guid .. "_" .. expanded_slot_idx
                             state.mod_selected_target[link_state_key] = state.mod_selected_target[link_state_key] or {}
                             local link_state = state.mod_selected_target[link_state_key]
 
-                            -- Get all devices in this container (excluding modulators)
-                            local target_devices = {}
-                            if container and container:is_container() then
-                                for child in container:iter_container_children() do
-                                    local ok_check, is_mod = pcall(function() return fx_utils.is_modulator_fx(child) end)
-                                    if not (ok_check and is_mod) then
-                                        local ok_name, child_name = pcall(function() return child:get_name() end)
-                                        if ok_name and child_name then
-                                            table.insert(target_devices, {fx = child, name = child_name})
-                                        end
-                                    end
-                                end
-                            end
+                            -- Modulator can only modulate its parent device (fx parameter)
+                            -- No device selector needed - use the device that owns this container
+                            local target_device = fx  -- The device being displayed
 
-                            -- Device selector
-                            if #target_devices > 0 then
-                                local current_device_name = link_state.device_name or "Select Device..."
-                                ctx:set_next_item_width(control_width)
-                                if ctx:begin_combo("##link_device_" .. guid, current_device_name) then
-                                    for i, dev_info in ipairs(target_devices) do
-                                        if ctx:selectable(dev_info.name, link_state.device_name == dev_info.name) then
-                                            link_state.device_fx = dev_info.fx
-                                            link_state.device_name = dev_info.name
-                                            link_state.param_idx = nil  -- Reset parameter selection
-                                            link_state.param_name = nil
-                                            interacted = true
-                                        end
-                                    end
-                                    ctx:end_combo()
-                                end
-
-                                -- Parameter selector (if device selected)
-                                if link_state.device_fx then
-                                    local ok_params, param_count = pcall(function() return link_state.device_fx:get_num_params() end)
-                                    if ok_params and param_count and param_count > 0 then
-                                        local current_param_name = link_state.param_name or "Select Parameter..."
-                                        ctx:set_next_item_width(control_width)
-                                        if ctx:begin_combo("##link_param_" .. guid, current_param_name) then
-                                            for param_idx = 0, param_count - 1 do
-                                                local ok_pname, param_name = pcall(function() return link_state.device_fx:get_param_name(param_idx) end)
-                                                if ok_pname and param_name then
-                                                    if ctx:selectable(param_name, link_state.param_idx == param_idx) then
-                                                        link_state.param_idx = param_idx
-                                                        link_state.param_name = param_name
-                                                        interacted = true
-                                                    end
+                            -- Parameter selector for parent device
+                            if target_device then
+                                local ok_params, param_count = pcall(function() return target_device:get_num_params() end)
+                                if ok_params and param_count and param_count > 0 then
+                                    local current_param_name = link_state.param_name or "Select Parameter..."
+                                    ctx:set_next_item_width(control_width)
+                                    if ctx:begin_combo("##link_param_" .. guid, current_param_name) then
+                                        for param_idx = 0, param_count - 1 do
+                                            local ok_pname, param_name = pcall(function() return target_device:get_param_name(param_idx) end)
+                                            if ok_pname and param_name then
+                                                if ctx:selectable(param_name, link_state.param_idx == param_idx) then
+                                                    link_state.param_idx = param_idx
+                                                    link_state.param_name = param_name
+                                                    interacted = true
                                                 end
                                             end
-                                            ctx:end_combo()
                                         end
+                                        ctx:end_combo()
+                                    end
 
-                                        -- Add Link button
-                                        if link_state.param_idx ~= nil then
-                                            if ctx:button("Add Link##" .. guid, control_width, 0) then
-                                                -- Create modulation link using REAPER's param.X.plink API
-                                                local target_fx = link_state.device_fx
-                                                local target_param = link_state.param_idx
+                                    -- Add Link button
+                                    if link_state.param_idx ~= nil then
+                                        if ctx:button("Add Link##" .. guid, control_width, 0) then
+                                            -- Create modulation link using REAPER's param.X.plink API
+                                            local target_param = link_state.param_idx
 
-                                                -- Get FX indices for both modulator and target
-                                                local track = opts.track or state.track
-                                                if track then
-                                                    local ok_link = pcall(function()
-                                                        -- Use REAPER's parameter modulation API
-                                                        -- Format: param.X.plink.active=Y where X is target param, Y is modulator FX
-                                                        local mod_fx_idx = expanded_modulator.pointer
-                                                        local target_fx_idx = target_fx.pointer
+                                            -- Get track and FX indices
+                                            local track = opts.track or state.track
+                                            if track and track.pointer then
+                                                local ok_link = pcall(function()
+                                                    -- Get track-level FX indices (not container-relative)
+                                                    local track_ptr = track.pointer
+                                                    local mod_track_idx = r.TrackFX_GetByGUID(track_ptr, expanded_modulator:get_guid())
+                                                    local target_track_idx = r.TrackFX_GetByGUID(track_ptr, target_device:get_guid())
 
+                                                    if mod_track_idx and target_track_idx and mod_track_idx >= 0 and target_track_idx >= 0 then
                                                         -- Enable parameter link from modulator output (slider4=param 3) to target parameter
-                                                        local plink_str = string.format("param.%d.plink.active", target_param)
-                                                        target_fx:set_named_config_param(plink_str, tostring(mod_fx_idx))
+                                                        -- Use track-level FX index for plink
+                                                        r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
+                                                            string.format("param.%d.plink.active", target_param),
+                                                            tostring(mod_track_idx))
 
-                                                        -- Set modulator link params
-                                                        local plink_param_str = string.format("param.%d.plink.param", target_param)
-                                                        target_fx:set_named_config_param(plink_param_str, "3")  -- slider4 (Output) is param index 3
+                                                        -- Set which modulator parameter to use (slider4 = Output = param index 3)
+                                                        r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
+                                                            string.format("param.%d.plink.param", target_param),
+                                                            "3")
 
                                                         -- Set modulation amount to 100%
-                                                        local plink_scale_str = string.format("param.%d.plink.scale", target_param)
-                                                        target_fx:set_named_config_param(plink_scale_str, "1.0")
-                                                    end)
+                                                        r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
+                                                            string.format("param.%d.plink.scale", target_param),
+                                                            "1.0")
 
-                                                    if ok_link then
-                                                        -- Clear selection after adding link
-                                                        link_state.device_fx = nil
-                                                        link_state.device_name = nil
-                                                        link_state.param_idx = nil
-                                                        link_state.param_name = nil
-                                                        interacted = true
+                                                        -- Set offset to 0 (full range modulation)
+                                                        r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
+                                                            string.format("param.%d.plink.offset", target_param),
+                                                            "0.0")
                                                     end
+                                                end)
+
+                                                if ok_link then
+                                                    -- Clear selection after adding link
+                                                    link_state.param_idx = nil
+                                                    link_state.param_name = nil
+                                                    interacted = true
                                                 end
                                             end
                                         end
@@ -1241,7 +1223,7 @@ function M.draw(ctx, fx, opts)
                                 end
                             else
                                 ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
-                                ctx:text("No devices in container")
+                                ctx:text("No target device")
                                 ctx:pop_style_color()
                             end
                         end
