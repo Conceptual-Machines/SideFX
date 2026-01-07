@@ -377,7 +377,8 @@ slider1 == 1 ? (
 
 // Only advance LFO in Free mode OR when triggered in other modes
 one_shot = slider28;
-trigger_mode == 0 || triggered ? (
+// In one-shot mode, stop advancing once phase reaches 1
+(trigger_mode == 0 || triggered) && !(one_shot && lfo_phase >= 1) ? (
   lfo_phase += rate / srate;
   one_shot ? (
     // One shot: clamp at 1, don't wrap

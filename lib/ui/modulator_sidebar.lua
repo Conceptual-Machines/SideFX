@@ -100,6 +100,12 @@ local function add_modulator_to_device(device_container, modulator_type, track)
     -- Refind modulator after move (pointer changed)
     local moved_modulator = track:find_fx_by_guid(mod_guid)
 
+    -- Initialize default parameter values
+    if moved_modulator then
+        -- Set LFO Mode to Loop (0) by default
+        pcall(function() moved_modulator:set_param_normalized(PARAM.PARAM_LFO_MODE, 0) end)
+    end
+
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Add Modulator to Device", -1)
 
@@ -248,6 +254,13 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     -- Set control width shorter for compact layout
                     local control_width = 180
 
+                    -- UI button to open JSFX editor
+                    if ctx:button("Curve Editor##ui_" .. guid, control_width, 0) then
+                        r.TrackFX_Show(expanded_modulator.track.pointer, expanded_modulator.pointer, 3)
+                        interacted = true
+                    end
+                    ctx:spacing()
+
                     -- Rate section
                     ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
                     ctx:text("RATE")
@@ -335,9 +348,10 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
                     -- Trigger Mode dropdown
                     local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_TRIGGER_MODE) end)
+                    local trig_idx = nil  -- Declare outside so it's accessible in Advanced section
                     if ok_trig then
                         local trigger_modes = {"Free", "Transport", "MIDI", "Audio"}
-                        local trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
+                        trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
                         ctx:set_next_item_width(control_width)
                         if ctx:begin_combo("##trigger_mode_" .. guid, trigger_modes[trig_idx + 1] or "Free") then
                             for i, mode_name in ipairs(trigger_modes) do
@@ -424,7 +438,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         end
 
                         -- Attack/Release (always show in advanced)
-                        if ok_trig and trig_idx > 0 then
+                        if ok_trig and trig_idx and trig_idx > 0 then
                             -- Attack (slider24)
                             local ok_atk, attack_ms = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_ATTACK) end)
                             if ok_atk then
