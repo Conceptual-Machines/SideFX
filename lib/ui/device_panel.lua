@@ -8,6 +8,10 @@ local r = reaper
 local imgui = require('imgui')
 local widgets = require('lib.ui.widgets')
 local fx_utils = require('lib.fx_utils')
+local modulator_sidebar = require('lib.ui.modulator_sidebar')
+local drawing = require('lib.ui.drawing')
+local fx_naming = require('lib.fx_naming')
+local param_utils = require('lib.param_utils')
 
 local M = {}
 
@@ -66,11 +70,8 @@ local sidebar_collapsed = {}
 -- Track panel collapsed state per FX (by GUID) - collapses the whole panel to just header
 local panel_collapsed = {}
 
--- Track modulator sidebar collapsed state per device container (by GUID)
-local mod_sidebar_collapsed = {}
-
--- Track which modulator slot is expanded per device container (by GUID)
-local expanded_mod_slot = {}  -- {[device_guid] = slot_index} or nil
+-- NOTE: Modulator sidebar state is now managed by the state module
+-- (accessed via state.mod_sidebar_collapsed and state.expanded_mod_slot)
 
 -- Rename state: which FX is being renamed and the edit buffer
 local rename_active = {}    -- guid -> true if rename mode active
@@ -86,472 +87,291 @@ local rename_buffer = {}    -- guid -> current edit text
 -- @param width number Button width
 -- @param height number Button height
 -- @return boolean True if clicked
-local function draw_ui_icon(ctx, label, width, height)
-    -- Invisible button for interaction
-    r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
-    local clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
-
-    -- Get button bounds for drawing
-    local item_min_x, item_min_y = r.ImGui_GetItemRectMin(ctx.ctx)
-    local item_max_x, item_max_y = r.ImGui_GetItemRectMax(ctx.ctx)
-
-    -- Draw window/screen icon using DrawList
-    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-    local center_x = (item_min_x + item_max_x) / 2
-    local center_y = (item_min_y + item_max_y) / 2
-    local icon_size = 12
-    local half_size = icon_size / 2
-
-    -- Draw a simple window icon: rectangle with a line in the middle (like a window)
-    local x1 = center_x - half_size
-    local y1 = center_y - half_size
-    local x2 = center_x + half_size
-    local y2 = center_y + half_size
-
-    -- Greyish color for the icon
-    local icon_color = 0xAAAAAAFF
-    -- Border color
-    local border_color = 0x666666FF
-
-    -- Draw border around the button
-    r.ImGui_DrawList_AddRect(draw_list, item_min_x, item_min_y, item_max_x, item_max_y, border_color, 0, 0, 1.0)
-
-    -- Outer rectangle (window frame) - signature: (draw_list, x1, y1, x2, y2, color, rounding, flags, thickness)
-    r.ImGui_DrawList_AddRect(draw_list, x1, y1, x2, y2, icon_color, 0, 0, 2)
-    -- Inner line (window pane divider)
-    r.ImGui_DrawList_AddLine(draw_list, center_x, y1, center_x, y2, icon_color, 1.5)
-
-    return clicked
-end
-
---- Draw an ON/OFF circle indicator with colored background
--- @param ctx ImGui context
--- @param label string Label for the button
--- @param is_on boolean Whether the state is ON
--- @param width number Button width
--- @param height number Button height
--- @param bg_color_on number RGBA color for ON background
--- @param bg_color_off number RGBA color for OFF background
--- @return boolean True if clicked
-local function draw_on_off_circle(ctx, label, is_on, width, height, bg_color_on, bg_color_off)
-    -- Get cursor position for drawing
-    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-    local center_x = cursor_x + width / 2
-    local center_y = cursor_y + height / 2
-    local radius = 6  -- Small circle radius
-
-    -- Invisible button for interaction
-    r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
-    local clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
-    local is_hovered = r.ImGui_IsItemHovered(ctx.ctx)
-
-    -- Draw background and circle
-    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-
-    -- Draw background rectangle
-    local bg_color = is_on and (bg_color_on or colors.bypass_on) or (bg_color_off or colors.bypass_off)
-    r.ImGui_DrawList_AddRectFilled(draw_list, cursor_x, cursor_y, cursor_x + width, cursor_y + height, bg_color, 0)
-
-    if is_on then
-        -- Filled circle for ON state
-        r.ImGui_DrawList_AddCircleFilled(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12)
-    else
-        -- Empty circle (outline only) for OFF state
-        r.ImGui_DrawList_AddCircle(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12, 2)
-    end
-
-    return clicked
-end
-
---- Draw a knob control
--- @param ctx ImGui context
--- @param label string Label for the knob
--- @param value number Current value (0-1)
--- @param size number Diameter of the knob
--- @return boolean changed, number new_value
-local function draw_knob(ctx, label, value, size)
-    local changed = false
-    local new_value = value
-
-    size = size or 32
-    local radius = size / 2
-
-    -- Get cursor position for drawing
-    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-    local center_x = cursor_x + radius
-    local center_y = cursor_y + radius
-
-    -- Invisible button for interaction
-    r.ImGui_InvisibleButton(ctx.ctx, label, size, size)
-    local is_active = r.ImGui_IsItemActive(ctx.ctx)
-    local is_hovered = r.ImGui_IsItemHovered(ctx.ctx)
-
-    -- Handle dragging
-    if is_active then
-        local delta_y = r.ImGui_GetMouseDragDelta(ctx.ctx, 0, 0, 0)
-        if delta_y ~= 0 then
-            local _, dy = r.ImGui_GetMouseDragDelta(ctx.ctx, 0, 0, 0)
-            new_value = math.max(0, math.min(1, value - dy * 0.005))
-            r.ImGui_ResetMouseDragDelta(ctx.ctx, 0)
-            if new_value ~= value then
-                changed = true
-            end
-        end
-    end
-
-    -- Draw knob
-    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-
-    -- Background circle
-    local bg_color = is_hovered and 0x444444FF or 0x333333FF
-    r.ImGui_DrawList_AddCircleFilled(draw_list, center_x, center_y, radius - 2, bg_color)
-
-    -- Border
-    local border_color = is_active and 0x88AACCFF or 0x666666FF
-    r.ImGui_DrawList_AddCircle(draw_list, center_x, center_y, radius - 2, border_color, 0, 2)
-
-    -- Value arc (270 degree range, starting from bottom-left)
-    local start_angle = 0.75 * math.pi  -- 135 degrees (bottom-left)
-    local end_angle = 2.25 * math.pi    -- 405 degrees (bottom-right)
-    local value_angle = start_angle + (end_angle - start_angle) * new_value
-
-    -- Draw filled arc for value
-    if new_value > 0.01 then
-        local arc_radius = radius - 5
-        local segments = 24
-        local step = (value_angle - start_angle) / segments
-        for i = 0, segments - 1 do
-            local a1 = start_angle + step * i
-            local a2 = start_angle + step * (i + 1)
-            local x1 = center_x + math.cos(a1) * arc_radius
-            local y1 = center_y + math.sin(a1) * arc_radius
-            local x2 = center_x + math.cos(a2) * arc_radius
-            local y2 = center_y + math.sin(a2) * arc_radius
-            r.ImGui_DrawList_AddLine(draw_list, x1, y1, x2, y2, 0x88AACCFF, 3)
-        end
-    end
-
-    -- Indicator line
-    local ind_inner = radius * 0.3
-    local ind_outer = radius * 0.7
-    local ind_x1 = center_x + math.cos(value_angle) * ind_inner
-    local ind_y1 = center_y + math.sin(value_angle) * ind_inner
-    local ind_x2 = center_x + math.cos(value_angle) * ind_outer
-    local ind_y2 = center_y + math.sin(value_angle) * ind_outer
-    r.ImGui_DrawList_AddLine(draw_list, ind_x1, ind_y1, ind_x2, ind_y2, 0xFFFFFFFF, 2)
-
-    return changed, new_value
-end
-
---- Draw a fader control (vertical slider with fill)
--- @param ctx ImGui context
--- @param label string Label for the fader
--- @param value number Current value
--- @param min_val number Minimum value
--- @param max_val number Maximum value
--- @param width number Width of fader
--- @param height number Height of fader
--- @param format string Display format
--- @return boolean changed, number new_value
-local function draw_fader(ctx, label, value, min_val, max_val, width, height, format)
-    local changed = false
-    local new_value = value
-
-    -- Get cursor position for drawing
-    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-
-    -- Calculate fill height based on value
-    local normalized = (value - min_val) / (max_val - min_val)
-    local fill_height = height * normalized
-
-    -- Draw background
-    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-    r.ImGui_DrawList_AddRectFilled(draw_list, cursor_x, cursor_y, cursor_x + width, cursor_y + height, 0x1A1A1AFF, 3)
-
-    -- Draw fill from bottom
-    if fill_height > 0 then
-        local fill_top = cursor_y + height - fill_height
-        -- Gradient-like effect with multiple colors
-        local fill_color = 0x5588AACC
-        r.ImGui_DrawList_AddRectFilled(draw_list, cursor_x + 2, fill_top, cursor_x + width - 2, cursor_y + height - 2, fill_color, 2)
-    end
-
-    -- Border
-    r.ImGui_DrawList_AddRect(draw_list, cursor_x, cursor_y, cursor_x + width, cursor_y + height, 0x555555FF, 3)
-
-    -- Invisible slider on top for interaction
-    r.ImGui_SetCursorScreenPos(ctx.ctx, cursor_x, cursor_y)
-    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_FrameBg(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_FrameBgHovered(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_FrameBgActive(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_SliderGrab(), 0xAAAAAAFF)
-    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_SliderGrabActive(), 0xFFFFFFFF)
-    r.ImGui_PushStyleVar(ctx.ctx, r.ImGui_StyleVar_GrabMinSize(), 8)
-
-    changed, new_value = r.ImGui_VSliderDouble(ctx.ctx, label, width, height, value, min_val, max_val, format)
-
-    r.ImGui_PopStyleVar(ctx.ctx)
-    r.ImGui_PopStyleColor(ctx.ctx, 5)
-
-    return changed, new_value
-end
-
---------------------------------------------------------------------------------
--- Helpers
---------------------------------------------------------------------------------
-
--- Get the internal REAPER name (with prefix)
-local function get_internal_name(fx)
-    if not fx then return "" end
-    local ok, renamed = pcall(function() return fx:get_named_config_param("renamed_name") end)
-    if ok and renamed and renamed ~= "" then
-        return renamed
-    end
-    local ok2, name = pcall(function() return fx:get_name() end)
-    return ok2 and name or ""
-end
-
--- Extract the SideFX prefix from a name (R1_C1:, D1:, R1:)
-local function extract_prefix(name)
-    local prefix = name:match("^(R%d+_C%d+:%s*)")
-    if prefix then return prefix end
-    prefix = name:match("^(D%d+:%s*)")
-    if prefix then return prefix end
-    prefix = name:match("^(R%d+:%s*)")
-    if prefix then return prefix end
-    return ""
-end
-
-local function get_display_name(fx)
-    if not fx then return "Unknown" end
-
-    -- Check for custom display name first (SideFX-only renaming)
-    local ok_guid, guid = pcall(function() return fx:get_guid() end)
-    if ok_guid and guid then
-        local state_module = require('lib.state')
-        local state = state_module.state
-        if state.display_names[guid] then
-            return state.display_names[guid]
-        end
-    end
-
-    -- Fall back to internal name with prefixes stripped
-    local name = get_internal_name(fx)
-
-    -- Strip SideFX internal prefixes for clean UI display
-    -- Patterns from most specific to least specific
-    name = name:gsub("^R%d+_C%d+_D%d+_FX:%s*", "")  -- R1_C1_D1_FX: prefix
-    name = name:gsub("^R%d+_C%d+_D%d+:%s*", "")     -- R1_C1_D1: prefix
-    name = name:gsub("^R%d+_C%d+:%s*", "")          -- R1_C1: prefix
-    name = name:gsub("^D%d+_FX:%s*", "")            -- D1_FX: prefix
-    name = name:gsub("^D%d+:%s*", "")               -- D1: prefix
-    name = name:gsub("^R%d+:%s*", "")               -- R1: prefix
-
-    -- Strip common plugin format prefixes
-    name = name:gsub("^VST3?: ", "")
-    name = name:gsub("^AU: ", "")
-    name = name:gsub("^JS: ", "")
-    name = name:gsub("^CLAP: ", "")
-
-    return name
-end
-
--- Rename an FX while preserving its internal prefix
-local function rename_fx(fx, new_display_name)
-    if not fx or not new_display_name then return false end
-    local internal_name = get_internal_name(fx)
-    local prefix = extract_prefix(internal_name)
-    local new_internal_name = prefix .. new_display_name
-    local ok = pcall(function()
-        fx:set_named_config_param("renamed_name", new_internal_name)
-    end)
-    return ok
-end
-
-local function truncate(str, max_len)
-    if #str <= max_len then return str end
-    return str:sub(1, max_len - 2) .. ".."
-end
-
--- Debug logging for parameter detection (only logs once per FX+param combo)
-local DEBUG_PARAMS = false  -- Set to true to enable logging
-local logged_params = {}   -- Cache to prevent repeated logging
-
---- Detect if a parameter is a switch (discrete) vs continuous
--- @param fx FX object
--- @param param_idx Parameter index
--- @return boolean true if switch, false if continuous
-local function is_switch_param(fx, param_idx)
-    -- Get parameter step sizes from REAPER API
-    -- Returns: retval, step, smallstep, largestep, istoggle
-    local retval_step, step, smallstep, largestep, is_toggle = r.TrackFX_GetParameterStepSizes(fx.track.pointer, fx.pointer, param_idx)
-
-    -- Get the parameter's value range
-    local retval_range, minval, maxval, midval = r.TrackFX_GetParamEx(fx.track.pointer, fx.pointer, param_idx)
-
-    -- Get param name
-    local param_name = "?"
-    pcall(function() param_name = fx:get_param_name(param_idx) end)
-
-    -- Create unique key for logging
-    local log_key = tostring(fx.pointer) .. "_" .. param_idx
-
-    local result = false
-    local reason = "default"
-
-    -- 1. API says it's explicitly a toggle
-    if is_toggle == true then
-        result = true
-        reason = "API is_toggle"
-    -- 2. API provides step info and step covers most of range (2 values)
-    elseif retval_step and step and step > 0 and retval_range and maxval and minval then
-        local range = maxval - minval
-        if range > 0 and step >= range * 0.5 then
-            result = true
-            reason = string.format("step=%s >= range/2", step)
-        end
-    end
-
-    -- 3. Fallback: check param name for common switch keywords
-    -- Only if API didn't provide info (retval_step=false)
-    if not result and not retval_step and param_name then
-        local lower = param_name:lower()
-        -- Common switch/toggle parameter names
-        if lower == "bypass" or lower == "on" or lower == "off" or
-           lower == "enabled" or lower == "enable" or lower == "mute" or
-           lower == "solo" or lower == "delta" or
-           lower:find("on/off") or lower:find("mode$") then
-            result = true
-            reason = "name match: " .. lower
-        end
-    end
-
-    -- Log only once per param
-    if DEBUG_PARAMS and not logged_params[log_key] then
-        logged_params[log_key] = true
-        r.ShowConsoleMsg(string.format(
-            "[%d] '%s': retval=%s, step=%s, is_toggle=%s -> %s (%s)\n",
-            param_idx,
-            param_name or "nil",
-            tostring(retval_step),
-            tostring(step),
-            tostring(is_toggle),
-            result and "SWITCH" or "CONTINUOUS",
-            reason
-        ))
-    end
-
-    return result
-end
-
--- Call this to reset logging (e.g., when FX changes)
-local function reset_param_logging()
-    logged_params = {}
-end
-
 --------------------------------------------------------------------------------
 -- Modulator Support
 --------------------------------------------------------------------------------
 
 -- Available modulator types
-local MODULATOR_TYPES = {
-    {id = "bezier_lfo", name = "Bezier LFO", jsfx = "JS:SideFX/SideFX_Modulator"},
-    -- Future: Classic LFO, ADSR, etc.
-}
 
---- Get all modulators inside a device container
--- @param device_container TrackFX D-container
--- @return table Array of modulator FX objects
-local function get_device_modulators(device_container)
-    if not device_container or not device_container:is_container() then
-        return {}
-    end
+--------------------------------------------------------------------------------
+-- Device Panel Component - Helper Functions
+--------------------------------------------------------------------------------
 
-    local modulators = {}
-    local ok, iter = pcall(function() return device_container:iter_container_children() end)
-    if not ok then return {} end
+--- Draw device panel header (collapsed or expanded)
+local function draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors)
+    local r = reaper
+    local imgui = require('imgui')
+    local interacted = false
 
-    for child in iter do
-        if fx_utils.is_modulator_fx(child) then
-            table.insert(modulators, child)
+    -- Header row using table for proper alignment
+    if is_panel_collapsed then
+        -- Collapsed header: collapse button | path
+        if r.ImGui_BeginTable(ctx.ctx, "header_collapsed_" .. guid, 2, 0) then
+            r.ImGui_TableSetupColumn(ctx.ctx, "collapse", r.ImGui_TableColumnFlags_WidthFixed(), 24)
+            r.ImGui_TableSetupColumn(ctx.ctx, "path", r.ImGui_TableColumnFlags_WidthStretch())
+
+            r.ImGui_TableNextRow(ctx.ctx)
+
+            -- Collapse button
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+            if ctx:button("▶##collapse_" .. state_guid, 20, 20) then
+                panel_collapsed[state_guid] = false
+                interacted = true
+            end
+            ctx:pop_style_color(3)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Expand panel")
+            end
+
+            -- Path identifier
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+            if device_id then
+                ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
+                ctx:text("[" .. device_id .. "]")
+                ctx:pop_style_color()
+            end
+
+            r.ImGui_EndTable(ctx.ctx)
         end
-    end
+    else
+        -- Expanded header: drag | name (50%) | path (15%) | ui | on | x | collapse (buttons fixed width)
+        local table_flags = imgui.TableFlags.SizingStretchProp()
+        if ctx:begin_table("header_" .. guid, 7, table_flags) then
+            ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
+            ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 50)  -- 50%
+            ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 15)  -- 15%
+            ctx:table_setup_column("ui", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
+            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
+            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
+            ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
 
-    return modulators
+            ctx:table_next_row()
+
+            -- Drag handle / collapse toggle
+            ctx:table_set_column_index(0)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+            local collapse_icon = is_panel_collapsed and "▶" or "≡"
+            if ctx:button(collapse_icon .. "##drag", 20, 20) then
+                -- Toggle panel collapse on click
+                panel_collapsed[state_guid] = not is_panel_collapsed
+                interacted = true
+            end
+            ctx:pop_style_color(3)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip(is_panel_collapsed and "Expand panel" or "Collapse panel (drag to reorder)")
+            end
+
+            if ctx:begin_drag_drop_source() then
+                ctx:set_drag_drop_payload("FX_GUID", drag_guid)
+                ctx:text("Moving: " .. fx_naming.truncate(name, 20))
+                ctx:end_drag_drop_source()
+            end
+
+            if ctx:begin_drag_drop_target() then
+                -- Accept FX reorder drops
+                local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
+                if accepted and payload and payload ~= drag_guid then
+                    if opts.on_drop then
+                        opts.on_drop(payload, drag_guid)
+                    end
+                    interacted = true
+                end
+
+                -- Accept plugin drops (insert before this FX/container)
+                local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                if accepted_plugin and plugin_name then
+                    if opts.on_plugin_drop then
+                        opts.on_plugin_drop(plugin_name, fx.pointer)
+                    end
+                    interacted = true
+                end
+
+                -- Accept rack drops (insert before this FX/container)
+                local accepted_rack = ctx:accept_drag_drop_payload("RACK_ADD")
+                if accepted_rack then
+                    if opts.on_rack_drop then
+                        opts.on_rack_drop(fx.pointer)
+                    end
+                    interacted = true
+                end
+
+                ctx:end_drag_drop_target()
+            end
+
+            -- Device name (editable)
+            ctx:table_set_column_index(1)
+
+            local sidefx_state = require('lib.state').state
+            local is_renaming = rename_active[guid] or false
+
+            if is_renaming then
+                -- Rename mode: show input box
+                ctx:set_next_item_width(-1)
+                local changed, text = ctx:input_text("##rename_" .. guid, rename_buffer[guid] or name, imgui.InputTextFlags.EnterReturnsTrue())
+
+                if changed then
+                    -- Save new display name
+                    sidefx_state.display_names[guid] = text
+                    local state_module = require('lib.state')
+                    state_module.save_display_names()
+                    rename_active[guid] = nil
+                    rename_buffer[guid] = ""
+                end
+
+                if ctx:is_item_deactivated() then
+                    rename_active[guid] = nil
+                    rename_buffer[guid] = ""
+                end
+            else
+                -- Normal mode: show text, double-click to rename
+                local display_name = fx_naming.truncate(name, 50)  -- Reasonable max length
+                if not enabled then
+                    ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
+                end
+
+                ctx:text(display_name)
+
+                if not enabled then
+                    ctx:pop_style_color()
+                end
+
+                if ctx:is_item_hovered() and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                    rename_active[guid] = true
+                    rename_buffer[guid] = name
+                end
+            end
+
+            -- Path identifier
+            ctx:table_set_column_index(2)
+            if device_id then
+                ctx:push_style_color(r.ImGui_Col_Text(), 0x666666FF)
+                ctx:text("[" .. device_id .. "]")
+                ctx:pop_style_color()
+            end
+
+            -- UI button
+            ctx:table_set_column_index(3)
+            if drawing.draw_ui_icon(ctx, "##ui_header_" .. state_guid, math.min(24, 24), 20) then
+                fx:show(3)
+                interacted = true
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Open plugin UI")
+            end
+
+            -- ON/OFF toggle
+            ctx:table_set_column_index(4)
+            if drawing.draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, math.min(24, 24), 20, colors.bypass_on, colors.bypass_off) then
+                fx:set_enabled(not enabled)
+                interacted = true
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip(enabled and "Bypass" or "Enable")
+            end
+
+            -- Delete button
+            ctx:table_set_column_index(5)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x884444FF)
+            if ctx:button("×##delete_" .. state_guid, 20, 20) then
+                if opts.on_delete then
+                    opts.on_delete(fx)
+                else
+                    fx:delete()
+                end
+                interacted = true
+            end
+            ctx:pop_style_color(2)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Delete device")
+            end
+
+            -- Collapse button (rightmost)
+            ctx:table_set_column_index(6)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+            if ctx:button("◀##collapse_" .. state_guid, 20, 20) then
+                panel_collapsed[state_guid] = true
+                interacted = true
+            end
+            ctx:pop_style_color(3)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Collapse panel")
+            end
+
+            ctx:end_table()
+        end  -- end expanded header
+    end  -- end if is_panel_collapsed check for header
+
+    return interacted
 end
 
---- Add a modulator to a device container
--- @param device_container TrackFX D-container
--- @param modulator_type table Modulator type definition
--- @param track Track object
--- @return TrackFX|nil Modulator FX object or nil on failure
-local function add_modulator_to_device(device_container, modulator_type, track)
-    if not track or not device_container then return nil end
-    if not device_container:is_container() then return nil end
+--- Draw collapsed panel body (minimal view with UI/ON/X buttons)
+local function draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opts, colors)
+    local r = reaper
+    local interacted = false
 
-    r.Undo_BeginBlock()
-    r.PreventUIRefresh(1)
+    ctx:separator()
 
-    -- Get container GUID before operations (GUID is stable)
-    local container_guid = device_container:get_guid()
-    if not container_guid then
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Modulator to Device (failed)", -1)
-        return nil
+    -- Collapsed view table layout
+    -- Row 1: ui | on | x
+    -- Row 2: name
+    if r.ImGui_BeginTable(ctx.ctx, "controls_" .. guid, 3, r.ImGui_TableFlags_SizingStretchSame()) then
+        r.ImGui_TableSetupColumn(ctx.ctx, "ui", r.ImGui_TableColumnFlags_WidthStretch())
+        r.ImGui_TableSetupColumn(ctx.ctx, "on", r.ImGui_TableColumnFlags_WidthStretch())
+        r.ImGui_TableSetupColumn(ctx.ctx, "x", r.ImGui_TableColumnFlags_WidthStretch())
+
+        r.ImGui_TableNextRow(ctx.ctx)
+
+        -- UI button
+        r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+        local ui_avail_w = ctx:get_content_region_avail()
+        if ui_avail_w > 0 and drawing.draw_ui_icon(ctx, "##ui_" .. state_guid, ui_avail_w, 24) then
+            fx:show(3)
+            interacted = true
+        end
+        if r.ImGui_IsItemHovered(ctx.ctx) then
+            ctx:set_tooltip("Open " .. name)
+        end
+
+        -- ON/OFF toggle
+        r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+        local avail_w, avail_h = ctx:get_content_region_avail()
+        if avail_w > 0 and drawing.draw_on_off_circle(ctx, "##on_off_" .. state_guid, enabled, avail_w, 24, colors.bypass_on, colors.bypass_off) then
+            fx:set_enabled(not enabled)
+            interacted = true
+        end
+
+        -- Close button
+        r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
+        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x444444FF)
+        if ctx:button("×", -1, 24) then
+            if opts.on_delete then
+                opts.on_delete(fx)
+            else
+                fx:delete()
+            end
+            interacted = true
+        end
+        ctx:pop_style_color(2)
+
+        r.ImGui_EndTable(ctx.ctx)
     end
 
-    -- Add modulator JSFX at track level first
-    local modulator = track:add_fx_by_name(modulator_type.jsfx, false, -1)
-    if not modulator or modulator.pointer < 0 then
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Modulator to Device (failed)", -1)
-        return nil
-    end
+    -- Row 2: name
+    local imgui = require('imgui')
+    ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
+    ctx:text(name)
+    ctx:pop_style_color()
 
-    local mod_guid = modulator:get_guid()
-
-    -- Refind container by GUID (important for nested containers)
-    local fresh_container = track:find_fx_by_guid(container_guid)
-    if not fresh_container then
-        if modulator then modulator:delete() end
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Modulator to Device (container lost)", -1)
-        return nil
-    end
-
-    -- Refresh pointer for deeply nested containers
-    if fresh_container.pointer and fresh_container.pointer >= 0x2000000 and fresh_container.refresh_pointer then
-        fresh_container:refresh_pointer()
-    end
-
-    -- Refind modulator by GUID
-    modulator = track:find_fx_by_guid(mod_guid)
-    if not modulator then
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Modulator to Device (modulator lost)", -1)
-        return nil
-    end
-
-    -- Get insert position (append to end of container)
-    local insert_pos = fresh_container:get_container_child_count()
-
-    -- Move modulator into container
-    local success = fresh_container:add_fx_to_container(modulator, insert_pos)
-
-    if not success then
-        if modulator then modulator:delete() end
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Modulator to Device (move failed)", -1)
-        return nil
-    end
-
-    -- Refind modulator after move (pointer changed)
-    local moved_modulator = track:find_fx_by_guid(mod_guid)
-
-    r.PreventUIRefresh(-1)
-    r.Undo_EndBlock("SideFX: Add Modulator to Device", -1)
-
-    return moved_modulator
+    return interacted
 end
 
 --------------------------------------------------------------------------------
@@ -602,7 +422,7 @@ function M.draw(ctx, fx, opts)
         if ok_id then device_id = id end
     else
         -- No container, use regular display name
-        local ok2, fx_name = pcall(function() return get_display_name(fx) end)
+        local ok2, fx_name = pcall(function() return fx_naming.get_display_name(fx) end)
         if ok2 then name = fx_name end
     end
 
@@ -642,14 +462,17 @@ function M.draw(ctx, fx, opts)
     local is_sidebar_collapsed = sidebar_collapsed[state_guid] or false
     local collapsed_sidebar_w = 8  -- Minimal width when collapsed (button is in header)
 
-    -- Check modulator sidebar state early for panel width calculation
-    if mod_sidebar_collapsed[state_guid] == nil then
-        mod_sidebar_collapsed[state_guid] = true
-    end
-    local is_mod_sidebar_collapsed = mod_sidebar_collapsed[state_guid]
+    -- Get state module for modulator sidebar state
+    local state_module = require('lib.state')
+    local state = state_module.state
 
-    -- Set sidebar width (fixed, doesn't expand when controls shown)
-    local expanded_slot_idx = expanded_mod_slot[state_guid]
+    -- Initialize modulator sidebar state tables if needed
+    state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
+    state.expanded_mod_slot = state.expanded_mod_slot or {}
+
+    -- Check modulator sidebar state early for panel width calculation
+    -- Default to false (expanded) to match modulator_sidebar.lua
+    local is_mod_sidebar_collapsed = state.mod_sidebar_collapsed[state_guid] or false
 
     local mod_sidebar_w
     if is_mod_sidebar_collapsed then
@@ -721,868 +544,29 @@ function M.draw(ctx, fx, opts)
             -- === MODULATOR SIDEBAR ===
             r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
 
-            -- TODO: Draw modulator sidebar here
-            if is_mod_sidebar_collapsed then
-                -- Collapsed: show expand button
-                if ctx:button("▶##expand_mod_" .. guid, 20, 30) then
-                    mod_sidebar_collapsed[state_guid] = false
-                    interacted = true
-                end
-                if ctx:is_item_hovered() then
-                    ctx:set_tooltip("Expand Modulators")
-                end
-            else
-                -- Expanded: show grid
-                if ctx:button("◀##collapse_mod_" .. guid, 24, 20) then
-                    mod_sidebar_collapsed[state_guid] = true
-                    interacted = true
-                end
-                if ctx:is_item_hovered() then
-                    ctx:set_tooltip("Collapse Modulators")
-                end
-                ctx:same_line()
-                ctx:text("Modulators")
-                ctx:separator()
-
-                -- Get modulators for this device
-                local modulators = get_device_modulators(container)
-                local expanded_slot_idx = expanded_mod_slot[state_guid]
-
-                -- Require imgui for Col constants
-                local imgui = require('imgui')
-
-                -- Require state module for modulator UI state
-                local state_module = require('lib.state')
-                local state = state_module.state
-
-                -- Use fixed square dimensions for slots
-                local slot_width = cfg.mod_slot_width
-                local slot_height = cfg.mod_slot_height
-
-                -- 4×2 grid of modulator slots
-                ctx:dummy(8, 1)  -- Left padding
-
-                -- Use basic table - let button sizes control column width
-                if ctx:begin_table("mod_grid_" .. guid, 4) then
-                    -- Draw 2 rows
-                    for row = 0, 1 do
-                        ctx:table_next_row(0, slot_height)
-
-                        for col = 0, 3 do
-                            ctx:table_set_column_index(col)
-
-                            local slot_idx = row * 4 + col
-                            local modulator = modulators[slot_idx + 1]  -- Lua 1-based
-                            local slot_id = "slot_" .. slot_idx .. "_" .. guid
-
-                            if modulator then
-                                -- Slot has modulator - show short name (LFO1, LFO2, etc.)
-                                local display_name = "LFO" .. (slot_idx + 1)
-
-                                local is_expanded = (expanded_slot_idx == slot_idx)
-                                if is_expanded then
-                                    ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-                                end
-
-                                if ctx:button(display_name .. "##" .. slot_id, slot_width, slot_height) then
-                                    -- Toggle expansion
-                                    if expanded_mod_slot[state_guid] == slot_idx then
-                                        expanded_mod_slot[state_guid] = nil
-                                    else
-                                        expanded_mod_slot[state_guid] = slot_idx
-                                    end
-                                    interacted = true
-                                end
-
-                                -- Right-click context menu for modulator
-                                if ctx:begin_popup_context_item("mod_ctx_" .. slot_id) then
-                                    if ctx:selectable("Delete Modulator") then
-                                        -- Delete modulator
-                                        local ok_del = pcall(function()
-                                            modulator:delete()
-                                        end)
-                                        if ok_del then
-                                            -- Clear expansion state for this slot
-                                            expanded_mod_slot[state_guid] = nil
-                                            -- Refresh FX list
-                                            if opts.refresh_fx_list then
-                                                opts.refresh_fx_list()
-                                            end
-                                            interacted = true
-                                        end
-                                    end
-                                    ctx:end_popup()
-                                end
-
-                                if is_expanded then
-                                    ctx:pop_style_color()
-                                end
-                            else
-                                -- Empty slot - show + button
-                                if ctx:button("+##" .. slot_id, slot_width, slot_height) then
-                                    -- Show modulator type dropdown (simplified for now - just add Bezier LFO)
-                                    local track = opts.track or state.track
-                                    if track and container then
-                                        local new_mod = add_modulator_to_device(container, MODULATOR_TYPES[1], track)
-                                        if new_mod and opts.refresh_fx_list then
-                                            opts.refresh_fx_list()
-                                        end
-                                    end
-                                    interacted = true
-                                end
-                                if ctx:is_item_hovered() then
-                                    ctx:set_tooltip("Add Modulator")
-                                end
-                            end
-                        end
-                    end
-
-                    ctx:end_table()
-                end
-
-                -- Show expanded modulator parameters
-                if expanded_slot_idx ~= nil then
-                    local expanded_modulator = modulators[expanded_slot_idx + 1]
-                    if expanded_modulator then
-                        -- Get parameter values safely (ReaWrap uses get_num_params, not get_param_count)
-                        local ok, param_count = pcall(function() return expanded_modulator:get_num_params() end)
-                        if ok and param_count and param_count > 0 then
-                            ctx:separator()
-                            ctx:spacing()
-                            -- Set control width shorter for compact layout
-                            local control_width = 180
-
-                            -- Rate section
-                            ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
-                            ctx:text("RATE")
-                            ctx:pop_style_color()
-                            ctx:spacing()
-
-                            -- Tempo Mode: Free/Sync (slider1)
-                            local ok_tempo, tempo_mode = pcall(function() return expanded_modulator:get_param_normalized(0) end)
-                            if ok_tempo then
-                                if ctx:radio_button("Free##tempo_" .. guid, tempo_mode < 0.5) then
-                                    expanded_modulator:set_param_normalized(0, 0)
-                                    interacted = true
-                                end
-                                ctx:same_line()
-                                if ctx:radio_button("Sync##tempo_" .. guid, tempo_mode >= 0.5) then
-                                    expanded_modulator:set_param_normalized(0, 1)
-                                    interacted = true
-                                end
-                            end
-
-                            -- Show Hz slider when Free mode, Sync Rate dropdown when Sync mode
-                            if ok_tempo and tempo_mode < 0.5 then
-                                -- Free mode - show Hz slider (slider2)
-                                local ok_rate, rate_hz = pcall(function() return expanded_modulator:get_param_normalized(1) end)
-                                if ok_rate then
-                                    ctx:set_next_item_width(control_width)
-                                    local changed, new_rate = ctx:slider_double("Hz##rate_" .. guid, rate_hz, 0.01, 20, "%.2f")
-                                    if changed then
-                                        expanded_modulator:set_param_normalized(1, new_rate)
-                                        interacted = true
-                                    end
-                                end
-                            else
-                                -- Sync mode - show sync rate dropdown (slider3)
-                                local ok_sync, sync_rate_idx = pcall(function() return expanded_modulator:get_param_normalized(2) end)
-                                if ok_sync then
-                                    local sync_rates = {"8 bars", "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/4T", "1/4.", "1/8", "1/8T", "1/8.", "1/16", "1/16T", "1/16.", "1/32", "1/32T", "1/32.", "1/64"}
-                                    local current_idx = math.floor(sync_rate_idx * 17 + 0.5)
-                                    ctx:set_next_item_width(control_width)
-                                    if ctx:begin_combo("##sync_rate_" .. guid, sync_rates[current_idx + 1] or "1/4") then
-                                        for i, rate_name in ipairs(sync_rates) do
-                                            if ctx:selectable(rate_name, i - 1 == current_idx) then
-                                                expanded_modulator:set_param_normalized(2, (i - 1) / 17)
-                                                interacted = true
-                                            end
-                                        end
-                                        ctx:end_combo()
-                                    end
-                                end
-                            end
-
-                            ctx:spacing()
-
-                            -- Phase (slider5)
-                            local ok_phase, phase = pcall(function() return expanded_modulator:get_param_normalized(4) end)
-                            if ok_phase then
-                                ctx:set_next_item_width(control_width)
-                                local phase_deg = phase * 360
-                                local changed, new_phase_deg = ctx:slider_double("Phase##phase_" .. guid, phase_deg, 0, 360, "%.0f°")
-                                if changed then
-                                    expanded_modulator:set_param_normalized(4, new_phase_deg / 360)
-                                    interacted = true
-                                end
-                            end
-
-                            -- Depth (slider6)
-                            local ok_depth, depth = pcall(function() return expanded_modulator:get_param_normalized(5) end)
-                            if ok_depth then
-                                ctx:set_next_item_width(control_width)
-                                local depth_pct = depth * 100
-                                local changed, new_depth_pct = ctx:slider_double("Depth##depth_" .. guid, depth_pct, 0, 100, "%.0f%%")
-                                if changed then
-                                    expanded_modulator:set_param_normalized(5, new_depth_pct / 100)
-                                    interacted = true
-                                end
-                            end
-
-                            ctx:spacing()
-
-                            -- Trigger Mode section
-                            ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
-                            ctx:text("TRIGGER")
-                            ctx:pop_style_color()
-                            ctx:spacing()
-
-                            -- Trigger Mode dropdown (slider20)
-                            local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(19) end)
-                            if ok_trig then
-                                local trigger_modes = {"Free", "Transport", "MIDI", "Audio"}
-                                local trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
-                                ctx:set_next_item_width(control_width)
-                                if ctx:begin_combo("##trigger_mode_" .. guid, trigger_modes[trig_idx + 1] or "Free") then
-                                    for i, mode_name in ipairs(trigger_modes) do
-                                        if ctx:selectable(mode_name, i - 1 == trig_idx) then
-                                            expanded_modulator:set_param_normalized(19, (i - 1) / 3)
-                                            interacted = true
-                                        end
-                                    end
-                                    ctx:end_combo()
-                                end
-                            end
-
-                            ctx:spacing()
-
-                            -- LFO Mode section
-                            ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
-                            ctx:text("MODE")
-                            ctx:pop_style_color()
-                            ctx:spacing()
-
-                            -- LFO Mode: Loop/One Shot (slider28)
-                            local ok_lfo_mode, lfo_mode = pcall(function() return expanded_modulator:get_param_normalized(27) end)
-                            if ok_lfo_mode then
-                                if ctx:radio_button("Loop##lfo_" .. guid, lfo_mode < 0.5) then
-                                    expanded_modulator:set_param_normalized(27, 0)
-                                    interacted = true
-                                end
-                                ctx:same_line()
-                                if ctx:radio_button("One Shot##lfo_" .. guid, lfo_mode >= 0.5) then
-                                    expanded_modulator:set_param_normalized(27, 1)
-                                    interacted = true
-                                end
-                            end
-
-                            ctx:spacing()
-
-                            -- Advanced section (collapsible)
-                            local advanced_key = "mod_advanced_" .. guid .. "_" .. expanded_slot_idx
-                            local is_advanced_open = state.modulator_advanced[advanced_key] or false
-
-                            if ctx:tree_node("Advanced##adv_" .. guid) then
-                                state.modulator_advanced[advanced_key] = true
-
-                                -- Show additional params based on trigger mode
-                                if ok_trig and trig_idx == 2 then
-                                    -- MIDI trigger mode
-                                    -- MIDI Source (slider21)
-                                    local ok_midi_src, midi_src = pcall(function() return expanded_modulator:get_param_normalized(20) end)
-                                    if ok_midi_src then
-                                        if ctx:radio_button("This Track##midi_src_" .. guid, midi_src < 0.5) then
-                                            expanded_modulator:set_param_normalized(20, 0)
-                                            interacted = true
-                                        end
-                                        ctx:same_line()
-                                        if ctx:radio_button("MIDI Bus##midi_src_" .. guid, midi_src >= 0.5) then
-                                            expanded_modulator:set_param_normalized(20, 1)
-                                            interacted = true
-                                        end
-                                    end
-
-                                    -- MIDI Note (slider22)
-                                    local ok_note, midi_note = pcall(function() return expanded_modulator:get_param_normalized(21) end)
-                                    if ok_note then
-                                        ctx:set_next_item_width(control_width)
-                                        local note_val = math.floor(midi_note * 127 + 0.5)
-                                        local changed, new_note_val = ctx:slider_int("MIDI Note##note_" .. guid, note_val, 0, 127, note_val == 0 and "Any" or tostring(note_val))
-                                        if changed then
-                                            expanded_modulator:set_param_normalized(21, new_note_val / 127)
-                                            interacted = true
-                                        end
-                                    end
-                                elseif ok_trig and trig_idx == 3 then
-                                    -- Audio trigger mode
-                                    -- Audio Threshold (slider23)
-                                    local ok_thresh, audio_thresh = pcall(function() return expanded_modulator:get_param_normalized(22) end)
-                                    if ok_thresh then
-                                        ctx:set_next_item_width(control_width)
-                                        local changed, new_thresh = ctx:slider_double("Threshold##thresh_" .. guid, audio_thresh, 0, 1, "%.2f")
-                                        if changed then
-                                            expanded_modulator:set_param_normalized(22, new_thresh)
-                                            interacted = true
-                                        end
-                                    end
-                                end
-
-                                -- Attack/Release (always show in advanced)
-                                if ok_trig and trig_idx > 0 then
-                                    -- Attack (slider24)
-                                    local ok_atk, attack_ms = pcall(function() return expanded_modulator:get_param_normalized(23) end)
-                                    if ok_atk then
-                                        local atk_val = attack_ms * 1999 + 1  -- 1-2000ms
-                                        ctx:set_next_item_width(control_width)
-                                        local changed, new_atk_val = ctx:slider_double("Attack##atk_" .. guid, atk_val, 1, 2000, "%.0f ms")
-                                        if changed then
-                                            expanded_modulator:set_param_normalized(23, (new_atk_val - 1) / 1999)
-                                            interacted = true
-                                        end
-                                    end
-
-                                    -- Release (slider25)
-                                    local ok_rel, release_ms = pcall(function() return expanded_modulator:get_param_normalized(24) end)
-                                    if ok_rel then
-                                        local rel_val = release_ms * 4999 + 1  -- 1-5000ms
-                                        ctx:set_next_item_width(control_width)
-                                        local changed, new_rel_val = ctx:slider_double("Release##rel_" .. guid, rel_val, 1, 5000, "%.0f ms")
-                                        if changed then
-                                            expanded_modulator:set_param_normalized(24, (new_rel_val - 1) / 4999)
-                                            interacted = true
-                                        end
-                                    end
-                                end
-
-                                ctx:tree_pop()
-                            else
-                                state.modulator_advanced[advanced_key] = false
-                            end
-
-                            ctx:spacing()
-                            ctx:separator()
-                            ctx:spacing()
-
-                            -- Parameter Links section
-                            ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
-                            ctx:text("PARAMETER LINKS")
-                            ctx:pop_style_color()
-                            ctx:spacing()
-
-                            -- Helper function to find track-level FX index by GUID
-                            local function get_track_fx_index_by_guid(track_ptr, fx_guid)
-                                local fx_count = r.TrackFX_GetCount(track_ptr)
-                                for i = 0, fx_count - 1 do
-                                    local guid = r.TrackFX_GetFXGUID(track_ptr, i)
-                                    if guid and guid == fx_guid then
-                                        return i
-                                    end
-                                end
-                                return nil
-                            end
-
-                            -- Find existing links for this modulator on the parent device
-                            local existing_links = {}
-                            local track = opts.track or state.track
-                            if track and track.pointer then
-                                local track_ptr = track.pointer
-                                local mod_track_idx = get_track_fx_index_by_guid(track_ptr, expanded_modulator:get_guid())
-                                local target_track_idx = get_track_fx_index_by_guid(track_ptr, fx:get_guid())
-
-                                if mod_track_idx and target_track_idx then
-                                    -- Check each parameter of parent device for links to this modulator
-                                    local ok_params, param_count = pcall(function() return fx:get_num_params() end)
-                                    if ok_params and param_count then
-                                        for param_idx = 0, param_count - 1 do
-                                            -- Query if this param is linked (check plink.active first)
-                                            local retval, active_str = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
-                                                string.format("param.%d.plink.active", param_idx))
-
-                                            if retval and active_str == "1" then
-                                                -- Link is active, check if it's from our modulator
-                                                local _, effect_str = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
-                                                    string.format("param.%d.plink.effect", param_idx))
-
-                                                local link_fx_idx = tonumber(effect_str)
-                                                if link_fx_idx == mod_track_idx then
-                                                    -- This parameter is linked to our modulator
-                                                    local ok_pname, param_name = pcall(function() return fx:get_param_name(param_idx) end)
-                                                    if ok_pname and param_name then
-                                                        table.insert(existing_links, {
-                                                            param_idx = param_idx,
-                                                            param_name = param_name
-                                                        })
-                                                    end
-                                                end
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-
-                            -- Show existing links
-                            if #existing_links > 0 then
-                                ctx:push_style_color(imgui.Col.Text(), 0x88FF88FF)
-                                ctx:text(string.format("Active Links: %d", #existing_links))
-                                ctx:pop_style_color()
-                                ctx:spacing()
-
-                                for i, link in ipairs(existing_links) do
-                                    ctx:text("• " .. link.param_name)
-                                    ctx:same_line()
-                                    if ctx:button("X##remove_link_" .. i .. "_" .. guid, 20, 0) then
-                                        -- Remove this link using track-level API
-                                        local track_remove = opts.track or state.track
-                                        if track_remove and track_remove.pointer then
-                                            local ok_remove = pcall(function()
-                                                local track_ptr = track_remove.pointer
-                                                local target_track_idx = get_track_fx_index_by_guid(track_ptr, fx:get_guid())
-                                                if target_track_idx then
-                                                    -- Set plink.active to "0" to disable the link
-                                                    r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
-                                                        string.format("param.%d.plink.active", link.param_idx),
-                                                        "0")
-                                                end
-                                            end)
-                                            if ok_remove then
-                                                interacted = true
-                                            end
-                                        end
-                                    end
-                                    if ctx:is_item_hovered() then
-                                        ctx:set_tooltip("Remove link")
-                                    end
-                                end
-
-                                ctx:spacing()
-                                ctx:separator()
-                                ctx:spacing()
-                            end
-
-                            -- Link selection state (parameter only - device is implicit)
-                            local link_state_key = "mod_link_" .. guid .. "_" .. expanded_slot_idx
-                            state.mod_selected_target[link_state_key] = state.mod_selected_target[link_state_key] or {}
-                            local link_state = state.mod_selected_target[link_state_key]
-
-                            -- Modulator can only modulate its parent device (fx parameter)
-                            -- No device selector needed - use the device that owns this container
-                            local target_device = fx  -- The device being displayed
-
-                            -- Parameter selector for parent device
-                            if target_device then
-                                local ok_params, param_count = pcall(function() return target_device:get_num_params() end)
-                                if ok_params and param_count and param_count > 0 then
-                                    local current_param_name = link_state.param_name or "Select Parameter..."
-                                    ctx:set_next_item_width(control_width)
-                                    if ctx:begin_combo("##link_param_" .. guid, current_param_name) then
-                                        for param_idx = 0, param_count - 1 do
-                                            local ok_pname, param_name = pcall(function() return target_device:get_param_name(param_idx) end)
-                                            if ok_pname and param_name then
-                                                if ctx:selectable(param_name, link_state.param_idx == param_idx) then
-                                                    link_state.param_idx = param_idx
-                                                    link_state.param_name = param_name
-                                                    interacted = true
-                                                end
-                                            end
-                                        end
-                                        ctx:end_combo()
-                                    end
-
-                                    -- Add Link button
-                                    if link_state.param_idx ~= nil then
-                                        if ctx:button("Add Link##" .. guid, control_width, 0) then
-                                            r.ShowConsoleMsg("=== Add Link button clicked ===\n")
-                                            r.ShowConsoleMsg(string.format("  Target param idx: %d\n", link_state.param_idx))
-                                            r.ShowConsoleMsg(string.format("  Target param name: %s\n", link_state.param_name or "nil"))
-
-                                            -- Create modulation link using REAPER's param.X.plink API
-                                            local target_param = link_state.param_idx
-
-                                            -- Get track and FX indices
-                                            local track_link = opts.track or state.track
-                                            r.ShowConsoleMsg(string.format("  Track: %s\n", track_link and "found" or "nil"))
-
-                                            if track_link and track_link.pointer then
-                                                local ok_link = pcall(function()
-                                                    -- Get track-level FX indices (not container-relative)
-                                                    local track_ptr = track_link.pointer
-                                                    local mod_track_idx = get_track_fx_index_by_guid(track_ptr, expanded_modulator:get_guid())
-                                                    local target_track_idx = get_track_fx_index_by_guid(track_ptr, target_device:get_guid())
-
-                                                    if mod_track_idx and target_track_idx then
-                                                        -- Enable parameter link from modulator output to target parameter
-                                                        -- REAPER plink format:
-                                                        -- - plink.active = "1" to enable
-                                                        -- - plink.effect = modulator FX index (track-level)
-                                                        -- - plink.param = modulator output parameter index (slider4 = param 3)
-
-                                                        local ok1 = r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
-                                                            string.format("param.%d.plink.active", target_param),
-                                                            "1")
-
-                                                        local ok2 = r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
-                                                            string.format("param.%d.plink.effect", target_param),
-                                                            tostring(mod_track_idx))
-
-                                                        local ok3 = r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
-                                                            string.format("param.%d.plink.param", target_param),
-                                                            "3")
-
-                                                        -- Debug output
-                                                        r.ShowConsoleMsg(string.format(
-                                                            "Plink: target_fx=%d param=%d -> mod_fx=%d param=3\n  ok1=%s ok2=%s ok3=%s\n",
-                                                            target_track_idx, target_param, mod_track_idx,
-                                                            tostring(ok1), tostring(ok2), tostring(ok3)
-                                                        ))
-
-                                                        -- Verify what was set
-                                                        local _, verify_active = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
-                                                            string.format("param.%d.plink.active", target_param))
-                                                        local _, verify_effect = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
-                                                            string.format("param.%d.plink.effect", target_param))
-                                                        local _, verify_param = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
-                                                            string.format("param.%d.plink.param", target_param))
-
-                                                        r.ShowConsoleMsg(string.format(
-                                                            "  Verify: active=%s effect=%s param=%s\n",
-                                                            tostring(verify_active), tostring(verify_effect), tostring(verify_param)
-                                                        ))
-                                                    end
-                                                end)
-
-                                                if ok_link then
-                                                    -- Clear selection after adding link
-                                                    link_state.param_idx = nil
-                                                    link_state.param_name = nil
-                                                    interacted = true
-                                                end
-                                            end
-                                        end
-                                    end
-                                end
-                            else
-                                ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
-                                ctx:text("No target device")
-                                ctx:pop_style_color()
-                            end
-                        end
-                    end
-                end
+            local mod_interacted = modulator_sidebar.draw(ctx, fx, container, guid, state_guid, cfg, opts)
+            if mod_interacted then
+                interacted = true
             end
 
             -- === MAIN CONTENT ===
             r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
 
-        -- Header row using table for proper alignment
+
+        -- Draw header
+        local header_interacted = draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors, enabled)
+        if header_interacted then interacted = true end
+
+
+        -- Draw collapsed body and return early if collapsed
         if is_panel_collapsed then
-            -- Collapsed header: collapse button | path
-            if r.ImGui_BeginTable(ctx.ctx, "header_collapsed_" .. guid, 2, 0) then
-                r.ImGui_TableSetupColumn(ctx.ctx, "collapse", r.ImGui_TableColumnFlags_WidthFixed(), 24)
-                r.ImGui_TableSetupColumn(ctx.ctx, "path", r.ImGui_TableColumnFlags_WidthStretch())
-
-                r.ImGui_TableNextRow(ctx.ctx)
-
-                -- Collapse button
-                r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
-                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
-                ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
-                if ctx:button("▶##collapse_" .. state_guid, 20, 20) then
-                    panel_collapsed[state_guid] = false
-                    interacted = true
-                end
-                ctx:pop_style_color(3)
-                if r.ImGui_IsItemHovered(ctx.ctx) then
-                    ctx:set_tooltip("Expand panel")
-                end
-
-                -- Path identifier
-                r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-                if device_id then
-                    ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
-                    ctx:text("[" .. device_id .. "]")
-                    ctx:pop_style_color()
-                end
-
-                r.ImGui_EndTable(ctx.ctx)
-            end
-        else
-            -- Expanded header: drag | name (50%) | path (15%) | ui | on | x | collapse (buttons fixed width)
-            local imgui = require('imgui')
-            local table_flags = imgui.TableFlags.SizingStretchProp()
-            if ctx:begin_table("header_" .. guid, 7, table_flags) then
-                ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
-                ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 50)  -- 50%
-                ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 15)  -- 15%
-                ctx:table_setup_column("ui", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
-                ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
-                ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
-                ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
-
-                ctx:table_next_row()
-
-            -- Drag handle / collapse toggle
-            ctx:table_set_column_index(0)
-            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
-            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
-            local collapse_icon = is_panel_collapsed and "▶" or "≡"
-            if ctx:button(collapse_icon .. "##drag", 20, 20) then
-                -- Toggle panel collapse on click
-                panel_collapsed[state_guid] = not is_panel_collapsed
-                interacted = true
-            end
-            ctx:pop_style_color(3)
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip(is_panel_collapsed and "Expand panel" or "Collapse panel (drag to reorder)")
-            end
-
-            if ctx:begin_drag_drop_source() then
-                ctx:set_drag_drop_payload("FX_GUID", drag_guid)
-                ctx:text("Moving: " .. truncate(name, 20))
-                ctx:end_drag_drop_source()
-            end
-
-            if ctx:begin_drag_drop_target() then
-                -- Accept FX reorder drops
-                local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
-                if accepted and payload and payload ~= drag_guid then
-                    if opts.on_drop then
-                        opts.on_drop(payload, drag_guid)
-                    end
-                    interacted = true
-                end
-
-                -- Accept plugin drops (insert before this FX/container)
-                local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
-                if accepted_plugin and plugin_name then
-                    if opts.on_plugin_drop then
-                        opts.on_plugin_drop(plugin_name, fx.pointer)
-                    end
-                    interacted = true
-                end
-
-                -- Accept rack drops (insert before this FX/container)
-                local accepted_rack = ctx:accept_drag_drop_payload("RACK_ADD")
-                if accepted_rack then
-                    if opts.on_rack_drop then
-                        opts.on_rack_drop(fx.pointer)
-                    end
-                    interacted = true
-                end
-
-                ctx:end_drag_drop_target()
-            end
-
-            -- Device name (double-click to rename)
-            ctx:table_set_column_index(1)
-
-            -- Check if this device/container is being renamed (use SideFX state system)
-            -- Use FX GUID for renaming since we display the FX name, not the container name
-            local state_module = require('lib.state')
-            local sidefx_state = state_module.state
-            local rename_guid = guid  -- Use FX GUID for renaming
-            local is_renaming = (sidefx_state.renaming_fx == rename_guid)
-
-            if is_renaming then
-                -- Rename mode: show input text (just the name)
-                ctx:set_next_item_width(-1)
-
-                -- Initialize rename text if needed (use just the name, not the identifier)
-                if not sidefx_state.rename_text or sidefx_state.rename_text == "" then
-                    sidefx_state.rename_text = name  -- Just the name, no identifier
-                    r.ImGui_SetKeyboardFocusHere(ctx.ctx)
-                end
-
-                local changed, new_text = r.ImGui_InputText(ctx.ctx, "##rename_" .. state_guid, sidefx_state.rename_text, r.ImGui_InputTextFlags_EnterReturnsTrue())
-                sidefx_state.rename_text = new_text
-
-                -- Commit on Enter
-                if changed then
-                    if sidefx_state.rename_text ~= "" then
-                        -- Store custom display name in state (SideFX-only, doesn't change REAPER name)
-                        sidefx_state.display_names[rename_guid] = sidefx_state.rename_text
-                    else
-                        -- Clear custom name if empty
-                        sidefx_state.display_names[rename_guid] = nil
-                    end
-                    state_module.save_display_names()
-                    sidefx_state.renaming_fx = nil
-                    sidefx_state.rename_text = ""
-                    interacted = true
-                end
-
-                -- Cancel on Escape or click elsewhere
-                if r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Escape()) then
-                    sidefx_state.renaming_fx = nil
-                    sidefx_state.rename_text = ""
-                elseif not r.ImGui_IsItemActive(ctx.ctx) and not r.ImGui_IsItemFocused(ctx.ctx) and r.ImGui_IsMouseClicked(ctx.ctx, 0) then
-                    -- Lost focus - commit if text changed
-                    if sidefx_state.rename_text ~= "" then
-                        sidefx_state.display_names[rename_guid] = sidefx_state.rename_text
-                    else
-                        sidefx_state.display_names[rename_guid] = nil
-                    end
-                    state_module.save_display_names()
-                    sidefx_state.renaming_fx = nil
-                    sidefx_state.rename_text = ""
-                end
-            else
-                -- Normal mode: show text, double-click to rename
-                local display_name = truncate(name, 50)  -- Reasonable max length
-                if not enabled then
-                    ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
-                end
-
-                -- Selectable for double-click detection (name only) - use 0 width to fill column
-                if r.ImGui_Selectable(ctx.ctx, display_name .. "##name_" .. state_guid, false, r.ImGui_SelectableFlags_AllowDoubleClick(), 0, 0) then
-                    if r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
-                        sidefx_state.renaming_fx = rename_guid
-                        sidefx_state.rename_text = name  -- Just the name, no identifier
-                        interacted = true
-                    end
-                end
-                if r.ImGui_IsItemHovered(ctx.ctx) then
-                    ctx:set_tooltip("Double-click to rename")
-                end
-
-                if not enabled then
-                    ctx:pop_style_color()
-                end
-            end
-
-            -- Path identifier (15%)
-            ctx:table_set_column_index(2)
-            if device_id then
-                ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
-                ctx:text("[" .. device_id .. "]")
-                ctx:pop_style_color()
-            end
-
-            -- UI button
-            ctx:table_set_column_index(3)
-            local ui_col_w = ctx:get_content_region_avail()
-            if ui_col_w > 0 then
-                if draw_ui_icon(ctx, "##ui_header_" .. state_guid, math.min(24, ui_col_w), 20) then
-                    fx:show(3)
-                    interacted = true
-                end
-                if r.ImGui_IsItemHovered(ctx.ctx) then
-                    ctx:set_tooltip("Open native FX window")
-                end
-            end
-
-            -- ON/OFF toggle
-            ctx:table_set_column_index(4)
-            local on_col_w = ctx:get_content_region_avail()
-            if on_col_w > 0 then
-                if draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, math.min(24, on_col_w), 20, colors.bypass_on, colors.bypass_off) then
-                    fx:set_enabled(not enabled)
-                    interacted = true
-                end
-            end
-
-            -- Close button
-            ctx:table_set_column_index(5)
-            ctx:push_style_color(r.ImGui_Col_Button(), 0x664444FF)
-            if ctx:button("×", 24, 20) then
-                if opts.on_delete then
-                    opts.on_delete(fx)
-                else
-                    fx:delete()
-                end
-                interacted = true
-            end
-            ctx:pop_style_color()
-
-            -- Sidebar collapse/expand button (rightmost) - only show when panel is expanded
-            ctx:table_set_column_index(6)
-            if not is_panel_collapsed then
-                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
-                if is_sidebar_collapsed then
-                    if ctx:button("▶##sidebar_" .. state_guid, 24, 20) then
-                        sidebar_collapsed[state_guid] = false
-                    end
-                    if r.ImGui_IsItemHovered(ctx.ctx) then
-                        ctx:set_tooltip("Expand sidebar")
-                    end
-                else
-                    if ctx:button("◀##sidebar_" .. state_guid, 24, 20) then
-                        sidebar_collapsed[state_guid] = true
-                    end
-                    if r.ImGui_IsItemHovered(ctx.ctx) then
-                        ctx:set_tooltip("Collapse sidebar")
-                    end
-                end
-                ctx:pop_style_color(2)
-            end
-
-            ctx:end_table()
-            end  -- end expanded header
-        end  -- end if is_panel_collapsed check for header
-
-        -- Render collapsed panel content
-        if is_panel_collapsed then
-            ctx:separator()
-
-            -- Collapsed view table layout
-            -- Row 1: ui | on | x
-            -- Row 2: name
-            if r.ImGui_BeginTable(ctx.ctx, "controls_" .. guid, 3, r.ImGui_TableFlags_SizingStretchSame()) then
-                r.ImGui_TableSetupColumn(ctx.ctx, "ui", r.ImGui_TableColumnFlags_WidthStretch())
-                r.ImGui_TableSetupColumn(ctx.ctx, "on", r.ImGui_TableColumnFlags_WidthStretch())
-                r.ImGui_TableSetupColumn(ctx.ctx, "x", r.ImGui_TableColumnFlags_WidthStretch())
-
-                r.ImGui_TableNextRow(ctx.ctx)
-
-                -- UI button
-                r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
-                -- Draw custom UI icon (border is drawn inside the function)
-                local ui_avail_w = ctx:get_content_region_avail()
-                if ui_avail_w > 0 and draw_ui_icon(ctx, "##ui_" .. state_guid, ui_avail_w, 24) then
-                    fx:show(3)
-                    interacted = true
-                end
-                if r.ImGui_IsItemHovered(ctx.ctx) then
-                    ctx:set_tooltip("Open " .. name)
-                end
-
-                -- ON/OFF toggle
-                r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-                -- Draw custom circle indicator with colored background
-                local avail_w, avail_h = ctx:get_content_region_avail()
-                if avail_w > 0 and draw_on_off_circle(ctx, "##on_off_" .. state_guid, enabled, avail_w, 24, colors.bypass_on, colors.bypass_off) then
-                    fx:set_enabled(not enabled)
-                    interacted = true
-                end
-
-                -- Close button
-                r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
-                ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
-                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x444444FF)
-                if ctx:button("×", -1, 24) then
-                    if opts.on_delete then
-                        opts.on_delete(fx)
-                    else
-                        fx:delete()
-                    end
-                    interacted = true
-                end
-                ctx:pop_style_color(2)
-
-                r.ImGui_EndTable(ctx.ctx)
-            end
-
-            -- Row 2: name
-            ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAAAAFF)
-            ctx:text(name)
-            ctx:pop_style_color()
-
+            local collapsed_interacted = draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opts, colors)
+            if collapsed_interacted then interacted = true end
             ctx:end_child()  -- end panel
             ctx:pop_id()
             return interacted
         end
+
 
         ctx:separator()
 
@@ -1626,7 +610,7 @@ function M.draw(ctx, fx, opts)
 
                                 if ok_name and ok_val then
                                     param_val = param_val or 0
-                                    local display_label = (param_name and param_name ~= "") and truncate(param_name, 14) or ("P" .. (param_idx + 1))
+                                    local display_label = (param_name and param_name ~= "") and fx_naming.truncate(param_name, 14) or ("P" .. (param_idx + 1))
 
                                     ctx:push_id(param_idx)
 
@@ -1636,7 +620,7 @@ function M.draw(ctx, fx, opts)
                                     ctx:pop_style_color()
 
                                     -- Smart detection: switch vs continuous
-                                    local is_switch = is_switch_param(fx, param_idx)
+                                    local is_switch = param_utils.is_switch_param(fx, param_idx)
 
                                     if is_switch then
                                         -- Draw as toggle button
@@ -1745,7 +729,7 @@ function M.draw(ctx, fx, opts)
                             -- Smaller knob (30px)
                             local mix_knob_size = 30
                             r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - mix_knob_size) / 2)
-                            local mix_changed, new_mix = draw_knob(ctx, "##mix_knob", mix_val, mix_knob_size)
+                            local mix_changed, new_mix = drawing.draw_knob(ctx, "##mix_knob", mix_val, mix_knob_size)
                             if mix_changed then
                                 pcall(function() container:set_param_normalized(mix_idx, new_mix) end)
                                 interacted = true
@@ -2114,7 +1098,7 @@ function M.draw_compact(ctx, fx, opts)
     if not fx then return false end
 
     local guid = fx:get_guid()
-    local name = get_display_name(fx)
+    local name = fx_naming.get_display_name(fx)
     local enabled = fx:get_enabled()
 
     local interacted = false
@@ -2128,7 +1112,7 @@ function M.draw_compact(ctx, fx, opts)
     ctx:push_style_color(r.ImGui_Col_Button(), btn_color)
     ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x4A4A4AFF)
 
-    if ctx:button(truncate(name, 14), compact_width, compact_height) then
+    if ctx:button(fx_naming.truncate(name, 14), compact_width, compact_height) then
         -- Click opens FX detail or native UI
         if opts.on_click then
             opts.on_click(fx)
@@ -2143,7 +1127,7 @@ function M.draw_compact(ctx, fx, opts)
     -- Drag source
     if ctx:begin_drag_drop_source() then
         ctx:set_drag_drop_payload("FX_GUID", guid)
-        ctx:text("Moving: " .. truncate(name, 20))
+        ctx:text("Moving: " .. fx_naming.truncate(name, 20))
         ctx:end_drag_drop_source()
     end
 
