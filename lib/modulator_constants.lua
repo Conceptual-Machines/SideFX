@@ -1,6 +1,6 @@
 -- SideFX_Modulator.jsfx Parameter Indices
--- Parameters are indexed sequentially in the order sliders are declared in JSFX,
--- NOT by slider number!
+-- Parameters are indexed BY SLIDER NUMBER ORDER in declaration sequence,
+-- NOT by declaration order in the file!
 
 local M = {}
 
@@ -20,12 +20,12 @@ M.PARAM_AUDIO_THRESHOLD = 9 -- slider23: Audio Threshold
 M.PARAM_ATTACK = 10        -- slider24: Attack
 M.PARAM_RELEASE = 11       -- slider25: Release
 
--- LFO Mode section (slider 28) - comes BEFORE sliders 26-27 in JSFX!
-M.PARAM_LFO_MODE = 12      -- slider28: Loop/One Shot
+-- Editor section (sliders 26-27) - come BEFORE slider28 by number!
+M.PARAM_GRID = 12          -- slider26: Grid
+M.PARAM_SNAP = 13          -- slider27: Snap
 
--- Editor section (sliders 26-27) - come AFTER slider28 in JSFX!
-M.PARAM_GRID = 13          -- slider26: Grid
-M.PARAM_SNAP = 14          -- slider27: Snap
+-- LFO Mode section (slider 28) - comes AFTER sliders 26-27 by number!
+M.PARAM_LFO_MODE = 14      -- slider28: Loop/One Shot
 
 -- Curve section
 M.PARAM_NUM_POINTS = 15    -- slider30: Number of points
