@@ -562,6 +562,7 @@ function M.draw(ctx, fx, opts)
         if is_panel_collapsed then
             local collapsed_interacted = draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opts, colors)
             if collapsed_interacted then interacted = true end
+            r.ImGui_EndTable(ctx.ctx)  -- end device_wrapper table
             ctx:end_child()  -- end panel
             ctx:pop_id()
             return interacted
