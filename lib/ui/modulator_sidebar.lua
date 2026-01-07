@@ -105,7 +105,7 @@ local function add_modulator_to_device(device_container, modulator_type, track)
     if moved_modulator then
         -- Set LFO Mode to Loop (0) by default
         -- Use direct value setting for discrete parameter (0 = Loop, 1 = One Shot)
-        r.TrackFX_SetParam(moved_modulator.track.pointer, moved_modulator.pointer, PARAM.PARAM_LFO_MODE, 0)
+        moved_modulator:set_param(PARAM.PARAM_LFO_MODE, 0)
     end
 
     r.PreventUIRefresh(-1)
@@ -266,36 +266,48 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     -- Set control width shorter for compact layout
                     local control_width = 180
 
-                    -- UI button to open JSFX editor
-                    if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20) then
-                        r.TrackFX_Show(expanded_modulator.track.pointer, expanded_modulator.pointer, 3)
-                        interacted = true
-                    end
-                    if ctx:is_item_hovered() then
-                        ctx:set_tooltip("Open Curve Editor")
-                    end
-                    ctx:spacing()
+                    -- Rate section: RATE label | Free/Sync buttons | UI icon
+                    if ctx:begin_table("##rate_table_" .. guid, 3, imgui.TableFlags.SizingStretchProp()) then
+                        ctx:table_setup_column("Label", imgui.TableColumnFlags.WidthFixed(), 45)
+                        ctx:table_setup_column("Mode", imgui.TableColumnFlags.WidthStretch())
+                        ctx:table_setup_column("UI", imgui.TableColumnFlags.WidthFixed(), 30)
 
-                    -- Rate section
-                    ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
-                    ctx:text("RATE")
-                    ctx:pop_style_color()
-                    ctx:spacing()
+                        ctx:table_next_row()
 
-                    -- Tempo Mode: Free/Sync (slider1 - discrete parameter)
-                    local tempo_mode = r.TrackFX_GetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_TEMPO_MODE)
-                    local ok_tempo = tempo_mode ~= nil
-                    if ok_tempo then
-                        if ctx:radio_button("Free##tempo_" .. guid, tempo_mode < 0.5) then
-                            r.TrackFX_SetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_TEMPO_MODE, 0)
+                        -- Column 1: RATE label
+                        ctx:table_set_column_index(0)
+                        ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
+                        ctx:text("RATE")
+                        ctx:pop_style_color()
+
+                        -- Column 2: Free/Sync buttons
+                        ctx:table_set_column_index(1)
+                        local ok_tempo, tempo_mode = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_TEMPO_MODE) end)
+                        if ok_tempo and tempo_mode then
+                            if ctx:radio_button("Free##tempo_" .. guid, tempo_mode < 0.5) then
+                                expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 0)
+                                interacted = true
+                            end
+                            ctx:same_line()
+                            if ctx:radio_button("Sync##tempo_" .. guid, tempo_mode >= 0.5) then
+                                expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 1)
+                                interacted = true
+                            end
+                        end
+
+                        -- Column 3: UI icon
+                        ctx:table_set_column_index(2)
+                        if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20) then
+                            expanded_modulator:show(3)
                             interacted = true
                         end
-                        ctx:same_line()
-                        if ctx:radio_button("Sync##tempo_" .. guid, tempo_mode >= 0.5) then
-                            r.TrackFX_SetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_TEMPO_MODE, 1)
-                            interacted = true
+                        if ctx:is_item_hovered() then
+                            ctx:set_tooltip("Open Curve Editor")
                         end
+
+                        ctx:end_table()
                     end
+                    ctx:spacing()
 
                     -- Show Hz slider when Free mode, Sync Rate dropdown when Sync mode
                     if ok_tempo and tempo_mode < 0.5 then
@@ -389,15 +401,15 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     ctx:spacing()
 
                     -- LFO Mode: Loop/One Shot (discrete parameter)
-                    local lfo_mode = r.TrackFX_GetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_LFO_MODE)
-                    if lfo_mode then
+                    local ok_lfo, lfo_mode = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_LFO_MODE) end)
+                    if ok_lfo and lfo_mode then
                         if ctx:radio_button("Loop##lfo_" .. guid, lfo_mode < 0.5) then
-                            r.TrackFX_SetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_LFO_MODE, 0)
+                            expanded_modulator:set_param(PARAM.PARAM_LFO_MODE, 0)
                             interacted = true
                         end
                         ctx:same_line()
                         if ctx:radio_button("One Shot##lfo_" .. guid, lfo_mode >= 0.5) then
-                            r.TrackFX_SetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_LFO_MODE, 1)
+                            expanded_modulator:set_param(PARAM.PARAM_LFO_MODE, 1)
                             interacted = true
                         end
                     end
@@ -415,15 +427,15 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         if ok_trig and trig_idx == 2 then
                             -- MIDI trigger mode
                             -- MIDI Source (slider21 - discrete parameter)
-                            local midi_src = r.TrackFX_GetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_MIDI_SOURCE)
-                            if midi_src then
+                            local ok_midi, midi_src = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_MIDI_SOURCE) end)
+                            if ok_midi and midi_src then
                                 if ctx:radio_button("This Track##midi_src_" .. guid, midi_src < 0.5) then
-                                    r.TrackFX_SetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_MIDI_SOURCE, 0)
+                                    expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 0)
                                     interacted = true
                                 end
                                 ctx:same_line()
                                 if ctx:radio_button("MIDI Bus##midi_src_" .. guid, midi_src >= 0.5) then
-                                    r.TrackFX_SetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_MIDI_SOURCE, 1)
+                                    expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 1)
                                     interacted = true
                                 end
                             end
