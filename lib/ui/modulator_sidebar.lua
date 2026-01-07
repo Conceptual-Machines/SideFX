@@ -568,15 +568,6 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                     -- Create modulation link using ReaWrap's high-level API
                                     local target_param = link_state.param_idx
 
-                                    r.ShowConsoleMsg("\n=== CREATING PARAMETER LINK ===\n")
-                                    r.ShowConsoleMsg(string.format("Target device: %s (ptr=%s)\n",
-                                        target_device:get_name(), tostring(target_device.pointer)))
-                                    r.ShowConsoleMsg(string.format("Source modulator: %s (ptr=%s)\n",
-                                        expanded_modulator:get_name(), tostring(expanded_modulator.pointer)))
-                                    r.ShowConsoleMsg(string.format("Source param: %d (PARAM_OUTPUT)\n", PARAM.PARAM_OUTPUT))
-                                    r.ShowConsoleMsg(string.format("Target param: %d (%s)\n",
-                                        target_param, link_state.param_name or "?"))
-
                                     -- Use ReaWrap's create_param_link - it handles all the complexity
                                     local success = target_device:create_param_link(
                                         expanded_modulator,
@@ -584,19 +575,6 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                         target_param,
                                         1.0  -- 100% modulation scale
                                     )
-
-                                    r.ShowConsoleMsg(string.format("create_param_link returned: %s\n", tostring(success)))
-
-                                    -- Verify the link was created
-                                    local verify_info = target_device:get_param_link_info(target_param)
-                                    if verify_info then
-                                        r.ShowConsoleMsg(string.format("Verification: effect=%s, param=%s, scale=%s\n",
-                                            tostring(verify_info.effect),
-                                            tostring(verify_info.param),
-                                            tostring(verify_info.scale)))
-                                    else
-                                        r.ShowConsoleMsg("Verification: NO LINK FOUND\n")
-                                    end
 
                                     if success then
                                         -- Clear selection after adding link
