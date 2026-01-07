@@ -533,6 +533,20 @@ function M.draw(ctx, fx, opts)
     local window_flags = imgui.WindowFlags.NoScrollbar()
     if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0, window_flags) then
 
+        -- Draw header (always shown, whether collapsed or expanded)
+        local header_interacted = draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors, enabled)
+        if header_interacted then interacted = true end
+
+        -- Draw collapsed body and return early if collapsed
+        if is_panel_collapsed then
+            local collapsed_interacted = draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opts, colors)
+            if collapsed_interacted then interacted = true end
+            ctx:end_child()  -- end panel
+            ctx:pop_id()
+            return interacted
+        end
+
+        -- Panel is expanded - show wrapper table with modulator sidebar
         -- Wrapper table: [Modulator Sidebar | Main Content]
         -- (mod_sidebar_w already calculated above for panel width)
         if r.ImGui_BeginTable(ctx.ctx, "device_wrapper_" .. guid, 2, r.ImGui_TableFlags_BordersInnerV()) then
@@ -551,22 +565,6 @@ function M.draw(ctx, fx, opts)
 
             -- === MAIN CONTENT ===
             r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-
-
-        -- Draw header
-        local header_interacted = draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors, enabled)
-        if header_interacted then interacted = true end
-
-
-        -- Draw collapsed body and return early if collapsed
-        if is_panel_collapsed then
-            local collapsed_interacted = draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opts, colors)
-            if collapsed_interacted then interacted = true end
-            r.ImGui_EndTable(ctx.ctx)  -- end device_wrapper table
-            ctx:end_child()  -- end panel
-            ctx:pop_id()
-            return interacted
-        end
 
 
         ctx:separator()
@@ -1040,7 +1038,7 @@ function M.draw(ctx, fx, opts)
             r.ImGui_EndTable(ctx.ctx)
         end  -- end device_layout table
 
-            ctx:end_table()  -- end device_wrapper table
+            r.ImGui_EndTable(ctx.ctx)  -- end device_wrapper table
         end
 
         ctx:end_child()  -- end panel
