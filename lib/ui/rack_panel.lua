@@ -151,6 +151,28 @@ local function draw_close_button(ctx, rack_width, container, opts)
     return clicked
 end
 
+--- Draw a filled rectangle (optionally with border outline)
+-- @param draw_list ImGui draw list
+-- @param x1 number Top-left X
+-- @param y1 number Top-left Y
+-- @param x2 number Bottom-right X
+-- @param y2 number Bottom-right Y
+-- @param fill_color number Fill color (RGBA)
+-- @param border_color number Border color (RGBA, optional)
+-- @param border_radius number Corner radius
+-- @param border_thickness number Border thickness (optional, default 1)
+local function draw_filled_rect(draw_list, x1, y1, x2, y2, fill_color, border_color, border_radius, border_thickness)
+    border_thickness = border_thickness or 1
+
+    -- Draw filled rectangle
+    r.ImGui_DrawList_AddRectFilled(draw_list, x1, y1, x2, y2, fill_color, border_radius)
+
+    -- Draw border if specified
+    if border_color then
+        r.ImGui_DrawList_AddRect(draw_list, x1, y1, x2, y2, border_color, border_radius, 0, border_thickness)
+    end
+end
+
 --- Draw a single chain row
 -- @param ctx ImGui context
 -- @param draw_list ImGui draw list
@@ -246,21 +268,17 @@ function M.draw(ctx, container, chains, opts)
     local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
     local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
 
-    r.ImGui_DrawList_AddRectFilled(draw_list,
+    draw_filled_rect(draw_list,
         cursor_x, cursor_y,
         cursor_x + rack_width, cursor_y + rack_height,
-        colors.rack_bg, cfg.border_radius)
-    r.ImGui_DrawList_AddRect(draw_list,
-        cursor_x, cursor_y,
-        cursor_x + rack_width, cursor_y + rack_height,
-        colors.rack_border, cfg.border_radius, 0, 2)
+        colors.rack_bg, colors.rack_border, cfg.border_radius, 2)
 
     if ctx:begin_child("rack_content_" .. guid, rack_width, rack_height, 0) then
         -- Header
-        r.ImGui_DrawList_AddRectFilled(draw_list,
+        draw_filled_rect(draw_list,
             cursor_x, cursor_y,
             cursor_x + rack_width, cursor_y + cfg.header_height,
-            colors.rack_header, cfg.border_radius)
+            colors.rack_header, nil, cfg.border_radius)
 
         -- Collapse/expand arrow (placeholder - would need state management)
         ctx:text("▼")
@@ -344,14 +362,10 @@ function M.draw_collapsed(ctx, container, chain_count, opts)
     local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
     local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
 
-    r.ImGui_DrawList_AddRectFilled(draw_list,
+    draw_filled_rect(draw_list,
         cursor_x, cursor_y,
         cursor_x + collapsed_width, cursor_y + collapsed_height,
-        colors.rack_bg, cfg.border_radius)
-    r.ImGui_DrawList_AddRect(draw_list,
-        cursor_x, cursor_y,
-        cursor_x + collapsed_width, cursor_y + collapsed_height,
-        colors.rack_border, cfg.border_radius, 0, 2)
+        colors.rack_bg, colors.rack_border, cfg.border_radius, 2)
 
     if ctx:begin_child("rack_coll_" .. guid, collapsed_width, collapsed_height, 0) then
         -- Expand arrow
