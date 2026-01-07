@@ -21,7 +21,9 @@ tests/
     ├── test_containers.lua
     ├── test_racks.lua
     ├── test_edge_cases.lua       # Edge cases and weird scenarios
-    └── test_state_management.lua # UI state management tests
+    ├── test_state_management.lua # UI state management tests
+    ├── test_deeply_nested.lua    # Deeply nested rack operations
+    └── test_modulators.lua       # Modulator operations
 ```
 
 ## Running Tests
@@ -39,6 +41,7 @@ These tests use mocked ReaWrap classes and don't require REAPER to be running.
 
 **Test Coverage:**
 - Naming conventions and parsing
+- **Hierarchical naming functions** (general path extraction and name building)
 - Pattern matching
 - Basic rack operations
 - **Recursive container operations** (path building, nested additions)
@@ -55,6 +58,8 @@ Integration tests must be run inside REAPER as ReaScript actions. They test actu
    - `tests/integration/test_racks.lua` - Rack and chain operations
    - `tests/integration/test_edge_cases.lua` - Edge cases and weird scenarios
    - `tests/integration/test_state_management.lua` - State management
+   - `tests/integration/test_deeply_nested.lua` - Deeply nested rack operations
+   - `tests/integration/test_modulators.lua` - Modulator operations
 
 **Test Coverage:**
 
@@ -78,6 +83,16 @@ Integration tests must be run inside REAPER as ReaScript actions. They test actu
 - Multiple nested racks with independent expansion state
 - Deep nesting state preservation
 - State persistence across FX list refresh
+
+#### Modulator Operations (`test_modulators.lua`)
+- Adding modulator to device container
+- Retrieving modulators from device container
+- Verifying modulators appear inside container (not at track level)
+- Modulator deletion and cleanup
+- Modulator in nested device (Rack → Chain → Device)
+- GUID-based refinding after container operations
+- Parent-child relationship verification
+- Hierarchical naming convention (D1_M1, R1_C1_D1_M1, etc.)
 
 ## Test Utilities
 
@@ -121,14 +136,14 @@ local M = {}
 
 local function test_something()
     assert.section("Test something")
-    
+
     -- Setup
     mock_reawrap.reset()
     local track = mock_reawrap.add_track({ name = "Test" })
-    
+
     -- Test
     -- ... your test code ...
-    
+
     -- Assert
     assert.truthy(something, "Something should be true")
 end
@@ -166,13 +181,13 @@ end
 
 local function test_something()
     assert.section("Test something")
-    
+
     setup_test_track()
-    
+
     -- Test
     local rack = rack_module.add_rack_to_track()
     assert.not_nil(rack, "Rack should be created")
-    
+
     cleanup_test_track()
 end
 
@@ -210,5 +225,3 @@ run_all_tests()
 - All integration tests use `Undo_BeginBlock` / `Undo_EndBlock` for easy cleanup
 - Tests are designed to be idempotent (can be run multiple times)
 - Mock system properly tracks parent-child relationships for recursive operations
-
-

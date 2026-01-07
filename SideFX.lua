@@ -99,7 +99,6 @@ local widgets = require('lib.ui.widgets')
 local browser_panel = require('lib.ui.browser_panel')
 local fx_menu = require('lib.ui.fx_menu')
 local fx_detail_panel = require('lib.ui.fx_detail_panel')
-local modulator_panel = require('lib.ui.modulator_panel')
 local toolbar = require('lib.ui.toolbar')
 local drag_drop = require('lib.ui.drag_drop')
 local rack_ui = require('lib.ui.rack_ui')
@@ -678,20 +677,64 @@ local function delete_modulator(fx_idx)
     refresh_fx_list()
 end
 
+--- Add a modulator inside a device container
+-- @param device_container TrackFX D-container
+-- @param modulator_type table {id, name, jsfx}
+-- @return TrackFX|nil Created modulator FX
+local function add_modulator_to_device(device_container, modulator_type)
+    if not state.track or not device_container then return nil end
+
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+
+    -- Add the modulator JSFX at track level first
+    local modulator = state.track:add_fx_by_name(modulator_type.jsfx, false, -1)
+
+    if modulator and modulator.pointer >= 0 then
+        local mod_guid = modulator:get_guid()
+
+        -- Move the modulator into the device container
+        device_container:add_fx_to_container(modulator, -1)  -- Add at end
+
+        -- Refind modulator after move
+        local moved_modulator = state.track:find_fx_by_guid(mod_guid)
+
+        -- Name the modulator with hierarchical convention
+        if moved_modulator then
+            local naming = require('lib.naming')
+
+            -- Extract hierarchical path from device container
+            local device_path_str = naming.extract_path_from_name(device_container:get_name())
+
+            if device_path_str then
+                -- Count existing modulators in this device to get next index
+                local modulator_count = 0
+                for child in device_container:iter_container_children() do
+                    if fx_utils.is_modulator_fx(child) then
+                        modulator_count = modulator_count + 1
+                    end
+                end
+
+                -- Build modulator name using general hierarchical function
+                local mod_name = naming.build_hierarchical_name(device_path_str, "modulator", modulator_count, "SideFX Modulator")
+                moved_modulator:set_named_config_param("renamed_name", mod_name)
+            end
+        end
+
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Modulator to Device", -1)
+
+        refresh_fx_list()
+        return moved_modulator or modulator
+    end
+
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Add Modulator to Device", -1)
+    return nil
+end
+
 -- Use fx_utils module for is_modulator_fx
 local is_modulator_fx = fx_utils.is_modulator_fx
-
-local function draw_modulator_column(ctx, width)
-    modulator_panel.draw(ctx, width, state, {
-        find_modulators_on_track = find_modulators_on_track,
-        get_linkable_fx = get_linkable_fx,
-        get_modulator_links = get_modulator_links,
-        create_param_link = create_param_link,
-        remove_param_link = remove_param_link,
-        add_modulator = add_modulator,
-        delete_modulator = delete_modulator,
-    })
-end
 
 --------------------------------------------------------------------------------
 -- UI: Toolbar (v2 - horizontal layout)
@@ -752,7 +795,8 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
     ctx:push_style_var(imgui.StyleVar.WindowPadding(), 12, 8)
 
     ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
-    if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, 0, rack_h, wrapper_flags) then
+    local window_flags = imgui.WindowFlags.NoScrollbar()
+    if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, 0, rack_h, wrapper_flags, window_flags) then
         -- Use table layout so header width matches content width
         local table_flags = imgui.TableFlags.SizingStretchSame()
         if ctx:begin_table("chain_table_" .. selected_chain_guid, 1, table_flags) then
@@ -862,6 +906,8 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                                 utility = dev_utility,
                                 container = dev,
                                 icon_font = icon_font,
+                                track = state.track,
+                                refresh_fx_list = refresh_fx_list,
                                 on_delete = function()
                                     dev:delete()
                                     refresh_fx_list()
@@ -944,6 +990,11 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
     is_nested = (is_nested == true)
     local rack_guid = rack:get_guid()
 
+    -- Safety check: if rack was deleted, guid may be nil
+    if not rack_guid then
+        return
+    end
+
     -- Use expanded_racks for ALL racks (both top-level and nested)
     -- This allows multiple top-level racks to be expanded independently
     local is_expanded = (state.expanded_racks[rack_guid] == true)
@@ -963,7 +1014,8 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
     ctx:push_style_color(imgui.Col.ChildBg(), 0x252535FF)
     -- Use unique child ID that includes nested flag to ensure no state conflicts
     local child_id = is_nested and ("rack_nested_" .. rack_guid) or ("rack_" .. rack_guid)
-    if ctx:begin_child(child_id, rack_w, rack_h, imgui.ChildFlags.Border()) then
+    local rack_window_flags = imgui.WindowFlags.NoScrollbar()
+    if ctx:begin_child(child_id, rack_w, rack_h, imgui.ChildFlags.Border(), rack_window_flags) then
 
         -- Draw rack header using widget
         rack_ui.draw_rack_header(ctx, rack, is_nested, state, {
@@ -1475,6 +1527,8 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
                     container = container,  -- Pass container reference
                     container_name = container and container:get_name() or nil,
                     icon_font = icon_font,
+                    track = state.track,
+                    refresh_fx_list = refresh_fx_list,
                     on_delete = function(fx_to_delete)
                         if container then
                             -- Delete the whole D-container
@@ -1782,9 +1836,7 @@ local function main()
 
             -- Layout dimensions
             local browser_w = 260
-            local modulator_w = 240
             local avail_w, avail_h = ctx:get_content_region_avail()
-            local chain_w = avail_w - browser_w - modulator_w - 20
 
             -- Plugin Browser (fixed left)
             ctx:push_style_color(imgui.Col.ChildBg(), 0x1E1E22FF)
@@ -1797,6 +1849,9 @@ local function main()
             ctx:pop_style_color()
 
             ctx:same_line()
+
+            -- Calculate remaining width for device chain
+            local chain_w = avail_w - browser_w - 20
 
             -- Device Chain (horizontal scroll, center area)
             ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1EFF)
@@ -1855,31 +1910,25 @@ local function main()
                     ctx:pop_style_var()
                     ctx:pop_style_color()
                 else
-                    -- Filter out modulators from top_level_fx
-                    -- Also filter out invalid FX (from deleted tracks)
+                    -- Filter out invalid FX (from deleted tracks)
                     local filtered_fx = {}
                     for _, fx in ipairs(state.top_level_fx) do
                         -- Validate FX is still accessible (track may have been deleted)
                         local ok = pcall(function()
                             return fx:get_name()
                         end)
-                        if ok and not is_modulator_fx(fx) then
+                        if ok then
                             table.insert(filtered_fx, fx)
                         end
                     end
 
-                    -- Draw the horizontal device chain
+                    -- Draw the horizontal device chain (includes modulators)
                     draw_device_chain(ctx, filtered_fx, chain_w, avail_h)
                 end
 
                 ctx:end_child()
             end
             ctx:pop_style_color()
-
-            ctx:same_line()
-
-            -- Modulator column (fixed right)
-            draw_modulator_column(ctx, modulator_w)
 
             reaper_theme:unapply(ctx)
 

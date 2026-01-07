@@ -5,7 +5,13 @@
 -- @license MIT
 
 local r = reaper
+local imgui = require('imgui')
 local widgets = require('lib.ui.widgets')
+local fx_utils = require('lib.fx_utils')
+local modulator_sidebar = require('lib.ui.modulator_sidebar')
+local drawing = require('lib.ui.drawing')
+local fx_naming = require('lib.fx_naming')
+local param_utils = require('lib.param_utils')
 
 local M = {}
 
@@ -24,6 +30,12 @@ M.config = {
     fader_width = 28,          -- Fader width
     fader_height = 70,         -- Fader height
     knob_size = 48,            -- Knob diameter
+    -- Modulator sidebar (left side of device)
+    mod_sidebar_width = 260,   -- Width for modulator 4×2 grid
+    mod_sidebar_collapsed_width = 24,  -- Collapsed width
+    mod_slot_width = 60,
+    mod_slot_height = 60,
+    mod_slot_padding = 4,
 }
 
 -- Utility JSFX name for detection
@@ -58,6 +70,9 @@ local sidebar_collapsed = {}
 -- Track panel collapsed state per FX (by GUID) - collapses the whole panel to just header
 local panel_collapsed = {}
 
+-- NOTE: Modulator sidebar state is now managed by the state module
+-- (accessed via state.mod_sidebar_collapsed and state.expanded_mod_slot)
+
 -- Rename state: which FX is being renamed and the edit buffer
 local rename_active = {}    -- guid -> true if rename mode active
 local rename_buffer = {}    -- guid -> current edit text
@@ -72,367 +87,291 @@ local rename_buffer = {}    -- guid -> current edit text
 -- @param width number Button width
 -- @param height number Button height
 -- @return boolean True if clicked
-local function draw_ui_icon(ctx, label, width, height)
-    -- Invisible button for interaction
-    r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
-    local clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
-    
-    -- Get button bounds for drawing
-    local item_min_x, item_min_y = r.ImGui_GetItemRectMin(ctx.ctx)
-    local item_max_x, item_max_y = r.ImGui_GetItemRectMax(ctx.ctx)
-    
-    -- Draw window/screen icon using DrawList
-    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-    local center_x = (item_min_x + item_max_x) / 2
-    local center_y = (item_min_y + item_max_y) / 2
-    local icon_size = 12
-    local half_size = icon_size / 2
-    
-    -- Draw a simple window icon: rectangle with a line in the middle (like a window)
-    local x1 = center_x - half_size
-    local y1 = center_y - half_size
-    local x2 = center_x + half_size
-    local y2 = center_y + half_size
-    
-    -- Greyish color for the icon
-    local icon_color = 0xAAAAAAFF
-    -- Border color
-    local border_color = 0x666666FF
-    
-    -- Draw border around the button
-    r.ImGui_DrawList_AddRect(draw_list, item_min_x, item_min_y, item_max_x, item_max_y, border_color, 0, 0, 1.0)
-    
-    -- Outer rectangle (window frame) - signature: (draw_list, x1, y1, x2, y2, color, rounding, flags, thickness)
-    r.ImGui_DrawList_AddRect(draw_list, x1, y1, x2, y2, icon_color, 0, 0, 2)
-    -- Inner line (window pane divider)
-    r.ImGui_DrawList_AddLine(draw_list, center_x, y1, center_x, y2, icon_color, 1.5)
-    
-    return clicked
-end
+--------------------------------------------------------------------------------
+-- Modulator Support
+--------------------------------------------------------------------------------
 
---- Draw an ON/OFF circle indicator with colored background
--- @param ctx ImGui context
--- @param label string Label for the button
--- @param is_on boolean Whether the state is ON
--- @param width number Button width
--- @param height number Button height
--- @param bg_color_on number RGBA color for ON background
--- @param bg_color_off number RGBA color for OFF background
--- @return boolean True if clicked
-local function draw_on_off_circle(ctx, label, is_on, width, height, bg_color_on, bg_color_off)
-    -- Get cursor position for drawing
-    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-    local center_x = cursor_x + width / 2
-    local center_y = cursor_y + height / 2
-    local radius = 6  -- Small circle radius
-    
-    -- Invisible button for interaction
-    r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
-    local clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
-    local is_hovered = r.ImGui_IsItemHovered(ctx.ctx)
-    
-    -- Draw background and circle
-    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-    
-    -- Draw background rectangle
-    local bg_color = is_on and (bg_color_on or colors.bypass_on) or (bg_color_off or colors.bypass_off)
-    r.ImGui_DrawList_AddRectFilled(draw_list, cursor_x, cursor_y, cursor_x + width, cursor_y + height, bg_color, 0)
-    
-    if is_on then
-        -- Filled circle for ON state
-        r.ImGui_DrawList_AddCircleFilled(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12)
-    else
-        -- Empty circle (outline only) for OFF state
-        r.ImGui_DrawList_AddCircle(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12, 2)
-    end
-    
-    return clicked
-end
+-- Available modulator types
 
---- Draw a knob control
--- @param ctx ImGui context
--- @param label string Label for the knob
--- @param value number Current value (0-1)
--- @param size number Diameter of the knob
--- @return boolean changed, number new_value
-local function draw_knob(ctx, label, value, size)
-    local changed = false
-    local new_value = value
+--------------------------------------------------------------------------------
+-- Device Panel Component - Helper Functions
+--------------------------------------------------------------------------------
 
-    size = size or 32
-    local radius = size / 2
+--- Draw device panel header (collapsed or expanded)
+local function draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors, enabled)
+    local r = reaper
+    local imgui = require('imgui')
+    local interacted = false
 
-    -- Get cursor position for drawing
-    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-    local center_x = cursor_x + radius
-    local center_y = cursor_y + radius
+    -- Header row using table for proper alignment
+    if is_panel_collapsed then
+        -- Collapsed header: collapse button | path
+        if r.ImGui_BeginTable(ctx.ctx, "header_collapsed_" .. guid, 2, 0) then
+            r.ImGui_TableSetupColumn(ctx.ctx, "collapse", r.ImGui_TableColumnFlags_WidthFixed(), 24)
+            r.ImGui_TableSetupColumn(ctx.ctx, "path", r.ImGui_TableColumnFlags_WidthStretch())
 
-    -- Invisible button for interaction
-    r.ImGui_InvisibleButton(ctx.ctx, label, size, size)
-    local is_active = r.ImGui_IsItemActive(ctx.ctx)
-    local is_hovered = r.ImGui_IsItemHovered(ctx.ctx)
+            r.ImGui_TableNextRow(ctx.ctx)
 
-    -- Handle dragging
-    if is_active then
-        local delta_y = r.ImGui_GetMouseDragDelta(ctx.ctx, 0, 0, 0)
-        if delta_y ~= 0 then
-            local _, dy = r.ImGui_GetMouseDragDelta(ctx.ctx, 0, 0, 0)
-            new_value = math.max(0, math.min(1, value - dy * 0.005))
-            r.ImGui_ResetMouseDragDelta(ctx.ctx, 0)
-            if new_value ~= value then
-                changed = true
+            -- Collapse button
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+            if ctx:button("▶##collapse_" .. state_guid, 20, 20) then
+                panel_collapsed[state_guid] = false
+                interacted = true
             end
+            ctx:pop_style_color(3)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Expand panel")
+            end
+
+            -- Path identifier
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+            if device_id then
+                ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
+                ctx:text("[" .. device_id .. "]")
+                ctx:pop_style_color()
+            end
+
+            r.ImGui_EndTable(ctx.ctx)
         end
-    end
+    else
+        -- Expanded header: drag | name (50%) | path (15%) | ui | on | x | collapse (buttons fixed width)
+        local table_flags = imgui.TableFlags.SizingStretchProp()
+        if ctx:begin_table("header_" .. guid, 7, table_flags) then
+            ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
+            ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 50)  -- 50%
+            ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 15)  -- 15%
+            ctx:table_setup_column("ui", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
+            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
+            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
+            ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
 
-    -- Draw knob
-    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+            ctx:table_next_row()
 
-    -- Background circle
-    local bg_color = is_hovered and 0x444444FF or 0x333333FF
-    r.ImGui_DrawList_AddCircleFilled(draw_list, center_x, center_y, radius - 2, bg_color)
+            -- Drag handle / collapse toggle
+            ctx:table_set_column_index(0)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+            local collapse_icon = is_panel_collapsed and "▶" or "≡"
+            if ctx:button(collapse_icon .. "##drag", 20, 20) then
+                -- Toggle panel collapse on click
+                panel_collapsed[state_guid] = not is_panel_collapsed
+                interacted = true
+            end
+            ctx:pop_style_color(3)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip(is_panel_collapsed and "Expand panel" or "Collapse panel (drag to reorder)")
+            end
 
-    -- Border
-    local border_color = is_active and 0x88AACCFF or 0x666666FF
-    r.ImGui_DrawList_AddCircle(draw_list, center_x, center_y, radius - 2, border_color, 0, 2)
+            if ctx:begin_drag_drop_source() then
+                ctx:set_drag_drop_payload("FX_GUID", drag_guid)
+                ctx:text("Moving: " .. fx_naming.truncate(name, 20))
+                ctx:end_drag_drop_source()
+            end
 
-    -- Value arc (270 degree range, starting from bottom-left)
-    local start_angle = 0.75 * math.pi  -- 135 degrees (bottom-left)
-    local end_angle = 2.25 * math.pi    -- 405 degrees (bottom-right)
-    local value_angle = start_angle + (end_angle - start_angle) * new_value
+            if ctx:begin_drag_drop_target() then
+                -- Accept FX reorder drops
+                local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
+                if accepted and payload and payload ~= drag_guid then
+                    if opts.on_drop then
+                        opts.on_drop(payload, drag_guid)
+                    end
+                    interacted = true
+                end
 
-    -- Draw filled arc for value
-    if new_value > 0.01 then
-        local arc_radius = radius - 5
-        local segments = 24
-        local step = (value_angle - start_angle) / segments
-        for i = 0, segments - 1 do
-            local a1 = start_angle + step * i
-            local a2 = start_angle + step * (i + 1)
-            local x1 = center_x + math.cos(a1) * arc_radius
-            local y1 = center_y + math.sin(a1) * arc_radius
-            local x2 = center_x + math.cos(a2) * arc_radius
-            local y2 = center_y + math.sin(a2) * arc_radius
-            r.ImGui_DrawList_AddLine(draw_list, x1, y1, x2, y2, 0x88AACCFF, 3)
+                -- Accept plugin drops (insert before this FX/container)
+                local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                if accepted_plugin and plugin_name then
+                    if opts.on_plugin_drop then
+                        opts.on_plugin_drop(plugin_name, fx.pointer)
+                    end
+                    interacted = true
+                end
+
+                -- Accept rack drops (insert before this FX/container)
+                local accepted_rack = ctx:accept_drag_drop_payload("RACK_ADD")
+                if accepted_rack then
+                    if opts.on_rack_drop then
+                        opts.on_rack_drop(fx.pointer)
+                    end
+                    interacted = true
+                end
+
+                ctx:end_drag_drop_target()
+            end
+
+            -- Device name (editable)
+            ctx:table_set_column_index(1)
+
+            local sidefx_state = require('lib.state').state
+            local is_renaming = rename_active[guid] or false
+
+            if is_renaming then
+                -- Rename mode: show input box
+                ctx:set_next_item_width(-1)
+                local changed, text = ctx:input_text("##rename_" .. guid, rename_buffer[guid] or name, imgui.InputTextFlags.EnterReturnsTrue())
+
+                if changed then
+                    -- Save new display name
+                    sidefx_state.display_names[guid] = text
+                    local state_module = require('lib.state')
+                    state_module.save_display_names()
+                    rename_active[guid] = nil
+                    rename_buffer[guid] = ""
+                end
+
+                if ctx:is_item_deactivated() then
+                    rename_active[guid] = nil
+                    rename_buffer[guid] = ""
+                end
+            else
+                -- Normal mode: show text, double-click to rename
+                local display_name = fx_naming.truncate(name, 50)  -- Reasonable max length
+                if not enabled then
+                    ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
+                end
+
+                ctx:text(display_name)
+
+                if not enabled then
+                    ctx:pop_style_color()
+                end
+
+                if ctx:is_item_hovered() and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                    rename_active[guid] = true
+                    rename_buffer[guid] = name
+                end
+            end
+
+            -- Path identifier
+            ctx:table_set_column_index(2)
+            if device_id then
+                ctx:push_style_color(r.ImGui_Col_Text(), 0x666666FF)
+                ctx:text("[" .. device_id .. "]")
+                ctx:pop_style_color()
+            end
+
+            -- UI button
+            ctx:table_set_column_index(3)
+            if drawing.draw_ui_icon(ctx, "##ui_header_" .. state_guid, math.min(24, 24), 20) then
+                fx:show(3)
+                interacted = true
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Open plugin UI")
+            end
+
+            -- ON/OFF toggle
+            ctx:table_set_column_index(4)
+            if drawing.draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, math.min(24, 24), 20, colors.bypass_on, colors.bypass_off) then
+                fx:set_enabled(not enabled)
+                interacted = true
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip(enabled and "Bypass" or "Enable")
+            end
+
+            -- Delete button
+            ctx:table_set_column_index(5)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x884444FF)
+            if ctx:button("×##delete_" .. state_guid, 20, 20) then
+                if opts.on_delete then
+                    opts.on_delete(fx)
+                else
+                    fx:delete()
+                end
+                interacted = true
+            end
+            ctx:pop_style_color(2)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Delete device")
+            end
+
+            -- Collapse button (rightmost)
+            ctx:table_set_column_index(6)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+            if ctx:button("◀##collapse_" .. state_guid, 20, 20) then
+                panel_collapsed[state_guid] = true
+                interacted = true
+            end
+            ctx:pop_style_color(3)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Collapse panel")
+            end
+
+            ctx:end_table()
+        end  -- end expanded header
+    end  -- end if is_panel_collapsed check for header
+
+    return interacted
+end
+
+--- Draw collapsed panel body (minimal view with UI/ON/X buttons)
+local function draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opts, colors)
+    local r = reaper
+    local interacted = false
+
+    ctx:separator()
+
+    -- Collapsed view table layout
+    -- Row 1: ui | on | x
+    -- Row 2: name
+    if r.ImGui_BeginTable(ctx.ctx, "controls_" .. guid, 3, r.ImGui_TableFlags_SizingStretchSame()) then
+        r.ImGui_TableSetupColumn(ctx.ctx, "ui", r.ImGui_TableColumnFlags_WidthStretch())
+        r.ImGui_TableSetupColumn(ctx.ctx, "on", r.ImGui_TableColumnFlags_WidthStretch())
+        r.ImGui_TableSetupColumn(ctx.ctx, "x", r.ImGui_TableColumnFlags_WidthStretch())
+
+        r.ImGui_TableNextRow(ctx.ctx)
+
+        -- UI button
+        r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+        local ui_avail_w = ctx:get_content_region_avail()
+        if ui_avail_w > 0 and drawing.draw_ui_icon(ctx, "##ui_" .. state_guid, ui_avail_w, 24) then
+            fx:show(3)
+            interacted = true
         end
-    end
-
-    -- Indicator line
-    local ind_inner = radius * 0.3
-    local ind_outer = radius * 0.7
-    local ind_x1 = center_x + math.cos(value_angle) * ind_inner
-    local ind_y1 = center_y + math.sin(value_angle) * ind_inner
-    local ind_x2 = center_x + math.cos(value_angle) * ind_outer
-    local ind_y2 = center_y + math.sin(value_angle) * ind_outer
-    r.ImGui_DrawList_AddLine(draw_list, ind_x1, ind_y1, ind_x2, ind_y2, 0xFFFFFFFF, 2)
-
-    return changed, new_value
-end
-
---- Draw a fader control (vertical slider with fill)
--- @param ctx ImGui context
--- @param label string Label for the fader
--- @param value number Current value
--- @param min_val number Minimum value
--- @param max_val number Maximum value
--- @param width number Width of fader
--- @param height number Height of fader
--- @param format string Display format
--- @return boolean changed, number new_value
-local function draw_fader(ctx, label, value, min_val, max_val, width, height, format)
-    local changed = false
-    local new_value = value
-
-    -- Get cursor position for drawing
-    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-
-    -- Calculate fill height based on value
-    local normalized = (value - min_val) / (max_val - min_val)
-    local fill_height = height * normalized
-
-    -- Draw background
-    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-    r.ImGui_DrawList_AddRectFilled(draw_list, cursor_x, cursor_y, cursor_x + width, cursor_y + height, 0x1A1A1AFF, 3)
-
-    -- Draw fill from bottom
-    if fill_height > 0 then
-        local fill_top = cursor_y + height - fill_height
-        -- Gradient-like effect with multiple colors
-        local fill_color = 0x5588AACC
-        r.ImGui_DrawList_AddRectFilled(draw_list, cursor_x + 2, fill_top, cursor_x + width - 2, cursor_y + height - 2, fill_color, 2)
-    end
-
-    -- Border
-    r.ImGui_DrawList_AddRect(draw_list, cursor_x, cursor_y, cursor_x + width, cursor_y + height, 0x555555FF, 3)
-
-    -- Invisible slider on top for interaction
-    r.ImGui_SetCursorScreenPos(ctx.ctx, cursor_x, cursor_y)
-    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_FrameBg(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_FrameBgHovered(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_FrameBgActive(), 0x00000000)
-    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_SliderGrab(), 0xAAAAAAFF)
-    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_SliderGrabActive(), 0xFFFFFFFF)
-    r.ImGui_PushStyleVar(ctx.ctx, r.ImGui_StyleVar_GrabMinSize(), 8)
-
-    changed, new_value = r.ImGui_VSliderDouble(ctx.ctx, label, width, height, value, min_val, max_val, format)
-
-    r.ImGui_PopStyleVar(ctx.ctx)
-    r.ImGui_PopStyleColor(ctx.ctx, 5)
-
-    return changed, new_value
-end
-
---------------------------------------------------------------------------------
--- Helpers
---------------------------------------------------------------------------------
-
--- Get the internal REAPER name (with prefix)
-local function get_internal_name(fx)
-    if not fx then return "" end
-    local ok, renamed = pcall(function() return fx:get_named_config_param("renamed_name") end)
-    if ok and renamed and renamed ~= "" then
-        return renamed
-    end
-    local ok2, name = pcall(function() return fx:get_name() end)
-    return ok2 and name or ""
-end
-
--- Extract the SideFX prefix from a name (R1_C1:, D1:, R1:)
-local function extract_prefix(name)
-    local prefix = name:match("^(R%d+_C%d+:%s*)")
-    if prefix then return prefix end
-    prefix = name:match("^(D%d+:%s*)")
-    if prefix then return prefix end
-    prefix = name:match("^(R%d+:%s*)")
-    if prefix then return prefix end
-    return ""
-end
-
-local function get_display_name(fx)
-    if not fx then return "Unknown" end
-    
-    -- Check for custom display name first (SideFX-only renaming)
-    local ok_guid, guid = pcall(function() return fx:get_guid() end)
-    if ok_guid and guid then
-        local state_module = require('lib.state')
-        local state = state_module.state
-        if state.display_names[guid] then
-            return state.display_names[guid]
+        if r.ImGui_IsItemHovered(ctx.ctx) then
+            ctx:set_tooltip("Open " .. name)
         end
-    end
-    
-    -- Fall back to internal name with prefixes stripped
-    local name = get_internal_name(fx)
 
-    -- Strip SideFX internal prefixes for clean UI display
-    -- Patterns from most specific to least specific
-    name = name:gsub("^R%d+_C%d+_D%d+_FX:%s*", "")  -- R1_C1_D1_FX: prefix
-    name = name:gsub("^R%d+_C%d+_D%d+:%s*", "")     -- R1_C1_D1: prefix
-    name = name:gsub("^R%d+_C%d+:%s*", "")          -- R1_C1: prefix
-    name = name:gsub("^D%d+_FX:%s*", "")            -- D1_FX: prefix
-    name = name:gsub("^D%d+:%s*", "")               -- D1: prefix
-    name = name:gsub("^R%d+:%s*", "")               -- R1: prefix
-
-    -- Strip common plugin format prefixes
-    name = name:gsub("^VST3?: ", "")
-    name = name:gsub("^AU: ", "")
-    name = name:gsub("^JS: ", "")
-    name = name:gsub("^CLAP: ", "")
-
-    return name
-end
-
--- Rename an FX while preserving its internal prefix
-local function rename_fx(fx, new_display_name)
-    if not fx or not new_display_name then return false end
-    local internal_name = get_internal_name(fx)
-    local prefix = extract_prefix(internal_name)
-    local new_internal_name = prefix .. new_display_name
-    local ok = pcall(function()
-        fx:set_named_config_param("renamed_name", new_internal_name)
-    end)
-    return ok
-end
-
-local function truncate(str, max_len)
-    if #str <= max_len then return str end
-    return str:sub(1, max_len - 2) .. ".."
-end
-
--- Debug logging for parameter detection (only logs once per FX+param combo)
-local DEBUG_PARAMS = false  -- Set to true to enable logging
-local logged_params = {}   -- Cache to prevent repeated logging
-
---- Detect if a parameter is a switch (discrete) vs continuous
--- @param fx FX object
--- @param param_idx Parameter index
--- @return boolean true if switch, false if continuous
-local function is_switch_param(fx, param_idx)
-    -- Get parameter step sizes from REAPER API
-    -- Returns: retval, step, smallstep, largestep, istoggle
-    local retval_step, step, smallstep, largestep, is_toggle = r.TrackFX_GetParameterStepSizes(fx.track.pointer, fx.pointer, param_idx)
-
-    -- Get the parameter's value range
-    local retval_range, minval, maxval, midval = r.TrackFX_GetParamEx(fx.track.pointer, fx.pointer, param_idx)
-
-    -- Get param name
-    local param_name = "?"
-    pcall(function() param_name = fx:get_param_name(param_idx) end)
-
-    -- Create unique key for logging
-    local log_key = tostring(fx.pointer) .. "_" .. param_idx
-
-    local result = false
-    local reason = "default"
-
-    -- 1. API says it's explicitly a toggle
-    if is_toggle == true then
-        result = true
-        reason = "API is_toggle"
-    -- 2. API provides step info and step covers most of range (2 values)
-    elseif retval_step and step and step > 0 and retval_range and maxval and minval then
-        local range = maxval - minval
-        if range > 0 and step >= range * 0.5 then
-            result = true
-            reason = string.format("step=%s >= range/2", step)
+        -- ON/OFF toggle
+        r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+        local avail_w, avail_h = ctx:get_content_region_avail()
+        if avail_w > 0 and drawing.draw_on_off_circle(ctx, "##on_off_" .. state_guid, enabled, avail_w, 24, colors.bypass_on, colors.bypass_off) then
+            fx:set_enabled(not enabled)
+            interacted = true
         end
-    end
 
-    -- 3. Fallback: check param name for common switch keywords
-    -- Only if API didn't provide info (retval_step=false)
-    if not result and not retval_step and param_name then
-        local lower = param_name:lower()
-        -- Common switch/toggle parameter names
-        if lower == "bypass" or lower == "on" or lower == "off" or
-           lower == "enabled" or lower == "enable" or lower == "mute" or
-           lower == "solo" or lower == "delta" or
-           lower:find("on/off") or lower:find("mode$") then
-            result = true
-            reason = "name match: " .. lower
+        -- Close button
+        r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
+        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x444444FF)
+        if ctx:button("×", -1, 24) then
+            if opts.on_delete then
+                opts.on_delete(fx)
+            else
+                fx:delete()
+            end
+            interacted = true
         end
+        ctx:pop_style_color(2)
+
+        r.ImGui_EndTable(ctx.ctx)
     end
 
-    -- Log only once per param
-    if DEBUG_PARAMS and not logged_params[log_key] then
-        logged_params[log_key] = true
-        r.ShowConsoleMsg(string.format(
-            "[%d] '%s': retval=%s, step=%s, is_toggle=%s -> %s (%s)\n",
-            param_idx,
-            param_name or "nil",
-            tostring(retval_step),
-            tostring(step),
-            tostring(is_toggle),
-            result and "SWITCH" or "CONTINUOUS",
-            reason
-        ))
-    end
+    -- Row 2: name
+    local imgui = require('imgui')
+    ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
+    ctx:text(name)
+    ctx:pop_style_color()
 
-    return result
-end
-
--- Call this to reset logging (e.g., when FX changes)
-local function reset_param_logging()
-    logged_params = {}
+    return interacted
 end
 
 --------------------------------------------------------------------------------
@@ -448,7 +387,7 @@ function M.draw(ctx, fx, opts)
     opts = opts or {}
     local cfg = M.config
     local colors = M.colors
-    
+
     -- Get icon font for UI button
     local icon_font = opts.icon_font
     local constants = require('lib.constants')
@@ -460,6 +399,12 @@ function M.draw(ctx, fx, opts)
     -- Safety check: FX might have been deleted
     local ok, guid = pcall(function() return fx:get_guid() end)
     if not ok or not guid then return false end
+
+    -- Skip rendering modulators - they're handled by modulator_grid_panel
+    local is_modulator = fx_utils.is_modulator_fx(fx)
+    if is_modulator then
+        return false
+    end
 
     -- Use container GUID for drag/drop if we have a container
     local container = opts.container
@@ -477,7 +422,7 @@ function M.draw(ctx, fx, opts)
         if ok_id then device_id = id end
     else
         -- No container, use regular display name
-        local ok2, fx_name = pcall(function() return get_display_name(fx) end)
+        local ok2, fx_name = pcall(function() return fx_naming.get_display_name(fx) end)
         if ok2 then name = fx_name end
     end
 
@@ -517,6 +462,25 @@ function M.draw(ctx, fx, opts)
     local is_sidebar_collapsed = sidebar_collapsed[state_guid] or false
     local collapsed_sidebar_w = 8  -- Minimal width when collapsed (button is in header)
 
+    -- Get state module for modulator sidebar state
+    local state_module = require('lib.state')
+    local state = state_module.state
+
+    -- Initialize modulator sidebar state tables if needed
+    state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
+    state.expanded_mod_slot = state.expanded_mod_slot or {}
+
+    -- Check modulator sidebar state early for panel width calculation
+    -- Default to false (expanded) to match modulator_sidebar.lua
+    local is_mod_sidebar_collapsed = state.mod_sidebar_collapsed[state_guid] or false
+
+    local mod_sidebar_w
+    if is_mod_sidebar_collapsed then
+        mod_sidebar_w = cfg.mod_sidebar_collapsed_width
+    else
+        mod_sidebar_w = cfg.mod_sidebar_width
+    end
+
     -- Calculate dimensions based on collapsed state
     local panel_height, panel_width, content_width, num_columns, params_per_column
 
@@ -540,10 +504,11 @@ function M.draw(ctx, fx, opts)
         num_columns = math.ceil(visible_count / params_per_column)
         num_columns = math.max(1, num_columns)
 
-        -- Calculate panel width: columns + sidebar (if visible) + padding
+        -- Calculate panel width: columns + sidebar (if visible) + modulator sidebar + padding
         content_width = cfg.column_width * num_columns
         local sidebar_w = is_sidebar_collapsed and collapsed_sidebar_w or (cfg.sidebar_width + cfg.sidebar_padding)
-        panel_width = content_width + sidebar_w + cfg.padding * 2
+
+        panel_width = content_width + sidebar_w + mod_sidebar_w + cfg.padding * 2
     end
 
     local interacted = false
@@ -564,312 +529,44 @@ function M.draw(ctx, fx, opts)
         cursor_x + panel_width, cursor_y + panel_height,
         colors.panel_border, cfg.border_radius, 0, 1)
 
-    -- Begin child for panel content
-    if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0) then
+    -- Begin child for panel content (hide scrollbars)
+    local window_flags = imgui.WindowFlags.NoScrollbar()
+    if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0, window_flags) then
 
-        -- Header row using table for proper alignment
+        -- Wrapper table: [Modulator Sidebar | Main Content]
+        -- (mod_sidebar_w already calculated above for panel width)
+        if r.ImGui_BeginTable(ctx.ctx, "device_wrapper_" .. guid, 2, r.ImGui_TableFlags_BordersInnerV()) then
+            r.ImGui_TableSetupColumn(ctx.ctx, "modulators", r.ImGui_TableColumnFlags_WidthFixed(), mod_sidebar_w)
+            r.ImGui_TableSetupColumn(ctx.ctx, "content", r.ImGui_TableColumnFlags_WidthStretch())
+
+            r.ImGui_TableNextRow(ctx.ctx)
+
+            -- === MODULATOR SIDEBAR ===
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+
+            local mod_interacted = modulator_sidebar.draw(ctx, fx, container, guid, state_guid, cfg, opts)
+            if mod_interacted then
+                interacted = true
+            end
+
+            -- === MAIN CONTENT ===
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+
+
+        -- Draw header
+        local header_interacted = draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors, enabled)
+        if header_interacted then interacted = true end
+
+
+        -- Draw collapsed body and return early if collapsed
         if is_panel_collapsed then
-            -- Collapsed header: collapse button | path
-            if r.ImGui_BeginTable(ctx.ctx, "header_collapsed_" .. guid, 2, 0) then
-                r.ImGui_TableSetupColumn(ctx.ctx, "collapse", r.ImGui_TableColumnFlags_WidthFixed(), 24)
-                r.ImGui_TableSetupColumn(ctx.ctx, "path", r.ImGui_TableColumnFlags_WidthStretch())
-                
-                r.ImGui_TableNextRow(ctx.ctx)
-                
-                -- Collapse button
-                r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
-                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
-                ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
-                if ctx:button("▶##collapse_" .. state_guid, 20, 20) then
-                    panel_collapsed[state_guid] = false
-                    interacted = true
-                end
-                ctx:pop_style_color(3)
-                if r.ImGui_IsItemHovered(ctx.ctx) then
-                    ctx:set_tooltip("Expand panel")
-                end
-                
-                -- Path identifier
-                r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-                if device_id then
-                    ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
-                    ctx:text("[" .. device_id .. "]")
-                    ctx:pop_style_color()
-                end
-                
-                r.ImGui_EndTable(ctx.ctx)
-            end
-        else
-            -- Expanded header: drag | name (50%) | path (15%) | ui | on | x | collapse (buttons fixed width)
-            local imgui = require('imgui')
-            local table_flags = imgui.TableFlags.SizingStretchProp()
-            if ctx:begin_table("header_" .. guid, 7, table_flags) then
-                ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
-                ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 50)  -- 50%
-                ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 15)  -- 15%
-                ctx:table_setup_column("ui", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
-                ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
-                ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
-                ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
-
-                ctx:table_next_row()
-
-            -- Drag handle / collapse toggle
-            ctx:table_set_column_index(0)
-            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
-            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
-            local collapse_icon = is_panel_collapsed and "▶" or "≡"
-            if ctx:button(collapse_icon .. "##drag", 20, 20) then
-                -- Toggle panel collapse on click
-                panel_collapsed[state_guid] = not is_panel_collapsed
-                interacted = true
-            end
-            ctx:pop_style_color(3)
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip(is_panel_collapsed and "Expand panel" or "Collapse panel (drag to reorder)")
-            end
-
-            if ctx:begin_drag_drop_source() then
-                ctx:set_drag_drop_payload("FX_GUID", drag_guid)
-                ctx:text("Moving: " .. truncate(name, 20))
-                ctx:end_drag_drop_source()
-            end
-
-            if ctx:begin_drag_drop_target() then
-                -- Accept FX reorder drops
-                local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
-                if accepted and payload and payload ~= drag_guid then
-                    if opts.on_drop then
-                        opts.on_drop(payload, drag_guid)
-                    end
-                    interacted = true
-                end
-
-                -- Accept plugin drops (insert before this FX/container)
-                local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
-                if accepted_plugin and plugin_name then
-                    if opts.on_plugin_drop then
-                        opts.on_plugin_drop(plugin_name, fx.pointer)
-                    end
-                    interacted = true
-                end
-
-                -- Accept rack drops (insert before this FX/container)
-                local accepted_rack = ctx:accept_drag_drop_payload("RACK_ADD")
-                if accepted_rack then
-                    if opts.on_rack_drop then
-                        opts.on_rack_drop(fx.pointer)
-                    end
-                    interacted = true
-                end
-
-                ctx:end_drag_drop_target()
-            end
-
-            -- Device name (double-click to rename)
-            ctx:table_set_column_index(1)
-
-            -- Check if this device/container is being renamed (use SideFX state system)
-            -- Use FX GUID for renaming since we display the FX name, not the container name
-            local state_module = require('lib.state')
-            local sidefx_state = state_module.state
-            local rename_guid = guid  -- Use FX GUID for renaming
-            local is_renaming = (sidefx_state.renaming_fx == rename_guid)
-            
-            if is_renaming then
-                -- Rename mode: show input text (just the name)
-                ctx:set_next_item_width(-1)
-
-                -- Initialize rename text if needed (use just the name, not the identifier)
-                if not sidefx_state.rename_text or sidefx_state.rename_text == "" then
-                    sidefx_state.rename_text = name  -- Just the name, no identifier
-                    r.ImGui_SetKeyboardFocusHere(ctx.ctx)
-                end
-
-                local changed, new_text = r.ImGui_InputText(ctx.ctx, "##rename_" .. state_guid, sidefx_state.rename_text, r.ImGui_InputTextFlags_EnterReturnsTrue())
-                sidefx_state.rename_text = new_text
-
-                -- Commit on Enter
-                if changed then
-                    if sidefx_state.rename_text ~= "" then
-                        -- Store custom display name in state (SideFX-only, doesn't change REAPER name)
-                        sidefx_state.display_names[rename_guid] = sidefx_state.rename_text
-                    else
-                        -- Clear custom name if empty
-                        sidefx_state.display_names[rename_guid] = nil
-                    end
-                    state_module.save_display_names()
-                    sidefx_state.renaming_fx = nil
-                    sidefx_state.rename_text = ""
-                    interacted = true
-                end
-
-                -- Cancel on Escape or click elsewhere
-                if r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_Escape()) then
-                    sidefx_state.renaming_fx = nil
-                    sidefx_state.rename_text = ""
-                elseif not r.ImGui_IsItemActive(ctx.ctx) and not r.ImGui_IsItemFocused(ctx.ctx) and r.ImGui_IsMouseClicked(ctx.ctx, 0) then
-                    -- Lost focus - commit if text changed
-                    if sidefx_state.rename_text ~= "" then
-                        sidefx_state.display_names[rename_guid] = sidefx_state.rename_text
-                    else
-                        sidefx_state.display_names[rename_guid] = nil
-                    end
-                    state_module.save_display_names()
-                    sidefx_state.renaming_fx = nil
-                    sidefx_state.rename_text = ""
-                end
-            else
-                -- Normal mode: show text, double-click to rename
-                local display_name = truncate(name, 50)  -- Reasonable max length
-                if not enabled then
-                    ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
-                end
-
-                -- Selectable for double-click detection (name only) - use 0 width to fill column
-                if r.ImGui_Selectable(ctx.ctx, display_name .. "##name_" .. state_guid, false, r.ImGui_SelectableFlags_AllowDoubleClick(), 0, 0) then
-                    if r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
-                        sidefx_state.renaming_fx = rename_guid
-                        sidefx_state.rename_text = name  -- Just the name, no identifier
-                        interacted = true
-                    end
-                end
-                if r.ImGui_IsItemHovered(ctx.ctx) then
-                    ctx:set_tooltip("Double-click to rename")
-                end
-
-                if not enabled then
-                    ctx:pop_style_color()
-                end
-            end
-
-            -- Path identifier (15%)
-            ctx:table_set_column_index(2)
-            if device_id then
-                ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
-                ctx:text("[" .. device_id .. "]")
-                ctx:pop_style_color()
-            end
-
-            -- UI button
-            ctx:table_set_column_index(3)
-            if draw_ui_icon(ctx, "##ui_header_" .. state_guid, 24, 20) then
-                fx:show(3)
-                interacted = true
-            end
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip("Open native FX window")
-            end
-
-            -- ON/OFF toggle
-            ctx:table_set_column_index(4)
-            if draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, 24, 20, colors.bypass_on, colors.bypass_off) then
-                fx:set_enabled(not enabled)
-                interacted = true
-            end
-
-            -- Close button
-            ctx:table_set_column_index(5)
-            ctx:push_style_color(r.ImGui_Col_Button(), 0x664444FF)
-            if ctx:button("×", 24, 20) then
-                if opts.on_delete then
-                    opts.on_delete(fx)
-                else
-                    fx:delete()
-                end
-                interacted = true
-            end
-            ctx:pop_style_color()
-
-            -- Sidebar collapse/expand button (rightmost) - only show when panel is expanded
-            ctx:table_set_column_index(6)
-            if not is_panel_collapsed then
-                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
-                if is_sidebar_collapsed then
-                    if ctx:button("▶##sidebar_" .. state_guid, 24, 20) then
-                        sidebar_collapsed[state_guid] = false
-                    end
-                    if r.ImGui_IsItemHovered(ctx.ctx) then
-                        ctx:set_tooltip("Expand sidebar")
-                    end
-                else
-                    if ctx:button("◀##sidebar_" .. state_guid, 24, 20) then
-                        sidebar_collapsed[state_guid] = true
-                    end
-                    if r.ImGui_IsItemHovered(ctx.ctx) then
-                        ctx:set_tooltip("Collapse sidebar")
-                    end
-                end
-                ctx:pop_style_color(2)
-            end
-
-            ctx:end_table()
-            end  -- end expanded header
-        end  -- end if is_panel_collapsed check for header
-
-        -- Render collapsed panel content
-        if is_panel_collapsed then
-            ctx:separator()
-
-            -- Collapsed view table layout
-            -- Row 1: ui | on | x
-            -- Row 2: name
-            if r.ImGui_BeginTable(ctx.ctx, "controls_" .. guid, 3, r.ImGui_TableFlags_SizingStretchSame()) then
-                r.ImGui_TableSetupColumn(ctx.ctx, "ui", r.ImGui_TableColumnFlags_WidthStretch())
-                r.ImGui_TableSetupColumn(ctx.ctx, "on", r.ImGui_TableColumnFlags_WidthStretch())
-                r.ImGui_TableSetupColumn(ctx.ctx, "x", r.ImGui_TableColumnFlags_WidthStretch())
-                
-                r.ImGui_TableNextRow(ctx.ctx)
-                
-                -- UI button
-                r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
-                -- Draw custom UI icon (border is drawn inside the function)
-                if draw_ui_icon(ctx, "##ui_" .. state_guid, -1, 24) then
-                    fx:show(3)
-                    interacted = true
-                end
-                if r.ImGui_IsItemHovered(ctx.ctx) then
-                    ctx:set_tooltip("Open " .. name)
-                end
-                
-                -- ON/OFF toggle
-                r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-                -- Draw custom circle indicator with colored background
-                local avail_w, avail_h = ctx:get_content_region_avail()
-                if draw_on_off_circle(ctx, "##on_off_" .. state_guid, enabled, avail_w, 24, colors.bypass_on, colors.bypass_off) then
-                    fx:set_enabled(not enabled)
-                    interacted = true
-                end
-                
-                -- Close button
-                r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
-                ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
-                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x444444FF)
-                if ctx:button("×", -1, 24) then
-                    if opts.on_delete then
-                        opts.on_delete(fx)
-                    else
-                        fx:delete()
-                    end
-                    interacted = true
-                end
-                ctx:pop_style_color(2)
-                
-                r.ImGui_EndTable(ctx.ctx)
-            end
-            
-            -- Row 2: name
-            ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAAAAFF)
-            ctx:text(name)
-            ctx:pop_style_color()
-
+            local collapsed_interacted = draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opts, colors)
+            if collapsed_interacted then interacted = true end
             ctx:end_child()  -- end panel
             ctx:pop_id()
             return interacted
         end
+
 
         ctx:separator()
 
@@ -880,7 +577,7 @@ function M.draw(ctx, fx, opts)
 
         if r.ImGui_BeginTable(ctx.ctx, "device_layout_" .. guid, 2, r.ImGui_TableFlags_BordersInnerV()) then
             r.ImGui_TableSetupColumn(ctx.ctx, "params", r.ImGui_TableColumnFlags_WidthFixed(), content_width)
-            r.ImGui_TableSetupColumn(ctx.ctx, "sidebar", r.ImGui_TableColumnFlags_WidthFixed(), sidebar_actual_w)
+            r.ImGui_TableSetupColumn(ctx.ctx, "sidebar", r.ImGui_TableColumnFlags_WidthStretch())  -- Stretch to fill remaining space
 
             r.ImGui_TableNextRow(ctx.ctx)
 
@@ -913,7 +610,7 @@ function M.draw(ctx, fx, opts)
 
                                 if ok_name and ok_val then
                                     param_val = param_val or 0
-                                    local display_label = (param_name and param_name ~= "") and truncate(param_name, 14) or ("P" .. (param_idx + 1))
+                                    local display_label = (param_name and param_name ~= "") and fx_naming.truncate(param_name, 14) or ("P" .. (param_idx + 1))
 
                                     ctx:push_id(param_idx)
 
@@ -923,7 +620,7 @@ function M.draw(ctx, fx, opts)
                                     ctx:pop_style_color()
 
                                     -- Smart detection: switch vs continuous
-                                    local is_switch = is_switch_param(fx, param_idx)
+                                    local is_switch = param_utils.is_switch_param(fx, param_idx)
 
                                     if is_switch then
                                         -- Draw as toggle button
@@ -1014,9 +711,9 @@ function M.draw(ctx, fx, opts)
                     if ctx:begin_table("mix_delta_" .. state_guid, 2, table_flags) then
                         ctx:table_setup_column("mix", imgui.TableColumnFlags.WidthStretch())
                         ctx:table_setup_column("delta", imgui.TableColumnFlags.WidthStretch())
-                        
+
                         ctx:table_next_row()
-                        
+
                         -- Mix column
                         ctx:table_set_column_index(0)
                         if has_mix then
@@ -1032,7 +729,7 @@ function M.draw(ctx, fx, opts)
                             -- Smaller knob (30px)
                             local mix_knob_size = 30
                             r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (col_w - mix_knob_size) / 2)
-                            local mix_changed, new_mix = draw_knob(ctx, "##mix_knob", mix_val, mix_knob_size)
+                            local mix_changed, new_mix = drawing.draw_knob(ctx, "##mix_knob", mix_val, mix_knob_size)
                             if mix_changed then
                                 pcall(function() container:set_param_normalized(mix_idx, new_mix) end)
                                 interacted = true
@@ -1050,7 +747,7 @@ function M.draw(ctx, fx, opts)
                                 ctx:set_tooltip(string.format("Device Mix: %.0f%% (parallel blend)", mix_val * 100))
                             end
                         end
-                        
+
                         -- Delta column
                         ctx:table_set_column_index(1)
                         if has_delta then
@@ -1063,7 +760,7 @@ function M.draw(ctx, fx, opts)
                             ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAACCFF)
                             ctx:text(delta_text)
                             ctx:pop_style_color()
-                            
+
                             -- Center button vertically with mix knob
                             -- Mix column: label (~20px) + spacing (~5px) + knob (30px) + spacing (~5px) + value (~20px) = ~80px total
                             -- Knob center is at: label (20px) + spacing (5px) + knob_radius (15px) = ~40px from top
@@ -1096,7 +793,7 @@ function M.draw(ctx, fx, opts)
                                 ctx:set_tooltip(delta_on and "Delta Solo: ON (wet - dry)" or "Delta Solo: OFF")
                             end
                         end
-                        
+
                         ctx:end_table()
                     end
                 end
@@ -1138,25 +835,25 @@ function M.draw(ctx, fx, opts)
                         local fader_w = 32
                         local meter_w = 12
                         local scale_w = 20
-                        
+
                         -- Calculate fader height (accounting for pan slider above)
                         local _, remaining_h = ctx:get_content_region_avail()
                         local fader_h = remaining_h - 22  -- Leave room for dB label
                         fader_h = math.max(50, fader_h)  -- Minimum 50px, but can extend
-                        
+
                         local avail_w, _ = ctx:get_content_region_avail()
                         local total_w = scale_w + fader_w + meter_w + 4
                         local offset_x = math.max(0, (avail_w - total_w) / 2)
-                        
+
                         ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + offset_x)
-                        
+
                         local screen_x, screen_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
                         local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-                        
+
                         local scale_x = screen_x
                         local fader_x = screen_x + scale_w + 2
                         local meter_x = fader_x + fader_w + 2
-                        
+
                         -- dB scale
                         local db_marks = {24, 12, 0, -12, -24}
                         for _, db in ipairs(db_marks) do
@@ -1168,7 +865,7 @@ function M.draw(ctx, fx, opts)
                                 r.ImGui_DrawList_AddText(draw_list, scale_x, mark_y - 5, 0x888888FF, label)
                             end
                         end
-                        
+
                         -- Fader background
                         r.ImGui_DrawList_AddRectFilled(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x1A1A1AFF, 3)
                         -- Fader fill
@@ -1183,14 +880,14 @@ function M.draw(ctx, fx, opts)
                         local zero_db_norm = 24 / 48
                         local zero_y = screen_y + fader_h - (fader_h * zero_db_norm)
                         r.ImGui_DrawList_AddLine(draw_list, fader_x, zero_y, fader_x + fader_w, zero_y, 0xFFFFFF44, 1)
-                        
+
                         -- Stereo meters
                         local meter_l_x = meter_x
                         local meter_r_x = meter_x + meter_w / 2 + 1
                         local half_meter_w = meter_w / 2 - 1
                         r.ImGui_DrawList_AddRectFilled(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
                         r.ImGui_DrawList_AddRectFilled(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
-                        
+
                         -- Get track for meters (if available)
                         local state_module = require('lib.state')
                         local sidefx_state = state_module.state
@@ -1217,10 +914,10 @@ function M.draw(ctx, fx, opts)
                             draw_meter_bar(meter_l_x + 1, half_meter_w - 1, peak_l)
                             draw_meter_bar(meter_r_x + 1, half_meter_w - 1, peak_r)
                         end
-                        
+
                         r.ImGui_DrawList_AddRect(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
                         r.ImGui_DrawList_AddRect(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
-                        
+
                         -- Invisible slider for fader interaction
                         r.ImGui_SetCursorScreenPos(ctx.ctx, fader_x, screen_y)
                         local imgui = require('imgui')
@@ -1240,7 +937,7 @@ function M.draw(ctx, fx, opts)
                             interacted = true
                         end
                         ctx:pop_style_color(5)
-                        
+
                         -- dB label below fader (with double-click editing)
                         local label_h = 16
                         local label_y = screen_y + fader_h + 2
@@ -1249,16 +946,16 @@ function M.draw(ctx, fx, opts)
                         local db_label = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db))
                         local text_w = r.ImGui_CalcTextSize(ctx.ctx, db_label)
                         r.ImGui_DrawList_AddText(draw_list, label_x + (fader_w - text_w) / 2, label_y + 1, 0xCCCCCCFF, db_label)
-                        
+
                         -- Invisible button for dB label (for double-click editing)
                         r.ImGui_SetCursorScreenPos(ctx.ctx, label_x, label_y)
                         ctx:invisible_button("##gain_db_label", fader_w, label_h)
-                        
+
                         -- Double-click on dB label to edit value
                         if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
                             ctx:open_popup("##gain_edit_popup")
                         end
-                        
+
                         -- Edit popup for gain
                         if ctx:begin_popup("##gain_edit_popup") then
                             local imgui = require('imgui')
@@ -1275,7 +972,7 @@ function M.draw(ctx, fx, opts)
                             end
                             ctx:end_popup()
                         end
-                        
+
                         -- Advance cursor past fader
                         r.ImGui_SetCursorScreenPos(ctx.ctx, screen_x, label_y + label_h)
                     end
@@ -1342,6 +1039,9 @@ function M.draw(ctx, fx, opts)
             r.ImGui_EndTable(ctx.ctx)
         end  -- end device_layout table
 
+            ctx:end_table()  -- end device_wrapper table
+        end
+
         ctx:end_child()  -- end panel
     end
 
@@ -1398,7 +1098,7 @@ function M.draw_compact(ctx, fx, opts)
     if not fx then return false end
 
     local guid = fx:get_guid()
-    local name = get_display_name(fx)
+    local name = fx_naming.get_display_name(fx)
     local enabled = fx:get_enabled()
 
     local interacted = false
@@ -1412,7 +1112,7 @@ function M.draw_compact(ctx, fx, opts)
     ctx:push_style_color(r.ImGui_Col_Button(), btn_color)
     ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x4A4A4AFF)
 
-    if ctx:button(truncate(name, 14), compact_width, compact_height) then
+    if ctx:button(fx_naming.truncate(name, 14), compact_width, compact_height) then
         -- Click opens FX detail or native UI
         if opts.on_click then
             opts.on_click(fx)
@@ -1427,7 +1127,7 @@ function M.draw_compact(ctx, fx, opts)
     -- Drag source
     if ctx:begin_drag_drop_source() then
         ctx:set_drag_drop_payload("FX_GUID", guid)
-        ctx:text("Moving: " .. truncate(name, 20))
+        ctx:text("Moving: " .. fx_naming.truncate(name, 20))
         ctx:end_drag_drop_source()
     end
 

@@ -64,6 +64,7 @@ M.state = {
     mod_selected_target = {},  -- {[mod_fx_idx] = {fx_idx, fx_name}} for two-dropdown linking
     modulator_expanded = {},  -- {[mod_fx_idx] = true} -- which modulators show params
     modulator_advanced = {},  -- {[mod_fx_idx] = true} -- advanced section expanded
+    modulator_panel_collapsed = true,  -- Collapse modulator grid panel by default
 }
 
 -- Alias for convenience

@@ -214,7 +214,132 @@ function M.parse_hierarchy(name)
 end
 
 --------------------------------------------------------------------------------
--- Name Building
+-- Hierarchical Path Building
+--------------------------------------------------------------------------------
+
+--- Extract hierarchical path from an FX by walking up parent containers.
+-- Returns path components like {rack_idx=1, chain_idx=2, device_idx=3}.
+-- @param fx TrackFX FX object
+-- @return table|nil Path components, or nil if not in hierarchy
+function M.extract_hierarchical_path(fx)
+    if not fx then return nil end
+
+    local path = {}
+    local current = fx
+    local depth = 0
+    local max_depth = 10  -- Prevent infinite loops
+
+    -- Walk up the parent chain
+    while current and depth < max_depth do
+        local name = current:get_name()
+        if not name then break end
+
+        -- Check what type of container this is
+        local rack_idx = name:match("^R(%d+)")
+        local chain_match = name:match("^R%d+_C(%d+)")
+        local device_match = name:match("^R%d+_C%d+_D(%d+)")
+        local standalone_device = name:match("^D(%d+)")
+
+        if device_match then
+            -- This is a device in a rack chain: R1_C1_D1
+            path.device_idx = tonumber(device_match)
+            path.chain_idx = tonumber(chain_match)
+            path.rack_idx = tonumber(rack_idx)
+        elseif chain_match then
+            -- This is a chain in a rack: R1_C1
+            path.chain_idx = tonumber(chain_match)
+            path.rack_idx = tonumber(rack_idx)
+        elseif rack_idx then
+            -- This is a rack: R1
+            path.rack_idx = tonumber(rack_idx)
+        elseif standalone_device then
+            -- This is a standalone device: D1
+            path.device_idx = tonumber(standalone_device)
+        end
+
+        -- Move to parent
+        if not current.get_parent_container then break end
+        local parent = current:get_parent_container()
+        if not parent then break end
+        current = parent
+        depth = depth + 1
+    end
+
+    return next(path) and path or nil
+end
+
+--- Build hierarchical path string from path components.
+-- @param path table Path components {rack_idx, chain_idx, device_idx}
+-- @return string Path string (e.g., "R1_C1_D1" or "D1")
+function M.build_hierarchical_path_string(path)
+    if not path then return "" end
+
+    if path.device_idx and path.chain_idx and path.rack_idx then
+        return string.format("R%d_C%d_D%d", path.rack_idx, path.chain_idx, path.device_idx)
+    elseif path.chain_idx and path.rack_idx then
+        return string.format("R%d_C%d", path.rack_idx, path.chain_idx)
+    elseif path.rack_idx then
+        return string.format("R%d", path.rack_idx)
+    elseif path.device_idx then
+        return string.format("D%d", path.device_idx)
+    end
+
+    return ""
+end
+
+--- Build full hierarchical name for an FX component.
+-- @param path table|string Path components or path string
+-- @param component_type string Component type: "device", "fx", "util", "modulator", "mixer"
+-- @param component_idx number|nil Component index (e.g., modulator index)
+-- @param display_name string|nil Display name for the component
+-- @return string Full hierarchical name
+function M.build_hierarchical_name(path, component_type, component_idx, display_name)
+    local path_str = type(path) == "string" and path or M.build_hierarchical_path_string(path)
+    if path_str == "" then return display_name or "" end
+
+    if component_type == "device" then
+        return string.format("%s: %s", path_str, display_name or "Device")
+    elseif component_type == "fx" then
+        return string.format("%s_FX: %s", path_str, display_name or "FX")
+    elseif component_type == "util" then
+        return string.format("%s_Util", path_str)
+    elseif component_type == "modulator" then
+        return string.format("%s_M%d: %s", path_str, component_idx or 1, display_name or "SideFX Modulator")
+    elseif component_type == "mixer" then
+        return string.format("_%s_M", path_str)
+    elseif component_type == "rack" then
+        return string.format("%s: %s", path_str, display_name or "Rack")
+    elseif component_type == "chain" then
+        return path_str
+    end
+
+    return display_name or path_str
+end
+
+--- Extract hierarchical path from FX name.
+-- @param name string FX name (e.g., "R1_C1_D1: Plugin" or "D1_M2: Modulator")
+-- @return string|nil Path string (e.g., "R1_C1_D1" or "D1")
+function M.extract_path_from_name(name)
+    if not name then return nil end
+
+    -- Try to match various patterns
+    local path = name:match("^(R%d+_C%d+_D%d+)")
+    if path then return path end
+
+    path = name:match("^(R%d+_C%d+)")
+    if path then return path end
+
+    path = name:match("^(R%d+)")
+    if path then return path end
+
+    path = name:match("^(D%d+)")
+    if path then return path end
+
+    return nil
+end
+
+--------------------------------------------------------------------------------
+-- Name Building (Legacy - consider using build_hierarchical_name instead)
 --------------------------------------------------------------------------------
 
 --- Build device container name.
@@ -290,6 +415,23 @@ end
 -- @return string Mixer name (e.g., "_R1_M")
 function M.build_mixer_name(rack_idx)
     return string.format("_R%d_M", rack_idx)
+end
+
+--- Build modulator name for a device.
+-- @param device_path string Device hierarchical path (e.g., "R1_C1_D1" or "D1")
+-- @param mod_idx number Modulator index within device
+-- @return string Modulator name (e.g., "R1_C1_D1_M1: SideFX Modulator" or "D1_M1: SideFX Modulator")
+function M.build_device_modulator_name(device_path, mod_idx)
+    return string.format("%s_M%d: SideFX Modulator", device_path, mod_idx)
+end
+
+--- Parse modulator index from name (M{n}).
+-- @param name string Name to parse
+-- @return number|nil Modulator index or nil
+function M.parse_modulator_index(name)
+    if not name then return nil end
+    local idx = name:match("_M(%d+)")
+    return idx and tonumber(idx) or nil
 end
 
 --------------------------------------------------------------------------------

@@ -53,6 +53,7 @@ end
 -- List of test modules to run
 local test_modules = {
     "unit.test_naming",
+    "unit.test_hierarchical_naming",
     "unit.test_patterns",
     "unit.test_rack",
     "unit.test_rack_recursive",
