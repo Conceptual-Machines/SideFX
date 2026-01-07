@@ -1191,11 +1191,17 @@ function M.draw(ctx, fx, opts)
                                     -- Add Link button
                                     if link_state.param_idx ~= nil then
                                         if ctx:button("Add Link##" .. guid, control_width, 0) then
+                                            r.ShowConsoleMsg("=== Add Link button clicked ===\n")
+                                            r.ShowConsoleMsg(string.format("  Target param idx: %d\n", link_state.param_idx))
+                                            r.ShowConsoleMsg(string.format("  Target param name: %s\n", link_state.param_name or "nil"))
+
                                             -- Create modulation link using REAPER's param.X.plink API
                                             local target_param = link_state.param_idx
 
                                             -- Get track and FX indices
                                             local track_link = opts.track or state.track
+                                            r.ShowConsoleMsg(string.format("  Track: %s\n", track_link and "found" or "nil"))
+
                                             if track_link and track_link.pointer then
                                                 local ok_link = pcall(function()
                                                     -- Get track-level FX indices (not container-relative)
