@@ -121,6 +121,7 @@ end
 function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
     local state = state_module.state
     local interacted = false
+    opts = opts or {}
 
     -- Initialize state tables if needed
     state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
@@ -595,25 +596,44 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
                             -- Add Link button
                             if link_state.param_idx ~= nil then
-                                ctx:text(">>> BUTTON RENDERING <<<")
                                 if ctx:button("Add Link##" .. guid, control_width, 0) then
                                     r.ShowConsoleMsg("=== Add Link button clicked ===\n")
                                     r.ShowConsoleMsg(string.format("  Target param idx: %d\n", link_state.param_idx))
                                     r.ShowConsoleMsg(string.format("  Target param name: %s\n", link_state.param_name or "nil"))
+
+                                    -- Debug: Check what track objects we have
+                                    r.ShowConsoleMsg(string.format("  opts.track: %s\n", opts.track and "exists" or "nil"))
+                                    r.ShowConsoleMsg(string.format("  state.track: %s\n", state.track and "exists" or "nil"))
+                                    if opts.track then
+                                        r.ShowConsoleMsg(string.format("  opts.track.pointer: %s\n", tostring(opts.track.pointer)))
+                                    end
+                                    if state.track then
+                                        r.ShowConsoleMsg(string.format("  state.track.pointer: %s\n", tostring(state.track.pointer)))
+                                    end
 
                                     -- Create modulation link using REAPER's param.X.plink API
                                     local target_param = link_state.param_idx
 
                                     -- Get track and FX indices
                                     local track_link = opts.track or state.track
-                                    r.ShowConsoleMsg(string.format("  Track: %s\n", track_link and "found" or "nil"))
+                                    r.ShowConsoleMsg(string.format("  Track link: %s\n", track_link and "found" or "nil"))
 
                                     if track_link and track_link.pointer then
-                                        local ok_link = pcall(function()
+                                        local ok_link, err = pcall(function()
                                             -- Get track-level FX indices (not container-relative)
                                             local track_ptr = track_link.pointer
-                                            local mod_track_idx = get_track_fx_index_by_guid(track_ptr, expanded_modulator:get_guid())
-                                            local target_track_idx = get_track_fx_index_by_guid(track_ptr, target_device:get_guid())
+
+                                            local mod_guid = expanded_modulator:get_guid()
+                                            local target_guid = target_device:get_guid()
+
+                                            r.ShowConsoleMsg(string.format("  Modulator GUID: %s\n", mod_guid))
+                                            r.ShowConsoleMsg(string.format("  Target GUID: %s\n", target_guid))
+
+                                            local mod_track_idx = get_track_fx_index_by_guid(track_ptr, mod_guid)
+                                            local target_track_idx = get_track_fx_index_by_guid(track_ptr, target_guid)
+
+                                            r.ShowConsoleMsg(string.format("  Modulator track idx: %s\n", tostring(mod_track_idx)))
+                                            r.ShowConsoleMsg(string.format("  Target track idx: %s\n", tostring(target_track_idx)))
 
                                             if mod_track_idx and target_track_idx then
                                                 -- Enable parameter link from modulator output to target parameter
@@ -661,7 +681,11 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                             link_state.param_idx = nil
                                             link_state.param_name = nil
                                             interacted = true
+                                        else
+                                            r.ShowConsoleMsg(string.format("  ERROR in pcall: %s\n", tostring(err)))
                                         end
+                                    else
+                                        r.ShowConsoleMsg("  ERROR: No track pointer available\n")
                                     end
                                 end
                             end
