@@ -103,7 +103,8 @@ local function add_modulator_to_device(device_container, modulator_type, track)
     -- Initialize default parameter values
     if moved_modulator then
         -- Set LFO Mode to Loop (0) by default
-        pcall(function() moved_modulator:set_param_normalized(PARAM.PARAM_LFO_MODE, 0) end)
+        -- Use direct value setting for discrete parameter (0 = Loop, 1 = One Shot)
+        r.TrackFX_SetParam(moved_modulator.track.pointer, moved_modulator.pointer, PARAM.PARAM_LFO_MODE, 0)
     end
 
     r.PreventUIRefresh(-1)
@@ -375,6 +376,11 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     -- LFO Mode: Loop/One Shot
                     local ok_lfo_mode, lfo_mode = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_LFO_MODE) end)
                     if ok_lfo_mode then
+                        -- DEBUG: Log actual value
+                        local raw_val = r.TrackFX_GetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_LFO_MODE)
+                        r.ShowConsoleMsg(string.format("LFO Mode - normalized: %.3f, raw: %.3f, is_loop: %s\n",
+                            lfo_mode or -1, raw_val or -1, tostring(lfo_mode < 0.5)))
+
                         if ctx:radio_button("Loop##lfo_" .. guid, lfo_mode < 0.5) then
                             expanded_modulator:set_param_normalized(PARAM.PARAM_LFO_MODE, 0)
                             interacted = true
