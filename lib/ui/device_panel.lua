@@ -1210,17 +1210,37 @@ function M.draw(ctx, fx, opts)
                                                         -- - plink.effect = modulator FX index (track-level)
                                                         -- - plink.param = modulator output parameter index (slider4 = param 3)
 
-                                                        r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
+                                                        local ok1 = r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
                                                             string.format("param.%d.plink.active", target_param),
                                                             "1")
 
-                                                        r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
+                                                        local ok2 = r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
                                                             string.format("param.%d.plink.effect", target_param),
                                                             tostring(mod_track_idx))
 
-                                                        r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
+                                                        local ok3 = r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
                                                             string.format("param.%d.plink.param", target_param),
                                                             "3")
+
+                                                        -- Debug output
+                                                        r.ShowConsoleMsg(string.format(
+                                                            "Plink: target_fx=%d param=%d -> mod_fx=%d param=3\n  ok1=%s ok2=%s ok3=%s\n",
+                                                            target_track_idx, target_param, mod_track_idx,
+                                                            tostring(ok1), tostring(ok2), tostring(ok3)
+                                                        ))
+
+                                                        -- Verify what was set
+                                                        local _, verify_active = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
+                                                            string.format("param.%d.plink.active", target_param))
+                                                        local _, verify_effect = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
+                                                            string.format("param.%d.plink.effect", target_param))
+                                                        local _, verify_param = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
+                                                            string.format("param.%d.plink.param", target_param))
+
+                                                        r.ShowConsoleMsg(string.format(
+                                                            "  Verify: active=%s effect=%s param=%s\n",
+                                                            tostring(verify_active), tostring(verify_effect), tostring(verify_param)
+                                                        ))
                                                     end
                                                 end)
 
