@@ -98,7 +98,7 @@ local rename_buffer = {}    -- guid -> current edit text
 --------------------------------------------------------------------------------
 
 --- Draw device panel header (collapsed or expanded)
-local function draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors)
+local function draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors, enabled)
     local r = reaper
     local imgui = require('imgui')
     local interacted = false
