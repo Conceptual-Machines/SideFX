@@ -126,6 +126,129 @@ local function draw_rack_toggle_button(ctx, rack_guid, expand_icon, rack_name, i
     return false
 end
 
+--- Finalize/save chain rename
+-- @param state table State object
+-- @param chain_guid string Chain GUID
+-- @param state_module table State module reference
+local function finalize_chain_rename(state, chain_guid, state_module)
+    if state.rename_text ~= "" then
+        state.display_names[chain_guid] = state.rename_text
+    else
+        state.display_names[chain_guid] = nil
+    end
+    state_module.save_display_names()
+    state.renaming_fx = nil
+    state.rename_text = ""
+    state._rename_focused = nil
+end
+
+--- Cancel chain rename
+-- @param state table State object
+local function cancel_chain_rename(state)
+    state.renaming_fx = nil
+    state.rename_text = ""
+    state._rename_focused = nil
+end
+
+--- Draw chain rename input field
+-- @param ctx ImGui context
+-- @param chain_guid string Chain GUID
+-- @param state table State object
+-- @param state_module table State module reference
+-- @return boolean True if interacted
+local function draw_chain_rename_input(ctx, chain_guid, state, state_module)
+    local interacted = false
+
+    -- Initialize rename text if not set
+    if not state.rename_text or state.rename_text == "" then
+        state.rename_text = state.display_names[chain_guid] or ""
+    end
+
+    ctx:set_next_item_width(-1)
+
+    -- Set keyboard focus on first frame
+    if not state._rename_focused then
+        ctx:set_keyboard_focus_here()
+        state._rename_focused = true
+    end
+
+    -- Style the input to be visible
+    ctx:push_style_color(imgui.Col.FrameBg(), 0x4A4A4AFF)
+    ctx:push_style_color(imgui.Col.Text(), 0xFFFFFFFF)
+    local changed, new_text = ctx:input_text("##chain_rename" .. chain_guid, state.rename_text, imgui.InputTextFlags.EnterReturnsTrue())
+    ctx:pop_style_color(2)
+
+    state.rename_text = new_text
+
+    -- Handle input events
+    if changed then
+        finalize_chain_rename(state, chain_guid, state_module)
+        interacted = true
+    elseif ctx:is_item_deactivated_after_edit() then
+        finalize_chain_rename(state, chain_guid, state_module)
+        interacted = true
+    elseif ctx:is_key_pressed(imgui.Key.Escape()) then
+        cancel_chain_rename(state)
+        interacted = true
+    end
+
+    return interacted
+end
+
+--- Draw chain button with selection state
+-- @param ctx ImGui context
+-- @param chain_name string Display name of chain
+-- @param chain_guid string Chain GUID
+-- @param chain_btn_id string Button ID for popup context
+-- @param row_color number Button color (RGBA)
+-- @param is_selected boolean Whether chain is selected
+-- @param is_nested_rack boolean Whether this is a nested rack
+-- @param state table State object
+-- @param rack ReaWrap rack FX object
+-- @param callbacks table Callbacks {on_chain_select, on_rename_chain}
+-- @return boolean True if clicked
+local function draw_chain_button(ctx, chain_name, chain_guid, chain_btn_id, row_color, is_selected, is_nested_rack, state, rack, callbacks)
+    ctx:push_style_color(imgui.Col.Button(), row_color)
+    if ctx:button(chain_name .. "##" .. chain_btn_id, -1, 20) then
+        local rack_guid = rack:get_guid()
+        callbacks.on_chain_select(chain_guid, is_selected, is_nested_rack, rack_guid)
+    end
+    ctx:pop_style_color()
+
+    -- Check for double-click to rename (after button is drawn)
+    if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
+        local custom_name = state.display_names[chain_guid]
+        callbacks.on_rename_chain(chain_guid, custom_name)
+    end
+end
+
+--- Draw chain context menu (Rename, Delete)
+-- @param ctx ImGui context
+-- @param chain_btn_id string Button ID for popup context
+-- @param chain_guid string Chain GUID
+-- @param chain ReaWrap chain FX object
+-- @param is_selected boolean Whether chain is selected
+-- @param is_nested_rack boolean Whether this is a nested rack
+-- @param rack ReaWrap rack FX object
+-- @param state table State object
+-- @param callbacks table Callbacks {on_rename_chain, on_delete_chain, on_refresh}
+local function draw_chain_context_menu(ctx, chain_btn_id, chain_guid, chain, is_selected, is_nested_rack, rack, state, callbacks)
+    if ctx:begin_popup_context_item(chain_btn_id) then
+        if ctx:menu_item("Rename") then
+            local custom_name = state.display_names[chain_guid]
+            callbacks.on_rename_chain(chain_guid, custom_name)
+        end
+        ctx:separator()
+        if ctx:menu_item("Delete") then
+            chain:delete()
+            local rack_guid = rack:get_guid()
+            callbacks.on_delete_chain(chain, is_selected, is_nested_rack, rack_guid)
+            callbacks.on_refresh()
+        end
+        ctx:end_popup()
+    end
+end
+
 --------------------------------------------------------------------------------
 -- Custom Widgets
 --------------------------------------------------------------------------------
@@ -319,88 +442,13 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
     local is_renaming_chain = (state.renaming_fx == chain_guid)
     local chain_btn_id = "chain_btn_" .. chain_guid
 
+    local state_module = require('lib.state')
+
     if is_renaming_chain then
-        -- Inline rename input for chain
-        -- Ensure rename_text is initialized (should be set by callback, but handle edge case)
-        if not state.rename_text or state.rename_text == "" then
-            state.rename_text = state.display_names[chain_guid] or ""
-        end
-
-        -- Set width to fill the table cell
-        ctx:set_next_item_width(-1)
-
-        -- Set keyboard focus on first frame of rename mode
-        if not state._rename_focused then
-            ctx:set_keyboard_focus_here()
-            state._rename_focused = true
-        end
-
-        -- Style the input to be visible (light background, white text)
-        ctx:push_style_color(imgui.Col.FrameBg(), 0x4A4A4AFF)
-        ctx:push_style_color(imgui.Col.Text(), 0xFFFFFFFF)
-        local changed, new_text = ctx:input_text("##chain_rename" .. chain_guid, state.rename_text, imgui.InputTextFlags.EnterReturnsTrue())
-        ctx:pop_style_color(2)
-
-        -- Update state.rename_text with the current input value
-        state.rename_text = new_text
-
-        if changed then
-            if state.rename_text ~= "" then
-                state.display_names[chain_guid] = state.rename_text
-            else
-                state.display_names[chain_guid] = nil
-            end
-            local state_module = require('lib.state')
-            state_module.save_display_names()
-            state.renaming_fx = nil
-            state.rename_text = ""
-            state._rename_focused = nil
-        elseif ctx:is_item_deactivated_after_edit() then
-            if state.rename_text ~= "" then
-                state.display_names[chain_guid] = state.rename_text
-            else
-                state.display_names[chain_guid] = nil
-            end
-            local state_module = require('lib.state')
-            state_module.save_display_names()
-            state.renaming_fx = nil
-            state.rename_text = ""
-            state._rename_focused = nil
-        elseif ctx:is_key_pressed(imgui.Key.Escape()) then
-            state.renaming_fx = nil
-            state.rename_text = ""
-            state._rename_focused = nil
-        end
+        draw_chain_rename_input(ctx, chain_guid, state, state_module)
     else
-        ctx:push_style_color(imgui.Col.Button(), row_color)
-        if ctx:button(chain_name .. "##" .. chain_btn_id, -1, 20) then
-            local rack_guid = rack:get_guid()
-            callbacks.on_chain_select(chain_guid, is_selected, is_nested_rack, rack_guid)
-        end
-        ctx:pop_style_color()
-
-        -- Check for double-click to rename (after button is drawn)
-        if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-            local custom_name = state.display_names[chain_guid]
-            callbacks.on_rename_chain(chain_guid, custom_name)
-        end
-
-        -- Chain context menu
-        if ctx:begin_popup_context_item(chain_btn_id) then
-            if ctx:menu_item("Rename") then
-                -- Get the custom name if it exists, otherwise use empty string
-                local custom_name = state.display_names[chain_guid]
-                callbacks.on_rename_chain(chain_guid, custom_name)
-            end
-            ctx:separator()
-            if ctx:menu_item("Delete") then
-                chain:delete()
-                local rack_guid = rack:get_guid()
-                callbacks.on_delete_chain(chain, is_selected, is_nested_rack, rack_guid)
-                callbacks.on_refresh()
-            end
-            ctx:end_popup()
-        end
+        draw_chain_button(ctx, chain_name, chain_guid, chain_btn_id, row_color, is_selected, is_nested_rack, state, rack, callbacks)
+        draw_chain_context_menu(ctx, chain_btn_id, chain_guid, chain, is_selected, is_nested_rack, rack, state, callbacks)
     end
 
     -- Make the button a drag-drop target (must be called right after the button)
