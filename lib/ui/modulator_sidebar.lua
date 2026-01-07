@@ -466,41 +466,36 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
                     -- Find existing links for this modulator on the parent device
                     local existing_links = {}
-                    local track = opts.track or state.track
-                    if track and track.pointer then
-                        local track_ptr = track.pointer
-                        -- Use ReaWrap FX pointer directly
-                        local mod_track_idx = expanded_modulator.pointer
-                        local target_track_idx = fx.pointer
-                        -- Get plain recFX index for comparison (plink.effect stores plain index)
-                        local mod_rec_idx = mod_track_idx - 0x2000000
 
-                        if mod_track_idx and target_track_idx then
-                            -- Check each parameter of parent device for links to this modulator
-                            local ok_params, param_count = pcall(function() return fx:get_num_params() end)
-                            if ok_params and param_count then
-                                for param_idx = 0, param_count - 1 do
-                                    -- Query if this param is linked (check plink.active first)
-                                    local retval, active_str = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
-                                        string.format("param.%d.plink.active", param_idx))
+                    -- Calculate what the modulator's index would be in the link
+                    -- (local index within container)
+                    local expected_mod_idx = nil
+                    local my_parent = fx:get_parent_container()
+                    if my_parent then
+                        local children = my_parent:get_container_children()
+                        local mod_guid = expanded_modulator:get_guid()
+                        for i, child in ipairs(children) do
+                            if child:get_guid() == mod_guid then
+                                expected_mod_idx = i - 1  -- 0-based
+                                break
+                            end
+                        end
+                    end
 
-                                    if retval and active_str == "1" then
-                                        -- Link is active, check if it's from our modulator
-                                        local _, effect_str = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
-                                            string.format("param.%d.plink.effect", param_idx))
-
-                                        local link_fx_idx = tonumber(effect_str)
-                                        -- Compare plain recFX indices (plink.effect stores plain index without 0x2000000)
-                                        if link_fx_idx == mod_rec_idx then
-                                            -- This parameter is linked to our modulator
-                                            local ok_pname, param_name = pcall(function() return fx:get_param_name(param_idx) end)
-                                            if ok_pname and param_name then
-                                                table.insert(existing_links, {
-                                                    param_idx = param_idx,
-                                                    param_name = param_name
-                                                })
-                                            end
-                                        end
+                    if expected_mod_idx then
+                        -- Check each parameter using ReaWrap's get_param_link_info
+                        local ok_params, param_count = pcall(function() return fx:get_num_params() end)
+                        if ok_params and param_count then
+                            for param_idx = 0, param_count - 1 do
+                                local link_info = fx:get_param_link_info(param_idx)
+                                if link_info and link_info.effect == expected_mod_idx then
+                                    -- This parameter is linked to our modulator
+                                    local ok_pname, param_name = pcall(function() return fx:get_param_name(param_idx) end)
+                                    if ok_pname and param_name then
+                                        table.insert(existing_links, {
+                                            param_idx = param_idx,
+                                            param_name = param_name
+                                        })
                                     end
                                 end
                             end
@@ -518,23 +513,9 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             ctx:text("• " .. link.param_name)
                             ctx:same_line()
                             if ctx:button("X##remove_link_" .. i .. "_" .. guid, 20, 0) then
-                                -- Remove this link using track-level API
-                                local track_remove = opts.track or state.track
-                                if track_remove and track_remove.pointer then
-                                    local ok_remove = pcall(function()
-                                        local track_ptr = track_remove.pointer
-                                        -- Use ReaWrap FX pointer directly
-                                        local target_track_idx = fx.pointer
-                                        if target_track_idx then
-                                            -- Set plink.active to "0" to disable the link
-                                            r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
-                                                string.format("param.%d.plink.active", link.param_idx),
-                                                "0")
-                                        end
-                                    end)
-                                    if ok_remove then
-                                        interacted = true
-                                    end
+                                -- Remove this link using ReaWrap's high-level API
+                                if fx:remove_param_link(link.param_idx) then
+                                    interacted = true
                                 end
                             end
                             if ctx:is_item_hovered() then
@@ -580,56 +561,23 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             -- Add Link button
                             if link_state.param_idx ~= nil then
                                 if ctx:button("Add Link##" .. guid, control_width, 0) then
-                                    -- Create modulation link using REAPER's param.X.plink API
+                                    -- Create modulation link using ReaWrap's high-level API
                                     local target_param = link_state.param_idx
-                                    local track_link = opts.track or state.track
+                                    local modulator_output_param = 3  -- slider4 (Output) in SideFX_Modulator.jsfx
 
-                                    if track_link and track_link.pointer then
-                                        local ok_link, err = pcall(function()
-                                            -- Find LOCAL index of modulator within the container
-                                            -- Both modulator and target are in the same container (fx's parent)
-                                            local target_parent = fx:get_parent_container()
-                                            if not target_parent then
-                                                error("Target FX has no parent container")
-                                            end
+                                    -- Use ReaWrap's create_param_link - it handles all the complexity
+                                    local success = target_device:create_param_link(
+                                        expanded_modulator,
+                                        modulator_output_param,
+                                        target_param,
+                                        1.0  -- 100% modulation scale
+                                    )
 
-                                            -- Get all children in the container
-                                            local children = target_parent:get_container_children()
-                                            local mod_guid = expanded_modulator:get_guid()
-                                            local local_mod_idx = nil
-
-                                            -- Find modulator's position in the container (0-based)
-                                            for i, child in ipairs(children) do
-                                                if child:get_guid() == mod_guid then
-                                                    local_mod_idx = i - 1  -- Convert to 0-based
-                                                    break
-                                                end
-                                            end
-
-                                            if not local_mod_idx then
-                                                error("Could not find modulator in container")
-                                            end
-
-                                            -- Create parameter link using LOCAL index
-                                            local plink_active_str = string.format("param.%d.plink.active", target_param)
-                                            target_device:set_named_config_param(plink_active_str, "1")
-
-                                            local plink_effect_str = string.format("param.%d.plink.effect", target_param)
-                                            target_device:set_named_config_param(plink_effect_str, tostring(local_mod_idx))
-
-                                            local plink_param_str = string.format("param.%d.plink.param", target_param)
-                                            target_device:set_named_config_param(plink_param_str, "3")
-
-                                            local plink_scale_str = string.format("param.%d.plink.scale", target_param)
-                                            target_device:set_named_config_param(plink_scale_str, "1.0")
-                                        end)
-
-                                        if ok_link then
-                                            -- Clear selection after adding link
-                                            link_state.param_idx = nil
-                                            link_state.param_name = nil
-                                            interacted = true
-                                        end
+                                    if success then
+                                        -- Clear selection after adding link
+                                        link_state.param_idx = nil
+                                        link_state.param_name = nil
+                                        interacted = true
                                     end
                                 end
                             end
