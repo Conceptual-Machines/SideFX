@@ -414,6 +414,44 @@ local function get_visible_params(fx)
     return visible_params
 end
 
+--- Draw expanded panel content (3-column table: modulators | params | sidebar)
+local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, opts, colors)
+    local r = reaper
+    local interacted = false
+
+    -- Calculate sidebar width based on collapsed state
+    local sidebar_actual_w = is_sidebar_collapsed and 8 or cfg.sidebar_width
+
+    -- Use ReaWrap's with_table for automatic cleanup
+    ctx:with_table("device_wrapper_" .. guid, 3, r.ImGui_TableFlags_BordersInnerV(), function()
+        r.ImGui_TableSetupColumn(ctx.ctx, "modulators", r.ImGui_TableColumnFlags_WidthFixed(), mod_sidebar_w)
+        r.ImGui_TableSetupColumn(ctx.ctx, "params", r.ImGui_TableColumnFlags_WidthFixed(), content_width)
+        r.ImGui_TableSetupColumn(ctx.ctx, "sidebar", r.ImGui_TableColumnFlags_WidthFixed(), sidebar_actual_w)
+
+        r.ImGui_TableNextRow(ctx.ctx)
+
+        -- === COLUMN 1: MODULATOR SIDEBAR ===
+        r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+        if draw_modulator_column(ctx, fx, container, guid, state_guid, cfg, opts) then
+            interacted = true
+        end
+
+        -- === COLUMN 2: DEVICE PARAMS ===
+        r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+        if params_column.draw(ctx, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts) then
+            interacted = true
+        end
+
+        -- === COLUMN 3: CHAIN SIDEBAR ===
+        r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+        if draw_sidebar_column(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors) then
+            interacted = true
+        end
+    end)  -- end with_table (device_wrapper)
+
+    return interacted
+end
+
 --- Draw panel frame (background + border)
 local function draw_panel_frame(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg)
     local r = reaper
@@ -474,6 +512,42 @@ end
 --- Draw chain sidebar column wrapper
 local function draw_sidebar_column(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors)
     return sidebar_column.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors)
+end
+
+--- Draw right-click context menu for device panel
+local function draw_context_menu(ctx, fx, guid, name, enabled, opts)
+    local r = reaper
+
+    if ctx:begin_popup_context_item("device_menu_" .. guid) then
+        if ctx:menu_item("Open FX Window") then
+            fx:show(3)
+        end
+        if ctx:menu_item(enabled and "Bypass" or "Enable") then
+            fx:set_enabled(not enabled)
+        end
+        ctx:separator()
+        if ctx:menu_item("Rename...") then
+            if opts.on_rename then
+                opts.on_rename(fx)
+            else
+                -- Fallback: use SideFX state system directly
+                -- Use FX GUID for renaming since we display the FX name
+                local state_module = require('lib.state')
+                local sidefx_state = state_module.state
+                sidefx_state.renaming_fx = guid  -- Use FX GUID
+                sidefx_state.rename_text = name
+            end
+        end
+        ctx:separator()
+        if ctx:menu_item("Delete") then
+            if opts.on_delete then
+                opts.on_delete(fx)
+            else
+                fx:delete()
+            end
+        end
+        ctx:end_popup()
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -605,73 +679,16 @@ function M.draw(ctx, fx, opts)
 
         ctx:separator()
 
-        -- Panel is expanded - show 3-column wrapper table
-        -- Wrapper table: [Modulator Sidebar | Device Params | Chain Sidebar]
-        local content_h = panel_height - cfg.header_height - 10
-        local sidebar_actual_w = is_sidebar_collapsed and 8 or cfg.sidebar_width
-        local btn_h = 22
-
-        -- Use ReaWrap's with_table for automatic cleanup
-        ctx:with_table("device_wrapper_" .. guid, 3, r.ImGui_TableFlags_BordersInnerV(), function()
-            r.ImGui_TableSetupColumn(ctx.ctx, "modulators", r.ImGui_TableColumnFlags_WidthFixed(), mod_sidebar_w)
-            r.ImGui_TableSetupColumn(ctx.ctx, "params", r.ImGui_TableColumnFlags_WidthFixed(), content_width)
-            r.ImGui_TableSetupColumn(ctx.ctx, "sidebar", r.ImGui_TableColumnFlags_WidthFixed(), sidebar_actual_w)
-
-            r.ImGui_TableNextRow(ctx.ctx)
-
-            -- === COLUMN 1: MODULATOR SIDEBAR ===
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
-            if draw_modulator_column(ctx, fx, container, guid, state_guid, cfg, opts) then
-                interacted = true
-            end
-
-            -- === COLUMN 2: DEVICE PARAMS ===
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-            if params_column.draw(ctx, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts) then
-                interacted = true
-            end
-
-            -- === COLUMN 3: CHAIN SIDEBAR ===
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
-            if draw_sidebar_column(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors) then
-                interacted = true
-            end
-        end)  -- end with_table (device_wrapper)
+        -- Draw expanded panel with 3-column layout
+        if draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, opts, colors) then
+            interacted = true
+        end
 
         ctx:end_child()  -- end panel
     end
 
     -- Right-click context menu
-    if ctx:begin_popup_context_item("device_menu_" .. guid) then
-        if ctx:menu_item("Open FX Window") then
-            fx:show(3)
-        end
-        if ctx:menu_item(enabled and "Bypass" or "Enable") then
-            fx:set_enabled(not enabled)
-        end
-        ctx:separator()
-        if ctx:menu_item("Rename...") then
-            if opts.on_rename then
-                opts.on_rename(fx)
-            else
-                -- Fallback: use SideFX state system directly
-                -- Use FX GUID for renaming since we display the FX name
-                local state_module = require('lib.state')
-                local sidefx_state = state_module.state
-                sidefx_state.renaming_fx = guid  -- Use FX GUID
-                sidefx_state.rename_text = name
-            end
-        end
-        ctx:separator()
-        if ctx:menu_item("Delete") then
-            if opts.on_delete then
-                opts.on_delete(fx)
-            else
-                fx:delete()
-            end
-        end
-        ctx:end_popup()
-    end
+    draw_context_menu(ctx, fx, guid, name, enabled, opts)
 
     ctx:pop_id()
 
