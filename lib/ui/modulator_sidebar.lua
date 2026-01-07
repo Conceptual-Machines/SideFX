@@ -268,16 +268,17 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     ctx:pop_style_color()
                     ctx:spacing()
 
-                    -- Tempo Mode: Free/Sync (slider1)
-                    local ok_tempo, tempo_mode = pcall(function() return expanded_modulator:get_param_normalized(0) end)
+                    -- Tempo Mode: Free/Sync (slider1 - discrete parameter)
+                    local tempo_mode = r.TrackFX_GetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_TEMPO_MODE)
+                    local ok_tempo = tempo_mode ~= nil
                     if ok_tempo then
                         if ctx:radio_button("Free##tempo_" .. guid, tempo_mode < 0.5) then
-                            expanded_modulator:set_param_normalized(0, 0)
+                            r.TrackFX_SetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_TEMPO_MODE, 0)
                             interacted = true
                         end
                         ctx:same_line()
                         if ctx:radio_button("Sync##tempo_" .. guid, tempo_mode >= 0.5) then
-                            expanded_modulator:set_param_normalized(0, 1)
+                            r.TrackFX_SetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_TEMPO_MODE, 1)
                             interacted = true
                         end
                     end
@@ -373,21 +374,16 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     ctx:pop_style_color()
                     ctx:spacing()
 
-                    -- LFO Mode: Loop/One Shot
-                    local ok_lfo_mode, lfo_mode = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_LFO_MODE) end)
-                    if ok_lfo_mode then
-                        -- DEBUG: Log actual value
-                        local raw_val = r.TrackFX_GetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_LFO_MODE)
-                        r.ShowConsoleMsg(string.format("LFO Mode - normalized: %.3f, raw: %.3f, is_loop: %s\n",
-                            lfo_mode or -1, raw_val or -1, tostring(lfo_mode < 0.5)))
-
+                    -- LFO Mode: Loop/One Shot (discrete parameter)
+                    local lfo_mode = r.TrackFX_GetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_LFO_MODE)
+                    if lfo_mode then
                         if ctx:radio_button("Loop##lfo_" .. guid, lfo_mode < 0.5) then
-                            expanded_modulator:set_param_normalized(PARAM.PARAM_LFO_MODE, 0)
+                            r.TrackFX_SetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_LFO_MODE, 0)
                             interacted = true
                         end
                         ctx:same_line()
                         if ctx:radio_button("One Shot##lfo_" .. guid, lfo_mode >= 0.5) then
-                            expanded_modulator:set_param_normalized(PARAM.PARAM_LFO_MODE, 1)
+                            r.TrackFX_SetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_LFO_MODE, 1)
                             interacted = true
                         end
                     end
@@ -404,16 +400,16 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         -- Show additional params based on trigger mode
                         if ok_trig and trig_idx == 2 then
                             -- MIDI trigger mode
-                            -- MIDI Source (slider21)
-                            local ok_midi_src, midi_src = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_MIDI_SOURCE) end)
-                            if ok_midi_src then
+                            -- MIDI Source (slider21 - discrete parameter)
+                            local midi_src = r.TrackFX_GetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_MIDI_SOURCE)
+                            if midi_src then
                                 if ctx:radio_button("This Track##midi_src_" .. guid, midi_src < 0.5) then
-                                    expanded_modulator:set_param_normalized(PARAM.PARAM_MIDI_SOURCE, 0)
+                                    r.TrackFX_SetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_MIDI_SOURCE, 0)
                                     interacted = true
                                 end
                                 ctx:same_line()
                                 if ctx:radio_button("MIDI Bus##midi_src_" .. guid, midi_src >= 0.5) then
-                                    expanded_modulator:set_param_normalized(PARAM.PARAM_MIDI_SOURCE, 1)
+                                    r.TrackFX_SetParam(expanded_modulator.track.pointer, expanded_modulator.pointer, PARAM.PARAM_MIDI_SOURCE, 1)
                                     interacted = true
                                 end
                             end
