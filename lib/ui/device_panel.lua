@@ -546,16 +546,23 @@ function M.draw(ctx, fx, opts)
             return interacted
         end
 
-        -- Panel is expanded - show wrapper table with modulator sidebar
-        -- Wrapper table: [Modulator Sidebar | Main Content]
-        -- (mod_sidebar_w already calculated above for panel width)
-        if r.ImGui_BeginTable(ctx.ctx, "device_wrapper_" .. guid, 2, r.ImGui_TableFlags_BordersInnerV()) then
+        ctx:separator()
+
+        -- Panel is expanded - show 3-column wrapper table
+        -- Wrapper table: [Modulator Sidebar | Device Params | Chain Sidebar]
+        local content_h = panel_height - cfg.header_height - 10
+        local sidebar_actual_w = is_sidebar_collapsed and 8 or cfg.sidebar_width
+        local btn_h = 22
+
+        -- Use ReaWrap's with_table for automatic cleanup
+        ctx:with_table("device_wrapper_" .. guid, 3, r.ImGui_TableFlags_BordersInnerV(), function()
             r.ImGui_TableSetupColumn(ctx.ctx, "modulators", r.ImGui_TableColumnFlags_WidthFixed(), mod_sidebar_w)
-            r.ImGui_TableSetupColumn(ctx.ctx, "content", r.ImGui_TableColumnFlags_WidthStretch())
+            r.ImGui_TableSetupColumn(ctx.ctx, "params", r.ImGui_TableColumnFlags_WidthFixed(), content_width)
+            r.ImGui_TableSetupColumn(ctx.ctx, "sidebar", r.ImGui_TableColumnFlags_WidthFixed(), sidebar_actual_w)
 
             r.ImGui_TableNextRow(ctx.ctx)
 
-            -- === MODULATOR SIDEBAR ===
+            -- === COLUMN 1: MODULATOR SIDEBAR ===
             r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
 
             local mod_interacted = modulator_sidebar.draw(ctx, fx, container, guid, state_guid, cfg, opts)
@@ -563,25 +570,8 @@ function M.draw(ctx, fx, opts)
                 interacted = true
             end
 
-            -- === MAIN CONTENT ===
+            -- === COLUMN 2: DEVICE PARAMS ===
             r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-
-
-        ctx:separator()
-
-        -- Main content area: use a table for params (left) + sidebar (right)
-        local content_h = panel_height - cfg.header_height - 10
-        local sidebar_actual_w = is_sidebar_collapsed and 8 or cfg.sidebar_width
-        local btn_h = 22
-
-        if r.ImGui_BeginTable(ctx.ctx, "device_layout_" .. guid, 2, r.ImGui_TableFlags_BordersInnerV()) then
-            r.ImGui_TableSetupColumn(ctx.ctx, "params", r.ImGui_TableColumnFlags_WidthFixed(), content_width)
-            r.ImGui_TableSetupColumn(ctx.ctx, "sidebar", r.ImGui_TableColumnFlags_WidthStretch())  -- Stretch to fill remaining space
-
-            r.ImGui_TableNextRow(ctx.ctx)
-
-            -- === PARAMS COLUMN ===
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
 
             if visible_count > 0 then
                 -- Use nested table for parameter columns
@@ -656,8 +646,8 @@ function M.draw(ctx, fx, opts)
                 ctx:text_disabled("No parameters")
             end
 
-            -- === SIDEBAR COLUMN ===
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+            -- === COLUMN 3: CHAIN SIDEBAR ===
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
 
             -- Get column starting X position for centering calculations
             local col_start_x = r.ImGui_GetCursorPosX(ctx.ctx)
@@ -1034,12 +1024,7 @@ function M.draw(ctx, fx, opts)
                     end
                 end
             end  -- end expanded sidebar
-
-            r.ImGui_EndTable(ctx.ctx)
-        end  -- end device_layout table
-
-            r.ImGui_EndTable(ctx.ctx)  -- end device_wrapper table
-        end
+        end)  -- end with_table (device_wrapper)
 
         ctx:end_child()  -- end panel
     end
