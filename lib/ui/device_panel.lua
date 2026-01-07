@@ -550,6 +550,45 @@ local function draw_context_menu(ctx, fx, guid, name, enabled, opts)
     end
 end
 
+--- Draw panel content (header + collapsed/expanded body)
+local function draw_panel_content(ctx, fx, container, guid, panel_width, panel_height, is_panel_collapsed, is_sidebar_collapsed, cfg, visible_params, visible_count, num_columns, params_per_column, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, name, device_id, drag_guid, enabled, opts, colors)
+    local r = reaper
+    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+    local interacted = false
+
+    -- Draw panel frame (background + border)
+    draw_panel_frame(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg)
+
+    -- Begin child for panel content (hide scrollbars)
+    local window_flags = imgui.WindowFlags.NoScrollbar()
+    if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0, window_flags) then
+
+        -- Draw header (always shown, whether collapsed or expanded)
+        local header_interacted = draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors, enabled)
+        if header_interacted then interacted = true end
+
+        -- Draw collapsed body and return early if collapsed
+        if is_panel_collapsed then
+            local collapsed_interacted = draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opts, colors)
+            if collapsed_interacted then interacted = true end
+            ctx:end_child()  -- end panel
+            return interacted
+        end
+
+        ctx:separator()
+
+        -- Draw expanded panel with 3-column layout
+        if draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, opts, colors) then
+            interacted = true
+        end
+
+        ctx:end_child()  -- end panel
+    end
+
+    return interacted
+end
+
 --------------------------------------------------------------------------------
 -- Device Panel Component
 --------------------------------------------------------------------------------
@@ -653,38 +692,9 @@ function M.draw(ctx, fx, opts)
 
     ctx:push_id(guid)
 
-    -- Panel background and frame
-    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-
-    -- Draw panel frame (background + border)
-    draw_panel_frame(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg)
-
-    -- Begin child for panel content (hide scrollbars)
-    local window_flags = imgui.WindowFlags.NoScrollbar()
-    if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0, window_flags) then
-
-        -- Draw header (always shown, whether collapsed or expanded)
-        local header_interacted = draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors, enabled)
-        if header_interacted then interacted = true end
-
-        -- Draw collapsed body and return early if collapsed
-        if is_panel_collapsed then
-            local collapsed_interacted = draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opts, colors)
-            if collapsed_interacted then interacted = true end
-            ctx:end_child()  -- end panel
-            ctx:pop_id()
-            return interacted
-        end
-
-        ctx:separator()
-
-        -- Draw expanded panel with 3-column layout
-        if draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, opts, colors) then
-            interacted = true
-        end
-
-        ctx:end_child()  -- end panel
+    -- Draw panel content (frame + header + body)
+    if draw_panel_content(ctx, fx, container, guid, panel_width, panel_height, is_panel_collapsed, is_sidebar_collapsed, cfg, visible_params, visible_count, num_columns, params_per_column, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, name, device_id, drag_guid, enabled, opts, colors) then
+        interacted = true
     end
 
     -- Right-click context menu
