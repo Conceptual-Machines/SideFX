@@ -83,6 +83,49 @@ local function draw_rack_rename_input(ctx, rack_guid, state, state_module)
     return interacted
 end
 
+--- Draw rack context menu (Rename, Dissolve, Delete)
+-- @param ctx ImGui context
+-- @param button_id string Button ID for popup context
+-- @param rack_guid string Rack GUID
+-- @param rack ReaWrap rack FX object
+-- @param state table State object
+-- @param callbacks table Callbacks {on_rename, on_dissolve, on_delete}
+local function draw_rack_context_menu(ctx, button_id, rack_guid, rack, state, callbacks)
+    if ctx:begin_popup_context_item(button_id) then
+        if ctx:menu_item("Rename") then
+            callbacks.on_rename(rack_guid, state.display_names[rack_guid])
+        end
+        ctx:separator()
+        if ctx:menu_item("Dissolve Container") then
+            callbacks.on_dissolve(rack)
+        end
+        ctx:separator()
+        if ctx:menu_item("Delete") then
+            callbacks.on_delete(rack)
+        end
+        ctx:end_popup()
+    end
+end
+
+--- Draw rack toggle/name button
+-- @param ctx ImGui context
+-- @param rack_guid string Rack GUID
+-- @param expand_icon string Icon to display (▼ or ▶)
+-- @param rack_name string Display name of rack
+-- @param is_expanded boolean Whether rack is expanded
+-- @param button_id string Unique button ID
+-- @param callbacks table Callbacks {on_toggle_expand}
+-- @return boolean True if clicked
+local function draw_rack_toggle_button(ctx, rack_guid, expand_icon, rack_name, is_expanded, button_id, callbacks)
+    -- Show only icon when collapsed, full name when expanded
+    local button_text = is_expanded and (expand_icon .. " " .. rack_name:sub(1, 20)) or expand_icon
+    if ctx:button(button_text .. "##" .. button_id, -1, 20) then
+        callbacks.on_toggle_expand(rack_guid, is_expanded)
+        return true
+    end
+    return false
+end
+
 --------------------------------------------------------------------------------
 -- Custom Widgets
 --------------------------------------------------------------------------------
@@ -187,27 +230,8 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
         if is_renaming_rack then
             draw_rack_rename_input(ctx, rack_guid, state, state_module)
         else
-            -- Show only icon when collapsed, full name when expanded
-            local button_text = is_expanded and (expand_icon .. " " .. rack_name:sub(1, 20)) or expand_icon
-            if ctx:button(button_text .. "##" .. button_id, -1, 20) then
-                callbacks.on_toggle_expand(rack_guid, is_expanded)
-            end
-
-            -- Rack context menu (attached to the button above)
-            if ctx:begin_popup_context_item(button_id) then
-                if ctx:menu_item("Rename") then
-                    callbacks.on_rename(rack_guid, state.display_names[rack_guid])
-                end
-                ctx:separator()
-                if ctx:menu_item("Dissolve Container") then
-                    callbacks.on_dissolve(rack)
-                end
-                ctx:separator()
-                if ctx:menu_item("Delete") then
-                    callbacks.on_delete(rack)
-                end
-                ctx:end_popup()
-            end
+            draw_rack_toggle_button(ctx, rack_guid, expand_icon, rack_name, is_expanded, button_id, callbacks)
+            draw_rack_context_menu(ctx, button_id, rack_guid, rack, state, callbacks)
         end
 
         -- Column 1: Path identifier (10%)
