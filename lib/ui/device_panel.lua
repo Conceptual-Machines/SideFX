@@ -514,6 +514,30 @@ local function draw_sidebar_column(ctx, fx, container, state_guid, sidebar_actua
     return sidebar_column.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors)
 end
 
+--- Extract FX display name and device identifier
+-- @param fx ReaWrap FX object
+-- @param container ReaWrap container FX object (optional)
+-- @return string name, string device_id
+local function extract_fx_display_info(fx, container)
+    local fx_utils = require('lib.fx_utils')
+    local name = "Unknown"
+    local device_id = nil
+
+    if container then
+        -- Get actual FX name (plugin name, not hierarchical) and identifier separately
+        local ok_name, fx_name = pcall(function() return fx_utils.get_display_name(fx) end)
+        if ok_name then name = fx_name end
+        local ok_id, id = pcall(function() return fx_utils.get_device_identifier(container) end)
+        if ok_id then device_id = id end
+    else
+        -- No container, use regular display name
+        local ok2, fx_name = pcall(function() return fx_naming.get_display_name(fx) end)
+        if ok2 then name = fx_name end
+    end
+
+    return name, device_id
+end
+
 --- Draw right-click context menu for device panel
 local function draw_context_menu(ctx, fx, guid, name, enabled, opts)
     local r = reaper
@@ -634,21 +658,8 @@ function M.draw(ctx, fx, opts)
     local container = opts.container
     local drag_guid = container and container:get_guid() or guid
 
-    -- Get device name and identifier separately
-    local fx_utils = require('lib.fx_utils')
-    local name = "Unknown"
-    local device_id = nil
-    if container then
-        -- Get actual FX name (plugin name, not hierarchical) and identifier separately
-        local ok_name, fx_name = pcall(function() return fx_utils.get_display_name(fx) end)
-        if ok_name then name = fx_name end
-        local ok_id, id = pcall(function() return fx_utils.get_device_identifier(container) end)
-        if ok_id then device_id = id end
-    else
-        -- No container, use regular display name
-        local ok2, fx_name = pcall(function() return fx_naming.get_display_name(fx) end)
-        if ok2 then name = fx_name end
-    end
+    -- Extract FX display info
+    local name, device_id = extract_fx_display_info(fx, container)
 
     local ok3, enabled = pcall(function() return fx:get_enabled() end)
     if not ok3 then enabled = false end
