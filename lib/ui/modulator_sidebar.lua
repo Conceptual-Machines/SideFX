@@ -105,18 +105,6 @@ local function add_modulator_to_device(device_container, modulator_type, track)
     return moved_modulator
 end
 
--- Helper function to find track-level FX index by GUID
-local function get_track_fx_index_by_guid(track_ptr, fx_guid)
-    local fx_count = r.TrackFX_GetCount(track_ptr)
-    for i = 0, fx_count - 1 do
-        local guid = r.TrackFX_GetFXGUID(track_ptr, i)
-        if guid and guid == fx_guid then
-            return i
-        end
-    end
-    return nil
-end
-
 -- Main draw function for modulator sidebar
 function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
     local state = state_module.state
@@ -481,8 +469,11 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     local track = opts.track or state.track
                     if track and track.pointer then
                         local track_ptr = track.pointer
-                        local mod_track_idx = get_track_fx_index_by_guid(track_ptr, expanded_modulator:get_guid())
-                        local target_track_idx = get_track_fx_index_by_guid(track_ptr, fx:get_guid())
+                        -- Use ReaWrap FX pointer directly
+                        local mod_track_idx = expanded_modulator.pointer
+                        local target_track_idx = fx.pointer
+                        -- Get plain recFX index for comparison (plink.effect stores plain index)
+                        local mod_rec_idx = mod_track_idx - 0x2000000
 
                         if mod_track_idx and target_track_idx then
                             -- Check each parameter of parent device for links to this modulator
@@ -499,7 +490,8 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                             string.format("param.%d.plink.effect", param_idx))
 
                                         local link_fx_idx = tonumber(effect_str)
-                                        if link_fx_idx == mod_track_idx then
+                                        -- Compare plain recFX indices (plink.effect stores plain index without 0x2000000)
+                                        if link_fx_idx == mod_rec_idx then
                                             -- This parameter is linked to our modulator
                                             local ok_pname, param_name = pcall(function() return fx:get_param_name(param_idx) end)
                                             if ok_pname and param_name then
@@ -531,7 +523,8 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                 if track_remove and track_remove.pointer then
                                     local ok_remove = pcall(function()
                                         local track_ptr = track_remove.pointer
-                                        local target_track_idx = get_track_fx_index_by_guid(track_ptr, fx:get_guid())
+                                        -- Use ReaWrap FX pointer directly
+                                        local target_track_idx = fx.pointer
                                         if target_track_idx then
                                             -- Set plink.active to "0" to disable the link
                                             r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
@@ -563,20 +556,11 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     -- No device selector needed - use the device that owns this container
                     local target_device = fx  -- The device being displayed
 
-                    -- DEBUG: Show what we have
-                    ctx:text(string.format("DEBUG: target_device=%s", target_device and "OK" or "NIL"))
-
                     -- Parameter selector for parent device
                     if target_device then
                         local ok_params, param_count = pcall(function() return target_device:get_num_params() end)
-                        ctx:text(string.format("DEBUG: params=%s (ok=%s)", tostring(param_count), tostring(ok_params)))
 
                         if ok_params and param_count and param_count > 0 then
-                            -- More verbose debug
-                            ctx:text(string.format("DEBUG: param_idx=%s", tostring(link_state.param_idx)))
-                            ctx:text(string.format("DEBUG: param_name=%s", tostring(link_state.param_name)))
-                            ctx:text(string.format("DEBUG: Button visible=%s", link_state.param_idx ~= nil and "YES" or "NO"))
-
                             local current_param_name = link_state.param_name or "Select Parameter..."
                             ctx:set_next_item_width(control_width)
                             if ctx:begin_combo("##link_param_" .. guid, current_param_name) then
@@ -586,7 +570,6 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                         if ctx:selectable(param_name, link_state.param_idx == param_idx) then
                                             link_state.param_idx = param_idx
                                             link_state.param_name = param_name
-                                            r.ShowConsoleMsg(string.format(">>> Parameter selected: idx=%d name=%s\n", param_idx, param_name))
                                             interacted = true
                                         end
                                     end
@@ -597,83 +580,48 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             -- Add Link button
                             if link_state.param_idx ~= nil then
                                 if ctx:button("Add Link##" .. guid, control_width, 0) then
-                                    r.ShowConsoleMsg("=== Add Link button clicked ===\n")
-                                    r.ShowConsoleMsg(string.format("  Target param idx: %d\n", link_state.param_idx))
-                                    r.ShowConsoleMsg(string.format("  Target param name: %s\n", link_state.param_name or "nil"))
-
-                                    -- Debug: Check what track objects we have
-                                    r.ShowConsoleMsg(string.format("  opts.track: %s\n", opts.track and "exists" or "nil"))
-                                    r.ShowConsoleMsg(string.format("  state.track: %s\n", state.track and "exists" or "nil"))
-                                    if opts.track then
-                                        r.ShowConsoleMsg(string.format("  opts.track.pointer: %s\n", tostring(opts.track.pointer)))
-                                    end
-                                    if state.track then
-                                        r.ShowConsoleMsg(string.format("  state.track.pointer: %s\n", tostring(state.track.pointer)))
-                                    end
-
                                     -- Create modulation link using REAPER's param.X.plink API
                                     local target_param = link_state.param_idx
-
-                                    -- Get track and FX indices
                                     local track_link = opts.track or state.track
-                                    r.ShowConsoleMsg(string.format("  Track link: %s\n", track_link and "found" or "nil"))
 
                                     if track_link and track_link.pointer then
                                         local ok_link, err = pcall(function()
-                                            -- Get track-level FX indices (not container-relative)
-                                            local track_ptr = track_link.pointer
-
-                                            local mod_guid = expanded_modulator:get_guid()
-                                            local target_guid = target_device:get_guid()
-
-                                            r.ShowConsoleMsg(string.format("  Modulator GUID: %s\n", mod_guid))
-                                            r.ShowConsoleMsg(string.format("  Target GUID: %s\n", target_guid))
-
-                                            local mod_track_idx = get_track_fx_index_by_guid(track_ptr, mod_guid)
-                                            local target_track_idx = get_track_fx_index_by_guid(track_ptr, target_guid)
-
-                                            r.ShowConsoleMsg(string.format("  Modulator track idx: %s\n", tostring(mod_track_idx)))
-                                            r.ShowConsoleMsg(string.format("  Target track idx: %s\n", tostring(target_track_idx)))
-
-                                            if mod_track_idx and target_track_idx then
-                                                -- Enable parameter link from modulator output to target parameter
-                                                -- REAPER plink format:
-                                                -- - plink.active = "1" to enable
-                                                -- - plink.effect = modulator FX index (track-level)
-                                                -- - plink.param = modulator output parameter index (slider4 = param 3)
-
-                                                local ok1 = r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
-                                                    string.format("param.%d.plink.active", target_param),
-                                                    "1")
-
-                                                local ok2 = r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
-                                                    string.format("param.%d.plink.effect", target_param),
-                                                    tostring(mod_track_idx))
-
-                                                local ok3 = r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
-                                                    string.format("param.%d.plink.param", target_param),
-                                                    "3")
-
-                                                -- Debug output
-                                                r.ShowConsoleMsg(string.format(
-                                                    "Plink: target_fx=%d param=%d -> mod_fx=%d param=3\n  ok1=%s ok2=%s ok3=%s\n",
-                                                    target_track_idx, target_param, mod_track_idx,
-                                                    tostring(ok1), tostring(ok2), tostring(ok3)
-                                                ))
-
-                                                -- Verify what was set
-                                                local _, verify_active = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
-                                                    string.format("param.%d.plink.active", target_param))
-                                                local _, verify_effect = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
-                                                    string.format("param.%d.plink.effect", target_param))
-                                                local _, verify_param = r.TrackFX_GetNamedConfigParm(track_ptr, target_track_idx,
-                                                    string.format("param.%d.plink.param", target_param))
-
-                                                r.ShowConsoleMsg(string.format(
-                                                    "  Verify: active=%s effect=%s param=%s\n",
-                                                    tostring(verify_active), tostring(verify_effect), tostring(verify_param)
-                                                ))
+                                            -- Find LOCAL index of modulator within the container
+                                            -- Both modulator and target are in the same container (fx's parent)
+                                            local target_parent = fx:get_parent_container()
+                                            if not target_parent then
+                                                error("Target FX has no parent container")
                                             end
+
+                                            -- Get all children in the container
+                                            local children = target_parent:get_container_children()
+                                            local mod_guid = expanded_modulator:get_guid()
+                                            local local_mod_idx = nil
+
+                                            -- Find modulator's position in the container (0-based)
+                                            for i, child in ipairs(children) do
+                                                if child:get_guid() == mod_guid then
+                                                    local_mod_idx = i - 1  -- Convert to 0-based
+                                                    break
+                                                end
+                                            end
+
+                                            if not local_mod_idx then
+                                                error("Could not find modulator in container")
+                                            end
+
+                                            -- Create parameter link using LOCAL index
+                                            local plink_active_str = string.format("param.%d.plink.active", target_param)
+                                            target_device:set_named_config_param(plink_active_str, "1")
+
+                                            local plink_effect_str = string.format("param.%d.plink.effect", target_param)
+                                            target_device:set_named_config_param(plink_effect_str, tostring(local_mod_idx))
+
+                                            local plink_param_str = string.format("param.%d.plink.param", target_param)
+                                            target_device:set_named_config_param(plink_param_str, "3")
+
+                                            local plink_scale_str = string.format("param.%d.plink.scale", target_param)
+                                            target_device:set_named_config_param(plink_scale_str, "1.0")
                                         end)
 
                                         if ok_link then
@@ -681,11 +629,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                             link_state.param_idx = nil
                                             link_state.param_name = nil
                                             interacted = true
-                                        else
-                                            r.ShowConsoleMsg(string.format("  ERROR in pcall: %s\n", tostring(err)))
                                         end
-                                    else
-                                        r.ShowConsoleMsg("  ERROR: No track pointer available\n")
                                     end
                                 end
                             end
