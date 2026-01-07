@@ -564,6 +564,25 @@ local function setup_modulator_sidebar_state(state_guid, cfg)
     return is_mod_sidebar_collapsed, mod_sidebar_w
 end
 
+--- Validate FX before rendering
+-- @param fx ReaWrap FX object
+-- @return boolean false if FX is invalid (should skip rendering), true otherwise
+local function validate_fx_for_rendering(fx)
+    if not fx then return false end
+
+    -- Safety check: FX might have been deleted
+    local ok, guid = pcall(function() return fx:get_guid() end)
+    if not ok or not guid then return false end
+
+    -- Skip rendering modulators - they're handled by modulator_grid_panel
+    local is_modulator = fx_utils.is_modulator_fx(fx)
+    if is_modulator then
+        return false
+    end
+
+    return true
+end
+
 --- Draw right-click context menu for device panel
 local function draw_context_menu(ctx, fx, guid, name, enabled, opts)
     local r = reaper
@@ -668,17 +687,11 @@ function M.draw(ctx, fx, opts)
     local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
     local ui_icon = constants.icon_text(emojimgui, constants.Icons.window)
 
-    if not fx then return false end
+    -- Validate FX before rendering
+    if not validate_fx_for_rendering(fx) then return false end
 
-    -- Safety check: FX might have been deleted
-    local ok, guid = pcall(function() return fx:get_guid() end)
-    if not ok or not guid then return false end
-
-    -- Skip rendering modulators - they're handled by modulator_grid_panel
-    local is_modulator = fx_utils.is_modulator_fx(fx)
-    if is_modulator then
-        return false
-    end
+    -- Get FX GUID (safe since validation passed)
+    local guid = fx:get_guid()
 
     -- Use container GUID for drag/drop if we have a container
     local container = opts.container
