@@ -1069,15 +1069,27 @@ function M.draw(ctx, fx, opts)
                             ctx:pop_style_color()
                             ctx:spacing()
 
+                            -- Helper function to find track-level FX index by GUID
+                            local function get_track_fx_index_by_guid(track_ptr, fx_guid)
+                                local fx_count = r.TrackFX_GetCount(track_ptr)
+                                for i = 0, fx_count - 1 do
+                                    local guid = r.TrackFX_GetFXGUID(track_ptr, i)
+                                    if guid and guid == fx_guid then
+                                        return i
+                                    end
+                                end
+                                return nil
+                            end
+
                             -- Find existing links for this modulator on the parent device
                             local existing_links = {}
                             local track = opts.track or state.track
                             if track and track.pointer then
                                 local track_ptr = track.pointer
-                                local mod_track_idx = r.TrackFX_GetByGUID(track_ptr, expanded_modulator:get_guid())
-                                local target_track_idx = r.TrackFX_GetByGUID(track_ptr, fx:get_guid())
+                                local mod_track_idx = get_track_fx_index_by_guid(track_ptr, expanded_modulator:get_guid())
+                                local target_track_idx = get_track_fx_index_by_guid(track_ptr, fx:get_guid())
 
-                                if mod_track_idx and target_track_idx and mod_track_idx >= 0 and target_track_idx >= 0 then
+                                if mod_track_idx and target_track_idx then
                                     -- Check each parameter of parent device for links to this modulator
                                     local ok_params, param_count = pcall(function() return fx:get_num_params() end)
                                     if ok_params and param_count then
@@ -1116,12 +1128,12 @@ function M.draw(ctx, fx, opts)
                                     ctx:same_line()
                                     if ctx:button("X##remove_link_" .. i .. "_" .. guid, 20, 0) then
                                         -- Remove this link using track-level API
-                                        local track = opts.track or state.track
-                                        if track and track.pointer then
+                                        local track_remove = opts.track or state.track
+                                        if track_remove and track_remove.pointer then
                                             local ok_remove = pcall(function()
-                                                local track_ptr = track.pointer
-                                                local target_track_idx = r.TrackFX_GetByGUID(track_ptr, fx:get_guid())
-                                                if target_track_idx and target_track_idx >= 0 then
+                                                local track_ptr = track_remove.pointer
+                                                local target_track_idx = get_track_fx_index_by_guid(track_ptr, fx:get_guid())
+                                                if target_track_idx then
                                                     -- -1 disables the link
                                                     r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
                                                         string.format("param.%d.plink.active", link.param_idx),
@@ -1179,15 +1191,15 @@ function M.draw(ctx, fx, opts)
                                             local target_param = link_state.param_idx
 
                                             -- Get track and FX indices
-                                            local track = opts.track or state.track
-                                            if track and track.pointer then
+                                            local track_link = opts.track or state.track
+                                            if track_link and track_link.pointer then
                                                 local ok_link = pcall(function()
                                                     -- Get track-level FX indices (not container-relative)
-                                                    local track_ptr = track.pointer
-                                                    local mod_track_idx = r.TrackFX_GetByGUID(track_ptr, expanded_modulator:get_guid())
-                                                    local target_track_idx = r.TrackFX_GetByGUID(track_ptr, target_device:get_guid())
+                                                    local track_ptr = track_link.pointer
+                                                    local mod_track_idx = get_track_fx_index_by_guid(track_ptr, expanded_modulator:get_guid())
+                                                    local target_track_idx = get_track_fx_index_by_guid(track_ptr, target_device:get_guid())
 
-                                                    if mod_track_idx and target_track_idx and mod_track_idx >= 0 and target_track_idx >= 0 then
+                                                    if mod_track_idx and target_track_idx then
                                                         -- Enable parameter link from modulator output (slider4=param 3) to target parameter
                                                         -- Use track-level FX index for plink
                                                         r.TrackFX_SetNamedConfigParm(track_ptr, target_track_idx,
