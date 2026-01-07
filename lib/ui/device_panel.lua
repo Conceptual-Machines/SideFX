@@ -551,8 +551,17 @@ local function draw_context_menu(ctx, fx, guid, name, enabled, opts)
 end
 
 --- Draw panel content (header + collapsed/expanded body)
-local function draw_panel_content(ctx, fx, container, guid, panel_width, panel_height, is_panel_collapsed, is_sidebar_collapsed, cfg, visible_params, visible_count, num_columns, params_per_column, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, name, device_id, drag_guid, enabled, opts, colors)
+local function draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, is_sidebar_collapsed, cfg, visible_params, visible_count, collapsed_sidebar_w, mod_sidebar_w, state_guid, name, device_id, drag_guid, enabled, opts, colors, avail_height)
     local r = reaper
+
+    -- Calculate panel dimensions
+    local dims = calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w)
+    local panel_height = dims.panel_height
+    local panel_width = dims.panel_width
+    local content_width = dims.content_width
+    local num_columns = dims.num_columns
+    local params_per_column = dims.params_per_column
+
     local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
     local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
     local interacted = false
@@ -680,20 +689,12 @@ function M.draw(ctx, fx, opts)
         mod_sidebar_w = cfg.mod_sidebar_width
     end
 
-    -- Calculate dimensions based on collapsed state
-    local dims = calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w)
-    local panel_height = dims.panel_height
-    local panel_width = dims.panel_width
-    local content_width = dims.content_width
-    local num_columns = dims.num_columns
-    local params_per_column = dims.params_per_column
-
     local interacted = false
 
     ctx:push_id(guid)
 
     -- Draw panel content (frame + header + body)
-    if draw_panel_content(ctx, fx, container, guid, panel_width, panel_height, is_panel_collapsed, is_sidebar_collapsed, cfg, visible_params, visible_count, num_columns, params_per_column, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, name, device_id, drag_guid, enabled, opts, colors) then
+    if draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, is_sidebar_collapsed, cfg, visible_params, visible_count, collapsed_sidebar_w, mod_sidebar_w, state_guid, name, device_id, drag_guid, enabled, opts, colors, avail_height) then
         interacted = true
     end
 
