@@ -681,12 +681,6 @@ function M.draw(ctx, fx, opts)
     local cfg = M.config
     local colors = M.colors
 
-    -- Get icon font for UI button
-    local icon_font = opts.icon_font
-    local constants = require('lib.constants')
-    local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
-    local ui_icon = constants.icon_text(emojimgui, constants.Icons.window)
-
     -- Validate FX before rendering
     if not validate_fx_for_rendering(fx) then return false end
 
