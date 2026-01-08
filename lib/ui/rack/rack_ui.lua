@@ -328,19 +328,19 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
     -- Check if rack is being renamed
     local is_renaming_rack = (state.renaming_fx == rack_guid)
 
-    -- Use table for layout with different widths based on expansion state
-    -- Collapsed: 25% | 25% | 25% | 25% (icon only)
-    -- Expanded: 70% | 10% | 10% | 10% (full name)
+    -- Use table for layout with burger menu, name, path, on/off, and delete
     local table_flags = imgui.TableFlags.SizingStretchProp()
-    if ctx:begin_table("rack_header_" .. rack_guid, 4, table_flags) then
+    if ctx:begin_table("rack_header_" .. rack_guid, 5, table_flags) then
+        -- Column 0: Burger menu (fixed width)
+        ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
         if is_expanded then
-            -- Expanded: name gets 70%, others get 10% each
+            -- Expanded: name gets most space
             ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 7)
             ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 1)
             ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
             ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
         else
-            -- Collapsed: equal 25% per column
+            -- Collapsed: equal distribution
             ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthStretch(), 1)
             ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 1)
             ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
@@ -349,8 +349,50 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
 
         ctx:table_next_row()
 
-        -- Column 0: Rack name (70%)
+        -- Column 0: Burger menu drag handle
         ctx:table_set_column_index(0)
+        ctx:push_style_color(imgui.Col.Button(), 0x00000000)
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x44444488)
+        ctx:push_style_color(imgui.Col.ButtonActive(), 0x55555588)
+        if ctx:button("≡##drag_rack_" .. rack_guid, 20, 20) then
+            -- Drag handle doesn't do anything on click
+        end
+        ctx:pop_style_color(3)
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip("Drag to reorder")
+        end
+
+        -- Drag/drop handling on burger menu
+        if ctx:begin_drag_drop_source() then
+            ctx:set_drag_drop_payload("FX_GUID", rack_guid)
+            ctx:text("Moving: " .. rack_name)
+            ctx:end_drag_drop_source()
+        end
+
+        if ctx:begin_drag_drop_target() then
+            local accepted, dragged_guid = ctx:accept_drag_drop_payload("FX_GUID")
+            if accepted and dragged_guid and dragged_guid ~= rack_guid then
+                if callbacks.on_drop then
+                    callbacks.on_drop(dragged_guid, rack_guid)
+                end
+            end
+
+            -- Preserve existing drop behavior for plugins and nested racks
+            local plugin_accepted = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+            if plugin_accepted and callbacks.on_add_to_rack then
+                callbacks.on_add_to_rack(plugin_accepted)
+            end
+
+            local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+            if rack_accepted and callbacks.on_add_nested_rack then
+                callbacks.on_add_nested_rack()
+            end
+
+            ctx:end_drag_drop_target()
+        end
+
+        -- Column 1: Rack name
+        ctx:table_set_column_index(1)
         if is_renaming_rack then
             draw_rack_rename_input(ctx, rack_guid, state, state_module)
         else
@@ -358,15 +400,15 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
             draw_rack_context_menu(ctx, button_id, rack_guid, rack, state, callbacks)
         end
 
-        -- Column 1: Path identifier (10%)
-        ctx:table_set_column_index(1)
+        -- Column 2: Path identifier
+        ctx:table_set_column_index(2)
         local rack_id = fx_utils.get_rack_identifier(rack)
         if rack_id then
             ctx:text_colored(0x888888FF, "[" .. rack_id .. "]")
         end
 
-        -- Column 2: ON button (10%)
-        ctx:table_set_column_index(2)
+        -- Column 3: ON button
+        ctx:table_set_column_index(3)
         local ok_enabled, rack_enabled = pcall(function() return rack:get_enabled() end)
         rack_enabled = ok_enabled and rack_enabled or false
         -- Draw custom circle indicator with colored background
@@ -375,8 +417,8 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
             pcall(function() rack:set_enabled(not rack_enabled) end)
         end
 
-        -- Column 3: X button (10%)
-        ctx:table_set_column_index(3)
+        -- Column 4: X button
+        ctx:table_set_column_index(4)
         ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
         if ctx:button("×##rack_del", -1, 20) then
             callbacks.on_delete(rack)
@@ -384,44 +426,6 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
         ctx:pop_style_color()
 
         ctx:end_table()
-    end
-
-    -- Make entire header draggable for rack reordering
-    if ctx:begin_drag_drop_source() then
-        local rack_guid = rack:get_guid()
-        ctx:set_drag_drop_payload("FX_GUID", rack_guid)
-        ctx:text("Moving: " .. rack_name)
-        ctx:end_drag_drop_source()
-    end
-
-    -- Add hover tooltip
-    if ctx:is_item_hovered() then
-        ctx:set_tooltip("Drag to reorder rack")
-    end
-
-    -- Accept drops from other racks or devices for swapping
-    if ctx:begin_drag_drop_target() then
-        local accepted, dragged_guid = ctx:accept_drag_drop_payload("FX_GUID")
-        local rack_guid = rack:get_guid()
-
-        if accepted and dragged_guid and dragged_guid ~= rack_guid then
-            if callbacks.on_drop then
-                callbacks.on_drop(dragged_guid, rack_guid)
-            end
-        end
-
-        -- Preserve existing drop behavior for plugins and nested racks
-        local plugin_accepted = ctx:accept_drag_drop_payload("PLUGIN_ADD")
-        if plugin_accepted and callbacks.on_add_to_rack then
-            callbacks.on_add_to_rack(plugin_accepted)
-        end
-
-        local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
-        if rack_accepted and callbacks.on_add_nested_rack then
-            callbacks.on_add_nested_rack()
-        end
-
-        ctx:end_drag_drop_target()
     end
 end
 
