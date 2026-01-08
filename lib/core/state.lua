@@ -65,6 +65,7 @@ M.state = {
     modulator_expanded = {},  -- {[mod_fx_idx] = true} -- which modulators show params
     modulator_advanced = {},  -- {[mod_fx_idx] = true} -- advanced section expanded
     modulator_panel_collapsed = true,  -- Collapse modulator grid panel by default
+    modulator_section_collapsed = {},  -- {[device_guid] = true} -- device modulator section collapsed
 }
 
 -- Alias for convenience
@@ -297,6 +298,7 @@ function M.save_expansion_state()
         expanded_path = state.expanded_path,
         expanded_racks = state.expanded_racks,
         expanded_nested_chains = state.expanded_nested_chains,
+        modulator_section_collapsed = state.modulator_section_collapsed,
     }
 
     -- Convert to JSON-like string (simple serialization)
@@ -346,6 +348,14 @@ function M.save_expansion_state()
     if #chain_pairs > 0 then
         table.insert(parts, "expanded_nested_chains:" .. table.concat(chain_pairs, ","))
     end
+    -- Save modulator_section_collapsed as comma-separated GUIDs
+    local mod_collapsed_guids = {}
+    for guid in pairs(state.modulator_section_collapsed) do
+        table.insert(mod_collapsed_guids, guid)
+    end
+    if #mod_collapsed_guids > 0 then
+        table.insert(parts, "modulator_section_collapsed:" .. table.concat(mod_collapsed_guids, ","))
+    end
 
     local serialized = table.concat(parts, "|")
     if serialized ~= "" then
@@ -388,6 +398,11 @@ function M.load_expansion_state()
                 if rack_guid and chain_guid then
                     state.expanded_nested_chains[rack_guid] = chain_guid
                 end
+            end
+        elseif key == "modulator_section_collapsed" then
+            state.modulator_section_collapsed = {}
+            for guid in value:gmatch("([^,]+)") do
+                state.modulator_section_collapsed[guid] = true
             end
         end
     end

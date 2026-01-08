@@ -51,7 +51,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
     local is_mod_sidebar_collapsed = state.mod_sidebar_collapsed[state_guid] or false
 
     if is_mod_sidebar_collapsed then
-        -- Collapsed: show expand button
+        -- Collapsed: show minimal expand button
         if ctx:button("▶##expand_mod_" .. guid, 20, 30) then
             state.mod_sidebar_collapsed[state_guid] = false
             interacted = true
@@ -60,17 +60,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
             ctx:set_tooltip("Expand Modulators")
         end
     else
-        -- Expanded: show grid
-        if ctx:button("◀##collapse_mod_" .. guid, 24, 20) then
-            state.mod_sidebar_collapsed[state_guid] = true
-            interacted = true
-        end
-        if ctx:is_item_hovered() then
-            ctx:set_tooltip("Collapse Modulators")
-        end
-        ctx:same_line()
-        ctx:text("Modulators")
-        ctx:separator()
+        -- Expanded: show grid (header now handled by parent device_panel)
 
         -- Get modulators for this device
         local modulators = get_device_modulators(container)

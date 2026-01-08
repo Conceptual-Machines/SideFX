@@ -12,6 +12,7 @@ local modulator_sidebar = require('lib.ui.device.modulator_sidebar')
 local drawing = require('lib.ui.common.drawing')
 local fx_naming = require('lib.fx.fx_naming')
 local param_utils = require('lib.utils.param_utils')
+local state_module = require('lib.core.state')
 
 local M = {}
 
@@ -22,7 +23,7 @@ local M = {}
 M.config = {
     column_width = 180,        -- Width per parameter column
     header_height = 32,
-    param_height = 38,         -- Height per param row (label + slider)
+    param_height = 50,         -- Height per param row (label + slider + value)
     sidebar_width = 120,       -- Width for sidebar (controls on right)
     sidebar_padding = 12,      -- Extra padding for scrollbar
     padding = 8,               -- Padding around content
@@ -70,6 +71,9 @@ local sidebar_collapsed = {}
 -- Track panel collapsed state per FX (by GUID) - collapses the whole panel to just header
 local panel_collapsed = {}
 
+-- Track device controls collapsed state per FX (by GUID) - collapses only device params, not modulators/gain
+local device_collapsed = {}
+
 -- NOTE: Modulator sidebar state is now managed by the state module
 -- (accessed via state.mod_sidebar_collapsed and state.expanded_mod_slot)
 
@@ -97,8 +101,271 @@ local rename_buffer = {}    -- guid -> current edit text
 -- Device Panel Component - Helper Functions
 --------------------------------------------------------------------------------
 
+--- Draw device name and path (for split header layout)
+local function draw_device_name_path(ctx, fx, container, guid, name, device_id, drag_guid, enabled, opts, colors, state_guid)
+    local r = reaper
+    local imgui = require('imgui')
+    local drawing = require('lib.ui.common.drawing')
+    local interacted = false
+
+    -- Check for mix (container parameter)
+    local has_mix = false
+    local mix_val, mix_idx
+    if container then
+        local ok_mix
+        ok_mix, mix_idx = pcall(function() return container:get_param_from_ident(":wet") end)
+        if ok_mix and mix_idx and mix_idx >= 0 then
+            local ok_mv
+            ok_mv, mix_val = pcall(function() return container:get_param_normalized(mix_idx) end)
+            has_mix = ok_mv and mix_val
+        end
+    end
+
+    -- Check for delta (fx parameter)
+    local has_delta = false
+    local delta_val, delta_idx
+    local ok_delta
+    ok_delta, delta_idx = pcall(function() return fx:get_param_from_ident(":delta") end)
+    if ok_delta and delta_idx and delta_idx >= 0 then
+        local ok_dv
+        ok_dv, delta_val = pcall(function() return fx:get_param_normalized(delta_idx) end)
+        has_delta = ok_dv and delta_val
+    end
+
+    -- Calculate number of columns: drag | name | path | mix | delta | ui
+    local num_cols = 3  -- base: drag, name, path
+    if has_mix then num_cols = num_cols + 1 end
+    if has_delta then num_cols = num_cols + 1 end
+    num_cols = num_cols + 1  -- ui button
+
+    -- Use table for proper layout
+    local table_flags = imgui.TableFlags.SizingStretchProp()
+    if ctx:begin_table("header_left_" .. guid, num_cols, table_flags) then
+        ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
+        ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 50)
+        ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 20)
+        if has_mix then
+            ctx:table_setup_column("mix", imgui.TableColumnFlags.WidthFixed(), 28)
+        end
+        if has_delta then
+            ctx:table_setup_column("delta", imgui.TableColumnFlags.WidthFixed(), 32)
+        end
+        ctx:table_setup_column("ui", imgui.TableColumnFlags.WidthFixed(), 24)
+
+        ctx:table_next_row()
+
+        -- Column 1: Drag handle
+        ctx:table_set_column_index(0)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+        ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+        if ctx:button("≡##drag_" .. guid, 20, 20) then
+            -- Drag handle doesn't do anything on click
+        end
+        ctx:pop_style_color(3)
+        if r.ImGui_IsItemHovered(ctx.ctx) then
+            ctx:set_tooltip("Drag to reorder")
+        end
+
+        -- Drag/drop handling
+        if ctx:begin_drag_drop_source() then
+            ctx:set_drag_drop_payload("FX_GUID", drag_guid)
+            ctx:text("Moving: " .. fx_naming.truncate(name, 20))
+            ctx:end_drag_drop_source()
+        end
+
+        if ctx:begin_drag_drop_target() then
+            local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
+            if accepted and payload and payload ~= drag_guid then
+                if opts.on_drop then
+                    opts.on_drop(payload, drag_guid)
+                end
+                interacted = true
+            end
+            local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+            if accepted_plugin and plugin_name then
+                if opts.on_plugin_drop then
+                    opts.on_plugin_drop(plugin_name, fx.pointer)
+                end
+                interacted = true
+            end
+            local accepted_rack = ctx:accept_drag_drop_payload("RACK_ADD")
+            if accepted_rack then
+                if opts.on_rack_drop then
+                    opts.on_rack_drop(fx.pointer)
+                end
+                interacted = true
+            end
+            ctx:end_drag_drop_target()
+        end
+
+        -- Column 2: Device name (editable)
+        ctx:table_set_column_index(1)
+        local sidefx_state = require('lib.core.state').state
+        local is_renaming = rename_active[guid] or false
+
+        if is_renaming then
+            ctx:set_next_item_width(-1)
+            local changed, text = ctx:input_text("##rename_" .. guid, rename_buffer[guid] or name, imgui.InputTextFlags.EnterReturnsTrue())
+            if changed then
+                sidefx_state.display_names[guid] = text
+                local state_module = require('lib.core.state')
+                state_module.save_display_names()
+                rename_active[guid] = nil
+                rename_buffer[guid] = ""
+            end
+            if ctx:is_item_deactivated() then
+                rename_active[guid] = nil
+                rename_buffer[guid] = ""
+            end
+        else
+            local display_name = fx_naming.truncate(name, 50)
+            if not enabled then
+                ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
+            end
+            ctx:text(display_name)
+            if not enabled then
+                ctx:pop_style_color()
+            end
+            if ctx:is_item_hovered() and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                rename_active[guid] = true
+                rename_buffer[guid] = name
+            end
+        end
+
+        -- Column 3: Path identifier
+        ctx:table_set_column_index(2)
+        if device_id then
+            ctx:push_style_color(r.ImGui_Col_Text(), 0x666666FF)
+            ctx:text("[" .. device_id .. "]")
+            ctx:pop_style_color()
+        end
+
+        local col_idx = 3
+
+        -- Column: Mix (if present)
+        if has_mix then
+            ctx:table_set_column_index(col_idx)
+            col_idx = col_idx + 1
+
+            local knob_size = 24
+            local mix_changed, new_mix = drawing.draw_knob(ctx, "##mix_knob_" .. state_guid, mix_val, knob_size)
+            if mix_changed then
+                pcall(function() container:set_param_normalized(mix_idx, new_mix) end)
+                interacted = true
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                local mix_pct = math.floor(mix_val * 100)
+                ctx:set_tooltip(string.format("Mix: %d%% (parallel blend)", mix_pct))
+            end
+        end
+
+        -- Column: Delta (if present)
+        if has_delta then
+            ctx:table_set_column_index(col_idx)
+            col_idx = col_idx + 1
+
+            local delta_on = delta_val > 0.5
+            if delta_on then
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x6666CCFF)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x7777DDFF)
+                ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x8888EEFF)
+            else
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x555555FF)
+                ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x666666FF)
+            end
+            if ctx:button((delta_on and "∆" or "—") .. "##delta_" .. state_guid, 28, 20) then
+                pcall(function() fx:set_param_normalized(delta_idx, delta_on and 0 or 1) end)
+                interacted = true
+            end
+            ctx:pop_style_color(3)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip(delta_on and "Delta Solo: ON (wet - dry)\nClick to toggle" or "Delta Solo: OFF\nClick to toggle")
+            end
+        end
+
+        -- Column: UI button
+        ctx:table_set_column_index(col_idx)
+        if drawing.draw_ui_icon(ctx, "##ui_header_" .. state_guid, 24, 20) then
+            pcall(function() fx:show(3) end)
+            interacted = true
+        end
+        if r.ImGui_IsItemHovered(ctx.ctx) then
+            ctx:set_tooltip("Open plugin UI")
+        end
+
+        ctx:end_table()
+    end
+
+    return interacted
+end
+
+--- Draw device control buttons (for split header layout) - Only ON, Delete, Collapse
+local function draw_device_buttons(ctx, fx, state_guid, enabled, is_device_collapsed, opts, colors)
+    local r = reaper
+    local drawing = require('lib.ui.common.drawing')
+    local imgui = require('imgui')
+    local interacted = false
+
+    -- Use table for proper layout: on | x | collapse
+    if ctx:begin_table("header_right_" .. state_guid, 3, 0) then
+        ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 24)
+        ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 20)
+        ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 20)
+
+        ctx:table_next_row()
+
+        -- Column: ON/OFF toggle
+        ctx:table_set_column_index(0)
+        if drawing.draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, 24, 20, colors.bypass_on, colors.bypass_off) then
+            fx:set_enabled(not enabled)
+            interacted = true
+        end
+        if r.ImGui_IsItemHovered(ctx.ctx) then
+            ctx:set_tooltip(enabled and "Bypass" or "Enable")
+        end
+
+        -- Column: Delete button
+        ctx:table_set_column_index(1)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
+        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x884444FF)
+        if ctx:button("×##delete_" .. state_guid, 20, 20) then
+            if opts.on_delete then
+                opts.on_delete(fx)
+            else
+                fx:delete()
+            end
+            interacted = true
+        end
+        ctx:pop_style_color(2)
+        if r.ImGui_IsItemHovered(ctx.ctx) then
+            ctx:set_tooltip("Delete device")
+        end
+
+        -- Column: Collapse/Expand button
+        ctx:table_set_column_index(2)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+        ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+        local collapse_icon = is_device_collapsed and "▶" or "◀"
+        if ctx:button(collapse_icon .. "##collapse_" .. state_guid, 20, 20) then
+            device_collapsed[state_guid] = not is_device_collapsed
+            interacted = true
+        end
+        ctx:pop_style_color(3)
+        if r.ImGui_IsItemHovered(ctx.ctx) then
+            ctx:set_tooltip(is_device_collapsed and "Expand device controls" or "Collapse device controls")
+        end
+
+        ctx:end_table()
+    end
+
+    return interacted
+end
+
 --- Draw device panel header (collapsed or expanded)
-local function draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors, enabled)
+local function draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors, enabled, is_device_collapsed)
     local r = reaper
     local imgui = require('imgui')
     local interacted = false
@@ -137,177 +404,324 @@ local function draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_g
             r.ImGui_EndTable(ctx.ctx)
         end
     else
-        -- Expanded header: drag | name (50%) | path (15%) | ui | on | x | collapse (buttons fixed width)
-        local table_flags = imgui.TableFlags.SizingStretchProp()
-        if ctx:begin_table("header_" .. guid, 7, table_flags) then
-            ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
-            ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 50)  -- 50%
-            ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 15)  -- 15%
-            ctx:table_setup_column("ui", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
-            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
-            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
-            ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 24)  -- Fixed
+        -- Panel is expanded, check if device is collapsed
+        if is_device_collapsed then
+            -- ========================================
+            -- DEVICE COLLAPSED: 2-row compact layout
+            -- Row 1: drag | ui | on | x | collapse (buttons only)
+            -- Row 2: name - path (text below)
+            -- ========================================
+            local table_flags = imgui.TableFlags.SizingStretchProp()
+            if ctx:begin_table("header_device_collapsed_" .. guid, 5, table_flags) then
+                ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
+                ctx:table_setup_column("ui", imgui.TableColumnFlags.WidthFixed(), 24)
+                ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 24)
+                ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 24)
+                ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 24)
 
-            ctx:table_next_row()
+                -- Row 1: Button row
+                ctx:table_next_row()
 
-            -- Drag handle / collapse toggle
-            ctx:table_set_column_index(0)
-            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
-            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
-            local collapse_icon = is_panel_collapsed and "▶" or "≡"
-            if ctx:button(collapse_icon .. "##drag", 20, 20) then
-                -- Toggle panel collapse on click
-                panel_collapsed[state_guid] = not is_panel_collapsed
-                interacted = true
-            end
-            ctx:pop_style_color(3)
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip(is_panel_collapsed and "Expand panel" or "Collapse panel (drag to reorder)")
-            end
+                -- Drag handle
+                ctx:table_set_column_index(0)
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+                ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+                if ctx:button("≡##drag", 20, 20) then
+                    -- Drag handle doesn't collapse, just used for drag/drop
+                end
+                ctx:pop_style_color(3)
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Drag to reorder")
+                end
 
-            if ctx:begin_drag_drop_source() then
-                ctx:set_drag_drop_payload("FX_GUID", drag_guid)
-                ctx:text("Moving: " .. fx_naming.truncate(name, 20))
-                ctx:end_drag_drop_source()
-            end
+                if ctx:begin_drag_drop_source() then
+                    ctx:set_drag_drop_payload("FX_GUID", drag_guid)
+                    ctx:text("Moving: " .. fx_naming.truncate(name, 20))
+                    ctx:end_drag_drop_source()
+                end
 
-            if ctx:begin_drag_drop_target() then
-                -- Accept FX reorder drops
-                local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
-                if accepted and payload and payload ~= drag_guid then
-                    if opts.on_drop then
-                        opts.on_drop(payload, drag_guid)
+                if ctx:begin_drag_drop_target() then
+                    local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
+                    if accepted and payload and payload ~= drag_guid then
+                        if opts.on_drop then
+                            opts.on_drop(payload, drag_guid)
+                        end
+                        interacted = true
+                    end
+                    local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                    if accepted_plugin and plugin_name then
+                        if opts.on_plugin_drop then
+                            opts.on_plugin_drop(plugin_name, fx.pointer)
+                        end
+                        interacted = true
+                    end
+                    local accepted_rack = ctx:accept_drag_drop_payload("RACK_ADD")
+                    if accepted_rack then
+                        if opts.on_rack_drop then
+                            opts.on_rack_drop(fx.pointer)
+                        end
+                        interacted = true
+                    end
+                    ctx:end_drag_drop_target()
+                end
+
+                -- UI button
+                ctx:table_set_column_index(1)
+                if drawing.draw_ui_icon(ctx, "##ui_header_" .. state_guid, 20, 20) then
+                    fx:show(3)
+                    interacted = true
+                end
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Open plugin UI")
+                end
+
+                -- ON/OFF toggle
+                ctx:table_set_column_index(2)
+                if drawing.draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, 20, 20, colors.bypass_on, colors.bypass_off) then
+                    fx:set_enabled(not enabled)
+                    interacted = true
+                end
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip(enabled and "Bypass" or "Enable")
+                end
+
+                -- Delete button
+                ctx:table_set_column_index(3)
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x884444FF)
+                if ctx:button("×##delete_" .. state_guid, 20, 20) then
+                    if opts.on_delete then
+                        opts.on_delete(fx)
+                    else
+                        fx:delete()
                     end
                     interacted = true
                 end
+                ctx:pop_style_color(2)
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Delete device")
+                end
 
-                -- Accept plugin drops (insert before this FX/container)
-                local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
-                if accepted_plugin and plugin_name then
-                    if opts.on_plugin_drop then
-                        opts.on_plugin_drop(plugin_name, fx.pointer)
-                    end
+                -- Expand button (rightmost)
+                ctx:table_set_column_index(4)
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+                ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+                if ctx:button("▶##expand_" .. state_guid, 20, 20) then
+                    device_collapsed[state_guid] = false
                     interacted = true
                 end
+                ctx:pop_style_color(3)
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Expand device controls")
+                end
 
-                -- Accept rack drops (insert before this FX/container)
-                local accepted_rack = ctx:accept_drag_drop_payload("RACK_ADD")
-                if accepted_rack then
-                    if opts.on_rack_drop then
-                        opts.on_rack_drop(fx.pointer)
+                -- Row 2: Name and path
+                ctx:table_next_row()
+                ctx:table_set_column_index(0)
+
+                -- Name spanning multiple columns
+                local sidefx_state = require('lib.core.state').state
+                local is_renaming = rename_active[guid] or false
+
+                if is_renaming then
+                    ctx:set_next_item_width(-1)
+                    local changed, text = ctx:input_text("##rename_" .. guid, rename_buffer[guid] or name, imgui.InputTextFlags.EnterReturnsTrue())
+                    if changed then
+                        sidefx_state.display_names[guid] = text
+                        local state_module = require('lib.core.state')
+                        state_module.save_display_names()
+                        rename_active[guid] = nil
+                        rename_buffer[guid] = ""
                     end
-                    interacted = true
+                    if ctx:is_item_deactivated() then
+                        rename_active[guid] = nil
+                        rename_buffer[guid] = ""
+                    end
+                else
+                    local display_name = fx_naming.truncate(name, 20)
+                    if not enabled then
+                        ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
+                    end
+                    ctx:text(display_name)
+                    if not enabled then
+                        ctx:pop_style_color()
+                    end
+                    if ctx:is_item_hovered() and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                        rename_active[guid] = true
+                        rename_buffer[guid] = name
+                    end
                 end
 
-                ctx:end_drag_drop_target()
-            end
-
-            -- Device name (editable)
-            ctx:table_set_column_index(1)
-
-            local sidefx_state = require('lib.core.state').state
-            local is_renaming = rename_active[guid] or false
-
-            if is_renaming then
-                -- Rename mode: show input box
-                ctx:set_next_item_width(-1)
-                local changed, text = ctx:input_text("##rename_" .. guid, rename_buffer[guid] or name, imgui.InputTextFlags.EnterReturnsTrue())
-
-                if changed then
-                    -- Save new display name
-                    sidefx_state.display_names[guid] = text
-                    local state_module = require('lib.core.state')
-                    state_module.save_display_names()
-                    rename_active[guid] = nil
-                    rename_buffer[guid] = ""
-                end
-
-                if ctx:is_item_deactivated() then
-                    rename_active[guid] = nil
-                    rename_buffer[guid] = ""
-                end
-            else
-                -- Normal mode: show text, double-click to rename
-                local display_name = fx_naming.truncate(name, 50)  -- Reasonable max length
-                if not enabled then
-                    ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
-                end
-
-                ctx:text(display_name)
-
-                if not enabled then
+                -- Path on same row if there's space
+                if device_id then
+                    ctx:same_line()
+                    ctx:push_style_color(r.ImGui_Col_Text(), 0x666666FF)
+                    ctx:text(" [" .. device_id .. "]")
                     ctx:pop_style_color()
                 end
 
-                if ctx:is_item_hovered() and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
-                    rename_active[guid] = true
-                    rename_buffer[guid] = name
+                ctx:end_table()
+            end  -- end device collapsed header
+        else
+            -- ========================================
+            -- DEVICE EXPANDED: Single-row full layout
+            -- drag | name | path | ui | on | x | collapse
+            -- ========================================
+            local table_flags = imgui.TableFlags.SizingStretchProp()
+            if ctx:begin_table("header_" .. guid, 7, table_flags) then
+                ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
+                ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 50)
+                ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 15)
+                ctx:table_setup_column("ui", imgui.TableColumnFlags.WidthFixed(), 24)
+                ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 24)
+                ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 24)
+                ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 24)
+
+                ctx:table_next_row()
+
+                -- Drag handle
+                ctx:table_set_column_index(0)
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+                ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+                if ctx:button("≡##drag", 20, 20) then
+                    -- Drag handle doesn't collapse
                 end
-            end
+                ctx:pop_style_color(3)
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Drag to reorder")
+                end
 
-            -- Path identifier
-            ctx:table_set_column_index(2)
-            if device_id then
-                ctx:push_style_color(r.ImGui_Col_Text(), 0x666666FF)
-                ctx:text("[" .. device_id .. "]")
-                ctx:pop_style_color()
-            end
+                if ctx:begin_drag_drop_source() then
+                    ctx:set_drag_drop_payload("FX_GUID", drag_guid)
+                    ctx:text("Moving: " .. fx_naming.truncate(name, 20))
+                    ctx:end_drag_drop_source()
+                end
 
-            -- UI button
-            ctx:table_set_column_index(3)
-            if drawing.draw_ui_icon(ctx, "##ui_header_" .. state_guid, math.min(24, 24), 20) then
-                fx:show(3)
-                interacted = true
-            end
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip("Open plugin UI")
-            end
+                if ctx:begin_drag_drop_target() then
+                    local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
+                    if accepted and payload and payload ~= drag_guid then
+                        if opts.on_drop then
+                            opts.on_drop(payload, drag_guid)
+                        end
+                        interacted = true
+                    end
+                    local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                    if accepted_plugin and plugin_name then
+                        if opts.on_plugin_drop then
+                            opts.on_plugin_drop(plugin_name, fx.pointer)
+                        end
+                        interacted = true
+                    end
+                    local accepted_rack = ctx:accept_drag_drop_payload("RACK_ADD")
+                    if accepted_rack then
+                        if opts.on_rack_drop then
+                            opts.on_rack_drop(fx.pointer)
+                        end
+                        interacted = true
+                    end
+                    ctx:end_drag_drop_target()
+                end
 
-            -- ON/OFF toggle
-            ctx:table_set_column_index(4)
-            if drawing.draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, math.min(24, 24), 20, colors.bypass_on, colors.bypass_off) then
-                fx:set_enabled(not enabled)
-                interacted = true
-            end
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip(enabled and "Bypass" or "Enable")
-            end
+                -- Device name (editable)
+                ctx:table_set_column_index(1)
+                local sidefx_state = require('lib.core.state').state
+                local is_renaming = rename_active[guid] or false
 
-            -- Delete button
-            ctx:table_set_column_index(5)
-            ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
-            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x884444FF)
-            if ctx:button("×##delete_" .. state_guid, 20, 20) then
-                if opts.on_delete then
-                    opts.on_delete(fx)
+                if is_renaming then
+                    ctx:set_next_item_width(-1)
+                    local changed, text = ctx:input_text("##rename_" .. guid, rename_buffer[guid] or name, imgui.InputTextFlags.EnterReturnsTrue())
+                    if changed then
+                        sidefx_state.display_names[guid] = text
+                        local state_module = require('lib.core.state')
+                        state_module.save_display_names()
+                        rename_active[guid] = nil
+                        rename_buffer[guid] = ""
+                    end
+                    if ctx:is_item_deactivated() then
+                        rename_active[guid] = nil
+                        rename_buffer[guid] = ""
+                    end
                 else
-                    fx:delete()
+                    local display_name = fx_naming.truncate(name, 50)
+                    if not enabled then
+                        ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
+                    end
+                    ctx:text(display_name)
+                    if not enabled then
+                        ctx:pop_style_color()
+                    end
+                    if ctx:is_item_hovered() and r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0) then
+                        rename_active[guid] = true
+                        rename_buffer[guid] = name
+                    end
                 end
-                interacted = true
-            end
-            ctx:pop_style_color(2)
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip("Delete device")
-            end
 
-            -- Collapse button (rightmost)
-            ctx:table_set_column_index(6)
-            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
-            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
-            if ctx:button("◀##collapse_" .. state_guid, 20, 20) then
-                panel_collapsed[state_guid] = true
-                interacted = true
-            end
-            ctx:pop_style_color(3)
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip("Collapse panel")
-            end
+                -- Path identifier
+                ctx:table_set_column_index(2)
+                if device_id then
+                    ctx:push_style_color(r.ImGui_Col_Text(), 0x666666FF)
+                    ctx:text("[" .. device_id .. "]")
+                    ctx:pop_style_color()
+                end
 
-            ctx:end_table()
-        end  -- end expanded header
-    end  -- end if is_panel_collapsed check for header
+                -- UI button
+                ctx:table_set_column_index(3)
+                if drawing.draw_ui_icon(ctx, "##ui_header_" .. state_guid, 24, 20) then
+                    fx:show(3)
+                    interacted = true
+                end
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Open plugin UI")
+                end
+
+                -- ON/OFF toggle
+                ctx:table_set_column_index(4)
+                if drawing.draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, 24, 20, colors.bypass_on, colors.bypass_off) then
+                    fx:set_enabled(not enabled)
+                    interacted = true
+                end
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip(enabled and "Bypass" or "Enable")
+                end
+
+                -- Delete button
+                ctx:table_set_column_index(5)
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x884444FF)
+                if ctx:button("×##delete_" .. state_guid, 20, 20) then
+                    if opts.on_delete then
+                        opts.on_delete(fx)
+                    else
+                        fx:delete()
+                    end
+                    interacted = true
+                end
+                ctx:pop_style_color(2)
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Delete device")
+                end
+
+                -- Collapse button (rightmost)
+                ctx:table_set_column_index(6)
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+                ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+                if ctx:button("◀##collapse_" .. state_guid, 20, 20) then
+                    device_collapsed[state_guid] = true
+                    interacted = true
+                end
+                ctx:pop_style_color(3)
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip("Collapse device controls")
+                end
+
+                ctx:end_table()
+            end  -- end device expanded header
+        end  -- end device collapsed/expanded check
+    end  -- end panel collapsed/expanded check
 
     return interacted
 end
@@ -419,40 +833,154 @@ local function get_visible_params(fx)
     return visible_params
 end
 
---- Draw expanded panel content (3-column table: modulators | params | sidebar)
-local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, opts, colors)
+--- Draw expanded panel content (2-column table: modulators | device_wrapper)
+-- Device wrapper contains nested 2-column table: device_content | gain_pan
+local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, name, device_id, drag_guid, enabled, opts, colors, panel_collapsed)
     local r = reaper
     local interacted = false
 
-    -- Calculate sidebar width based on collapsed state
-    local sidebar_actual_w = is_sidebar_collapsed and 8 or cfg.sidebar_width
+    -- Fixed width for gain/pan column (right side of nested table)
+    -- Header row: ON (24) + Delete (20) + Collapse (20) = 64px
+    -- Content row: Gain fader + meters + phase controls needs more space
+    -- Use 100px for comfortable spacing
+    local gain_pan_w = 100
 
-    -- Use ReaWrap's with_table for automatic cleanup
-    ctx:with_table("device_wrapper_" .. guid, 3, r.ImGui_TableFlags_BordersInnerV(), function()
+    -- Check if device controls are collapsed
+    local is_device_collapsed = device_collapsed[state_guid] or false
+
+    -- Outer table: 2 rows × 3 columns (modulators | device content | gain/pan)
+    -- Row 1: Header row (aligned across all columns)
+    -- Row 2: Content row (aligned across all columns)
+    ctx:with_table("panel_outer_" .. guid, 3, r.ImGui_TableFlags_BordersInnerV(), function()
+        -- Column 1: Modulators (left) - fixed width
         r.ImGui_TableSetupColumn(ctx.ctx, "modulators", r.ImGui_TableColumnFlags_WidthFixed(), mod_sidebar_w)
-        r.ImGui_TableSetupColumn(ctx.ctx, "params", r.ImGui_TableColumnFlags_WidthFixed(), content_width)
-        r.ImGui_TableSetupColumn(ctx.ctx, "sidebar", r.ImGui_TableColumnFlags_WidthFixed(), sidebar_actual_w)
 
+        -- Column 2: Device Content (center) - stretches
+        r.ImGui_TableSetupColumn(ctx.ctx, "device_content", r.ImGui_TableColumnFlags_WidthStretch())
+
+        -- Column 3: Gain/Pan (right) - fixed width
+        r.ImGui_TableSetupColumn(ctx.ctx, "gain_pan", r.ImGui_TableColumnFlags_WidthFixed(), gain_pan_w)
+
+        -- === ROW 1: HEADER ===
         r.ImGui_TableNextRow(ctx.ctx)
 
-        -- === COLUMN 1: MODULATOR SIDEBAR ===
+        -- Header Column 1: Modulator collapse button + "Modulators" label
+        r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+        local state = state_module.state
+        state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
+        local is_mod_sidebar_collapsed = state.mod_sidebar_collapsed[state_guid] or false
+
+        -- Collapse/expand button
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+        ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+        if ctx:button((is_mod_sidebar_collapsed and "▶" or "◀") .. "##collapse_mod_" .. state_guid, 20, 20) then
+            state.mod_sidebar_collapsed[state_guid] = not is_mod_sidebar_collapsed
+            interacted = true
+        end
+        ctx:pop_style_color(3)
+        if r.ImGui_IsItemHovered(ctx.ctx) then
+            ctx:set_tooltip(is_mod_sidebar_collapsed and "Expand Modulators" or "Collapse Modulators")
+        end
+
+        ctx:same_line()
+        ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
+        ctx:text("Modulators")
+        ctx:pop_style_color()
+
+        -- Header Column 2: Device name/path/mix/delta/ui (only when expanded)
+        r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+        if not is_device_collapsed then
+            if draw_device_name_path(ctx, fx, container, guid, name, device_id, drag_guid, enabled, opts, colors, state_guid) then
+                interacted = true
+            end
+        end
+        -- When collapsed, leave this column empty in header (content shows below)
+
+        -- Header Column 3: Control buttons (on/delete/collapse only when expanded)
+        r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+        if not is_device_collapsed then
+            if draw_device_buttons(ctx, fx, state_guid, enabled, is_device_collapsed, opts, colors) then
+                interacted = true
+            end
+        end
+        -- When collapsed, leave this column empty in header (buttons show in content area)
+
+        -- Separator row between header and content
+        r.ImGui_TableNextRow(ctx.ctx)
+        r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+        ctx:separator()
+        r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+        ctx:separator()
+        r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+        ctx:separator()
+
+        -- === ROW 2: CONTENT ===
+        r.ImGui_TableNextRow(ctx.ctx)
+
+        -- Content Column 1: Modulators
         r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
         if draw_modulator_column(ctx, fx, container, guid, state_guid, cfg, opts) then
             interacted = true
         end
 
-        -- === COLUMN 2: DEVICE PARAMS ===
+        -- Content Column 2: Device params or collapsed view
         r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-        if params_column.draw(ctx, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts) then
-            interacted = true
+        if not is_device_collapsed then
+            -- Expanded: show device params
+            if params_column.draw(ctx, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts) then
+                interacted = true
+            end
+        else
+            -- Collapsed: show vertical stack (buttons | name | fader/pan)
+            local drawing = require('lib.ui.common.drawing')
+
+            -- Row 1: Buttons (UI | ON | Expand)
+            if drawing.draw_ui_icon(ctx, "##ui_collapsed_" .. state_guid, 24, 20) then
+                pcall(function() fx:show(3) end)
+                interacted = true
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Open plugin UI")
+            end
+
+            ctx:same_line()
+            if drawing.draw_on_off_circle(ctx, "##on_off_collapsed_" .. state_guid, enabled, 24, 20, colors.bypass_on, colors.bypass_off) then
+                fx:set_enabled(not enabled)
+                interacted = true
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip(enabled and "Bypass" or "Enable")
+            end
+
+            ctx:same_line()
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+            if ctx:button("▶##expand_collapsed_" .. state_guid, 20, 20) then
+                device_collapsed[state_guid] = false
+                interacted = true
+            end
+            ctx:pop_style_color(3)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Expand device controls")
+            end
+
+            -- Row 2: Device name
+            ctx:push_style_color(r.ImGui_Col_Text(), 0xCCCCCCFF)
+            local display_name = fx_naming.truncate(name, 30)
+            ctx:text(display_name)
+            ctx:pop_style_color()
+
+            ctx:separator()
         end
 
-        -- === COLUMN 3: CHAIN SIDEBAR ===
+        -- Content Column 3: Gain/Pan controls
         r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
-        if draw_sidebar_column(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors) then
+        if draw_sidebar_column(ctx, fx, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, opts, colors) then
             interacted = true
         end
-    end)  -- end with_table (device_wrapper)
+    end)  -- end with_table (panel_outer)
 
     return interacted
 end
@@ -475,8 +1003,14 @@ local function draw_panel_frame(draw_list, cursor_x, cursor_y, panel_width, pane
 end
 
 --- Calculate panel dimensions based on collapsed state
-local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w)
+local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, is_device_collapsed)
     local panel_height, panel_width, content_width, num_columns, params_per_column
+
+    -- Fixed width for gain/pan column (right side of nested table)
+    -- Header row: ON (24) + Delete (20) + Collapse (20) = 64px
+    -- Content row: Gain fader + meters + phase controls needs more space
+    -- Use 100px for comfortable spacing
+    local gain_pan_w = 100
 
     if is_panel_collapsed then
         -- Collapsed: full height but narrow width
@@ -486,7 +1020,8 @@ local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg,
         num_columns = 0
         params_per_column = 0
     else
-        -- Expanded: full panel
+        -- Expanded: full panel with 2-column layout (modulators | device_wrapper)
+        -- Device wrapper contains nested 2-column table (device_content | gain_pan)
         panel_height = avail_height
 
         -- Calculate how many params fit per column based on available height
@@ -498,11 +1033,20 @@ local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg,
         num_columns = math.ceil(visible_count / params_per_column)
         num_columns = math.max(1, num_columns)
 
-        -- Calculate panel width: columns + sidebar (if visible) + modulator sidebar + padding
-        content_width = cfg.column_width * num_columns
-        local sidebar_w = is_sidebar_collapsed and collapsed_sidebar_w or (cfg.sidebar_width + cfg.sidebar_padding)
+        -- Calculate device content width (for params) based on collapse state
+        local device_content_width
+        if is_device_collapsed then
+            device_content_width = 300  -- Fixed narrow width when device collapsed (just header)
+        else
+            device_content_width = cfg.column_width * num_columns  -- Full width for params
+        end
 
-        panel_width = content_width + sidebar_w + mod_sidebar_w + cfg.padding * 2
+        -- Calculate device wrapper width: device_content + gain_pan
+        local device_wrapper_width = device_content_width + gain_pan_w
+
+        -- Calculate total panel width: modulator column + device wrapper + padding
+        content_width = cfg.column_width * num_columns
+        panel_width = mod_sidebar_w + device_wrapper_width + cfg.padding * 2
     end
 
     return {
@@ -623,8 +1167,11 @@ end
 local function draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, is_sidebar_collapsed, cfg, visible_params, visible_count, collapsed_sidebar_w, mod_sidebar_w, state_guid, name, device_id, drag_guid, enabled, opts, colors, avail_height)
     local r = reaper
 
+    -- Check if device controls are collapsed
+    local is_device_collapsed = device_collapsed[state_guid] or false
+
     -- Calculate panel dimensions
-    local dims = calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w)
+    local dims = calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, is_device_collapsed)
     local panel_height = dims.panel_height
     local panel_width = dims.panel_width
     local content_width = dims.content_width
@@ -642,22 +1189,21 @@ local function draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, 
     local window_flags = imgui.WindowFlags.NoScrollbar()
     if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0, window_flags) then
 
-        -- Draw header (always shown, whether collapsed or expanded)
-        local header_interacted = draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors, enabled)
-        if header_interacted then interacted = true end
-
         -- Draw collapsed body and return early if collapsed
         if is_panel_collapsed then
+            -- For collapsed, still draw a simple header + body
+            local header_interacted = draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors, enabled, is_device_collapsed)
+            if header_interacted then interacted = true end
+
             local collapsed_interacted = draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opts, colors)
             if collapsed_interacted then interacted = true end
             ctx:end_child()  -- end panel
             return interacted
         end
 
-        ctx:separator()
-
-        -- Draw expanded panel with 3-column layout
-        if draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, opts, colors) then
+        -- Draw expanded panel with 3-column layout (no top header)
+        -- Device header will be drawn inside column 2
+        if draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, name, device_id, drag_guid, enabled, opts, colors, panel_collapsed) then
             interacted = true
         end
 
