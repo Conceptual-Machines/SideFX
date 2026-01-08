@@ -275,6 +275,10 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
     -- When expanded: 3 columns (modulators | device content | gain/pan)
     -- When collapsed: 2 columns (modulators | device content)
     local num_cols = is_device_collapsed and 2 or 3
+
+    -- Push ID scope for device area (to restrict context menu)
+    ctx:push_id("device_area_" .. guid)
+
     ctx:with_table("panel_outer_" .. guid, num_cols, r.ImGui_TableFlags_BordersInnerV(), function()
         -- Column 1: Modulators (left) - fixed width
         r.ImGui_TableSetupColumn(ctx.ctx, "modulators", r.ImGui_TableColumnFlags_WidthFixed(), mod_sidebar_w)
@@ -305,7 +309,6 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
 
         -- Header Column 2: Device name/path/mix/delta/ui when expanded, buttons when collapsed
         r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-        ctx:push_id("device_area_" .. guid)  -- Scope for device-only context menu
         if not is_device_collapsed then
             -- Expanded: show full device header
             if header.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag_guid, enabled, opts, colors, state_guid) then
@@ -359,10 +362,13 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
             end
         end
 
-        -- Right-click context menu (only for device area, not modulators)
-        draw_context_menu(ctx, fx, guid, name, enabled, opts)
-        ctx:pop_id()  -- End device_area scope
     end)  -- end with_table (panel_outer)
+
+    -- Right-click context menu (outside table, but inside device ID scope)
+    draw_context_menu(ctx, fx, guid, name, enabled, opts)
+
+    -- Pop ID scope after table is fully closed
+    ctx:pop_id()  -- End device_area scope
 
     return interacted
 end
