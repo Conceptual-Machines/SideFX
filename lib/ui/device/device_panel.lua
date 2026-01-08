@@ -18,7 +18,7 @@ local state_module = require('lib.core.state')
 local header = require('lib.ui.device.device_panel.header')
 local collapsed_header = require('lib.ui.device.device_panel.collapsed_header')
 local modulator_header = require('lib.ui.device.device_panel.modulator_header')
-local content_column = require('lib.ui.device.device_panel.content_column')
+local device_column = require('lib.ui.device.device_panel.device_column')
 
 local M = {}
 
@@ -346,7 +346,7 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         end
 
         -- Content Column 2: Device params or collapsed view
-        if content_column.draw(ctx, is_device_collapsed, params_column, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts, name, fx_naming, draw_sidebar_column, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, colors) then
+        if device_column.draw(ctx, is_device_collapsed, params_column, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts, name, fx_naming, draw_sidebar_column, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, colors) then
             interacted = true
         end
 
