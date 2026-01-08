@@ -1382,6 +1382,29 @@ draw_rack_panel = function(ctx, rack, avail_height, is_nested)
     }
 end
 
+--- Draw selected chain column if rack is expanded
+-- @param ctx ImGui context
+-- @param rack_data table Data returned from draw_rack_panel {is_expanded, chains, rack_h}
+-- @param rack_guid string GUID of the rack
+local function draw_selected_chain_column_if_expanded(ctx, rack_data, rack_guid)
+    local selected_chain_guid = state.expanded_nested_chains[rack_guid]
+    if rack_data.is_expanded and selected_chain_guid then
+        local selected_chain = nil
+        for _, chain in ipairs(rack_data.chains) do
+            local ok_guid, chain_guid = pcall(function() return chain:get_guid() end)
+            if ok_guid and chain_guid and chain_guid == selected_chain_guid then
+                selected_chain = chain
+                break
+            end
+        end
+
+        if selected_chain then
+            ctx:same_line()
+            draw_chain_column(ctx, selected_chain, rack_data.rack_h)
+        end
+    end
+end
+
 local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
     -- Lazy load UI components
     if not device_panel then
@@ -1498,25 +1521,9 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
             -- Draw rack using helper function (top-level rack, explicitly not nested)
             local rack_data = draw_rack_panel(ctx, fx, avail_height, false)
 
-            -- If a chain is selected, show chain column
-            -- Use the rack's GUID to look up which chain is selected for this specific rack
+            -- Draw selected chain column if expanded
             local rack_guid = fx:get_guid()
-            local selected_chain_guid = state.expanded_nested_chains[rack_guid]
-            if rack_data.is_expanded and selected_chain_guid then
-                local selected_chain = nil
-                for _, chain in ipairs(rack_data.chains) do
-                    local ok_guid, chain_guid = pcall(function() return chain:get_guid() end)
-                    if ok_guid and chain_guid and chain_guid == selected_chain_guid then
-                        selected_chain = chain
-                        break
-                    end
-                end
-
-                if selected_chain then
-                    ctx:same_line()
-                    draw_chain_column(ctx, selected_chain, rack_data.rack_h)
-                end
-            end
+            draw_selected_chain_column_if_expanded(ctx, rack_data, rack_guid)
         elseif is_container then
             -- Unknown container type - show basic view
             ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
