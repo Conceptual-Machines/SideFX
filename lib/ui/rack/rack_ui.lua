@@ -8,6 +8,7 @@ local imgui = require('imgui')
 local r = reaper
 local widgets = require('lib.ui.common.widgets')
 local drawing = require('lib.ui.common.drawing')
+local fx_naming = require('lib.fx.fx_naming')
 
 local M = {}
 
@@ -404,7 +405,8 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
         ctx:table_set_column_index(2)
         local rack_id = fx_utils.get_rack_identifier(rack)
         if rack_id then
-            ctx:text_colored(0x888888FF, "[" .. rack_id .. "]")
+            local short_id = fx_naming.get_short_path(rack_id)
+            ctx:text_colored(0x888888FF, "[" .. short_id .. "]")
         end
 
         -- Column 3: ON button
@@ -456,7 +458,9 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
     local ok_name, chain_raw_name = pcall(function() return chain:get_name() end)
     -- Use chain label name (just the name, no [R1_C1] in the row)
     local fx_utils = require('lib.fx.fx_utils')
-    local chain_name = ok_name and fx_utils.get_chain_label_name(chain) or "Unknown"
+    local chain_name_full = ok_name and fx_utils.get_chain_label_name(chain) or "Unknown"
+    -- Apply short path display (R1_C1 -> C1)
+    local chain_name = fx_naming.get_short_path(chain_name_full)
     local ok_en, chain_enabled = pcall(function() return chain:get_enabled() end)
     chain_enabled = ok_en and chain_enabled or false
     local ok_guid, chain_guid = pcall(function() return chain:get_guid() end)

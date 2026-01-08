@@ -90,4 +90,30 @@ function M.truncate(str, max_len)
     return str:sub(1, max_len - 2) .. ".."
 end
 
+--- Get short display name for path identifiers (UI only, strips parent prefix)
+-- Converts hierarchical path names to local names for cleaner UI display
+-- Examples: R1_C1 -> C1, R1_C1_D1 -> D1, R2 -> R2
+-- Backend naming unchanged - this is purely for display
+-- @param full_path string Full hierarchical path (e.g., "R1_C1", "R1_C1_D1")
+-- @return string Short display path (e.g., "C1", "D1")
+function M.get_short_path(full_path)
+    if not full_path or full_path == "" then return "" end
+
+    -- Match patterns to extract the last component:
+    -- R\d+_C\d+_D\d+ -> D\d+ (device in chain)
+    -- R\d+_C\d+_M\d+ -> M\d+ (modulator in chain)
+    -- R\d+_C\d+ -> C\d+ (chain in rack)
+    -- R\d+_D\d+ -> D\d+ (device in top-level rack - shouldn't happen but handle it)
+    -- R\d+ -> R\d+ (rack itself - no change)
+
+    -- Try to extract the last component after underscore
+    local last_component = full_path:match("_([DCMR]%d+)$")
+    if last_component then
+        return last_component
+    end
+
+    -- No underscore means it's already a top-level name (R1, R2, etc.)
+    return full_path
+end
+
 return M

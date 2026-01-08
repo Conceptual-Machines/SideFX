@@ -157,7 +157,8 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         ctx:table_set_column_index(2)
         if device_id then
             ctx:push_style_color(r.ImGui_Col_Text(), 0x666666FF)
-            ctx:text("[" .. device_id .. "]")
+            local short_id = fx_naming.get_short_path(device_id)
+            ctx:text("[" .. short_id .. "]")
             ctx:pop_style_color()
         end
 
