@@ -7,6 +7,7 @@
 local imgui = require('imgui')
 local r = reaper
 local widgets = require('lib.ui.widgets')
+local drawing = require('lib.ui.drawing')
 
 local M = {}
 
@@ -552,6 +553,182 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
         end
     else
         ctx:text_disabled("C")
+    end
+end
+
+--------------------------------------------------------------------------------
+-- Rack Visualization Functions
+--------------------------------------------------------------------------------
+
+--- Draw collapsed fader control (full vertical fader with meters and scale)
+-- @param ctx ImGui context
+-- @param mixer ReaWrap mixer FX
+-- @param rack_guid string Rack GUID (for popup ID)
+-- @param state table State object for peak info access
+function M.draw_collapsed_fader_control(ctx, mixer, rack_guid, state)
+    local fader_w = 32
+    local meter_w = 12
+    local scale_w = 20
+
+    local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
+    if not ok_gain or not gain_norm then return end
+
+    local gain_db = -24 + gain_norm * 36
+    local gain_format = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db))
+
+    local _, remaining_h = ctx:get_content_region_avail()
+    local fader_h = remaining_h - 22
+    fader_h = math.max(50, fader_h)
+
+    local avail_w, _ = ctx:get_content_region_avail()
+    local total_w = scale_w + fader_w + meter_w + 4
+    local offset_x = math.max(0, (avail_w - total_w) / 2 - 8)
+    ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + offset_x)
+
+    local screen_x, screen_y = ctx:get_cursor_screen_pos()
+    local draw_list = ctx:get_window_draw_list()
+
+    local scale_x = screen_x
+    local fader_x = screen_x + scale_w + 2
+    local meter_x = fader_x + fader_w + 2
+
+    -- Draw scale, fader, and meters
+    drawing.draw_db_scale_marks(ctx, draw_list, scale_x, screen_y, fader_h, scale_w)
+    drawing.draw_fader_visualization(ctx, draw_list, fader_x, screen_y, fader_w, fader_h, gain_norm)
+    drawing.draw_stereo_meters_visualization(ctx, draw_list, meter_x, screen_y, meter_w, fader_h)
+
+    -- Draw peak meter bars if track available
+    if state.track and state.track.pointer then
+        local peak_l = r.Track_GetPeakInfo(state.track.pointer, 0)
+        local peak_r = r.Track_GetPeakInfo(state.track.pointer, 1)
+        local half_meter_w = meter_w / 2 - 1
+        local meter_l_x = meter_x
+        local meter_r_x = meter_x + meter_w / 2 + 1
+        drawing.draw_peak_meters(ctx, draw_list, meter_l_x, meter_r_x, screen_y, fader_h, half_meter_w, peak_l, peak_r)
+    end
+
+    -- Interactive slider
+    ctx:set_cursor_screen_pos(fader_x, screen_y)
+    ctx:push_style_color(imgui.Col.FrameBg(), 0x00000000)
+    ctx:push_style_color(imgui.Col.FrameBgHovered(), 0x00000000)
+    ctx:push_style_color(imgui.Col.FrameBgActive(), 0x00000000)
+    ctx:push_style_color(imgui.Col.SliderGrab(), 0xAAAAAAFF)
+    ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
+    local gain_changed, new_gain_db = ctx:v_slider_double("##master_gain_v", fader_w, fader_h, gain_db, -24, 12, "")
+    if gain_changed then
+        pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
+    end
+    if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
+        pcall(function() mixer:set_param_normalized(0, (0 + 24) / 36) end)
+    end
+    ctx:pop_style_color(5)
+
+    -- dB label
+    local label_y = screen_y + fader_h + 2
+    local db_text_w, _ = ctx:calc_text_size(gain_format)
+    local label_x = fader_x + (fader_w - db_text_w) / 2
+    ctx:set_cursor_screen_pos(label_x, label_y)
+    ctx:text(gain_format)
+
+    -- Edit popup
+    if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
+        ctx:open_popup("##gain_edit_popup_" .. rack_guid)
+    end
+    if ctx:begin_popup("##gain_edit_popup_" .. rack_guid) then
+        ctx:set_next_item_width(60)
+        ctx:set_keyboard_focus_here()
+        local input_changed, input_val = ctx:input_double("##gain_input", gain_db, 0, 0, "%.1f")
+        if input_changed then
+            local new_db = math.max(-24, math.min(12, input_val))
+            pcall(function() mixer:set_param_normalized(0, (new_db + 24) / 36) end)
+        end
+        if ctx:is_key_pressed(imgui.Key.Enter()) or ctx:is_key_pressed(imgui.Key.Escape()) then
+            ctx:close_current_popup()
+        end
+        ctx:end_popup()
+    end
+end
+
+--- Draw master controls table (gain + pan sliders)
+-- @param ctx ImGui context
+-- @param mixer ReaWrap mixer FX
+function M.draw_master_controls_table(ctx, mixer)
+    if ctx:begin_table("master_controls", 3, imgui.TableFlags.SizingStretchProp()) then
+        ctx:table_setup_column("label", imgui.TableColumnFlags.WidthFixed(), 50)
+        ctx:table_setup_column("gain", imgui.TableColumnFlags.WidthStretch(), 1)
+        ctx:table_setup_column("pan", imgui.TableColumnFlags.WidthFixed(), 70)
+        ctx:table_next_row()
+
+        ctx:table_set_column_index(0)
+        ctx:text_colored(0xAAAAAAFF, "Master")
+
+        ctx:table_set_column_index(1)
+        local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
+        if ok_gain and gain_norm then
+            local gain_db = -24 + gain_norm * 36
+            local gain_format = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.1f", gain_db) or string.format("%.1f", gain_db))
+            ctx:set_next_item_width(-1)
+            local gain_changed, new_gain_db = ctx:slider_double("##master_gain", gain_db, -24, 12, gain_format)
+            if gain_changed then
+                pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
+            end
+            if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
+                pcall(function() mixer:set_param_normalized(0, (0 + 24) / 36) end)
+            end
+        else
+            ctx:text_disabled("--")
+        end
+
+        ctx:table_set_column_index(2)
+        local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(1) end)
+        if ok_pan and pan_norm then
+            local pan_val = -100 + pan_norm * 200
+            local pan_changed, new_pan = widgets.draw_pan_slider(ctx, "##master_pan", pan_val, 60)
+            if pan_changed then
+                pcall(function() mixer:set_param_normalized(1, (new_pan + 100) / 200) end)
+            end
+        else
+            ctx:text_disabled("C")
+        end
+
+        ctx:end_table()
+    end
+end
+
+--- Draw rack drop zone for plugins/racks
+-- @param ctx ImGui context
+-- @param rack ReaWrap rack container
+-- @param has_payload boolean Whether there's a drag payload
+-- @param on_add_chain_plugin callback When plugin dropped
+-- @param on_add_nested_rack callback When rack dropped
+function M.draw_rack_drop_zone(ctx, rack, has_payload, on_add_chain_plugin, on_add_nested_rack)
+    ctx:spacing()
+    local drop_h = 40
+    if has_payload then
+        ctx:push_style_color(imgui.Col.Button(), 0x4488FF66)
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x66AAFF88)
+    else
+        ctx:push_style_color(imgui.Col.Button(), 0x33333344)
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x44444466)
+    end
+    ctx:button("+ Drop plugin or rack##rack_drop", -1, drop_h)
+    ctx:pop_style_color(2)
+
+    if ctx:begin_drag_drop_target() then
+        local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+        if accepted and plugin_name then
+            local plugin = { full_name = plugin_name, name = plugin_name }
+            if on_add_chain_plugin then
+                on_add_chain_plugin(rack, plugin)
+            end
+        end
+        local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+        if rack_accepted then
+            if on_add_nested_rack then
+                on_add_nested_rack(rack)
+            end
+        end
+        ctx:end_drag_drop_target()
     end
 end
 
