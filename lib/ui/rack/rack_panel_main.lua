@@ -313,6 +313,7 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
     local reorder_chain_in_rack = opts.reorder_chain_in_rack
     local move_chain_between_racks = opts.move_chain_between_racks
     local add_chain_to_rack = opts.add_chain_to_rack
+    local add_empty_chain_to_rack = opts.add_empty_chain_to_rack
     local add_nested_rack_to_rack = opts.add_nested_rack_to_rack
     local drawing_module = opts.drawing or drawing
 
@@ -420,8 +421,8 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
             ctx:same_line()
             ctx:push_style_color(imgui.Col.Button(), 0x446688FF)
             if ctx:small_button("+ Chain") then
-                if add_chain_to_rack then
-                    add_chain_to_rack(rack)
+                if add_empty_chain_to_rack then
+                    add_empty_chain_to_rack(rack)
                 end
             end
             ctx:pop_style_color()

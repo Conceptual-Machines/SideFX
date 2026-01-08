@@ -261,6 +261,7 @@ end
 -- Use rack backend functions with state management
 local add_rack_to_track = rack_backend.add_rack_to_track
 local add_chain_to_rack = rack_backend.add_chain_to_rack
+local add_empty_chain_to_rack = rack_backend.add_empty_chain_to_rack
 local add_nested_rack_to_rack = rack_backend.add_nested_rack_to_rack
 local add_device_to_chain = rack_backend.add_device_to_chain
 local add_rack_to_chain = rack_backend.add_rack_to_chain
@@ -452,6 +453,7 @@ local function draw_rack_panel(ctx, rack, avail_height, is_nested, callbacks)
         reorder_chain_in_rack = reorder_chain_in_rack,
         move_chain_between_racks = move_chain_between_racks,
         add_chain_to_rack = add_chain_to_rack,
+        add_empty_chain_to_rack = add_empty_chain_to_rack,
         add_nested_rack_to_rack = add_nested_rack_to_rack,
         drawing = drawing,
         on_drop = callbacks.on_drop,  -- Pass through on_drop callback for rack swapping

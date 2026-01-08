@@ -70,6 +70,17 @@ function M.add_chain_to_rack(rack, plugin)
     return chain
 end
 
+--- Add an empty chain to a rack (no plugin)
+-- @param rack TrackFX Rack container
+-- @return TrackFX|nil Chain FX or nil on failure
+function M.add_empty_chain_to_rack(rack)
+    local chain = rack_module.add_empty_chain_to_rack(rack)
+    if chain then
+        refresh_fx_list()
+    end
+    return chain
+end
+
 --- Add a nested rack to an existing rack
 -- @param parent_rack TrackFX Parent rack container
 -- @return TrackFX|nil Nested rack FX or nil on failure
