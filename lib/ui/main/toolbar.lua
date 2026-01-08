@@ -79,6 +79,40 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
             end
         end
     end
+
+    -- Right-side buttons (presets and config)
+    local button_width = 30
+    local spacing = 4
+    local total_button_width = button_width * 2 + spacing
+    local window_width = ctx:get_window_size()
+    local style_x, _ = ctx:get_style_var(imgui.StyleVar.WindowPadding())
+
+    -- Position buttons on the right
+    ctx:same_line(window_width - total_button_width - style_x)
+
+    -- Preset button
+    if icon_font then ctx:push_font(icon_font, icon_size) end
+    local preset_icon = constants.icon_text(emojimgui, constants.Icons.floppy_disk)
+    if ctx:button(preset_icon .. "##preset", button_width, 0) then
+        if callbacks.on_preset then
+            callbacks.on_preset()
+        end
+    end
+    if icon_font then ctx:pop_font() end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Chain Presets") end
+
+    ctx:same_line()
+
+    -- Config button
+    if icon_font then ctx:push_font(icon_font, icon_size) end
+    local config_icon = constants.icon_text(emojimgui, constants.Icons.gear)
+    if ctx:button(config_icon .. "##config", button_width, 0) then
+        if callbacks.on_config then
+            callbacks.on_config()
+        end
+    end
+    if icon_font then ctx:pop_font() end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Settings") end
 end
 
 return M

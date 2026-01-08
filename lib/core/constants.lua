@@ -26,6 +26,8 @@ M.Icons = {
     window = "1F5D5",           -- 🗕 (window/UI)
     computer = "1F4BB",         -- 💻 (computer/screen)
     desktop = "1F5A5",          -- 🖥 (desktop computer)
+    floppy_disk = "1F4BE",      -- 💾 (save/presets)
+    gear = "2699",              -- ⚙️ (settings/config)
 }
 
 --- Get icon text from EmojImGui
