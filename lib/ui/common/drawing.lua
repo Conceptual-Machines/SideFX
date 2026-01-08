@@ -12,17 +12,22 @@ local r = reaper
 -- @param icon_font ImGui font handle for emoji rendering (optional)
 -- @return boolean True if clicked
 function M.draw_ui_icon(ctx, label, width, height, icon_font)
-    -- Use text button with spanner emoji
+    local imgui = require('imgui')
     local constants = require('lib.core.constants')
     local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
     local icon = constants.icon_text(emojimgui, constants.Icons.wrench)
 
-    -- Push icon font if available (use 16pt for emoji icons)
+    -- Push icon font if available (use 14pt for emoji icons to better match button size)
     if icon_font then
-        ctx:push_font(icon_font, 16)
+        ctx:push_font(icon_font, 14)
     end
 
+    -- Adjust frame padding to center the emoji better
+    ctx:push_style_var(imgui.StyleVar.FramePadding(), 2, 2)
+
     local clicked = ctx:button(icon .. label, width, height)
+
+    ctx:pop_style_var()
 
     -- Pop icon font if we pushed it
     if icon_font then
