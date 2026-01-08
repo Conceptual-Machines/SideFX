@@ -173,12 +173,13 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     -- Set control width shorter for compact layout
                     local control_width = 180
 
-                    -- Rate section: Free/Sync buttons | UI icon (no label)
+                    -- Rate section: Free/Sync buttons | Preset | UI icon (no label)
                     -- Read tempo mode BEFORE table so it's accessible inside and outside
                     local tempo_mode = expanded_modulator:get_param(PARAM.PARAM_TEMPO_MODE)
 
-                    if ctx:begin_table("##rate_table_" .. guid, 2, imgui.TableFlags.SizingStretchProp()) then
+                    if ctx:begin_table("##rate_table_" .. guid, 3, imgui.TableFlags.SizingStretchProp()) then
                         ctx:table_setup_column("Mode", imgui.TableColumnFlags.WidthStretch())
+                        ctx:table_setup_column("Preset", imgui.TableColumnFlags.WidthFixed(), 80)
                         ctx:table_setup_column("UI", imgui.TableColumnFlags.WidthFixed(), 30)
 
                         ctx:table_next_row()
@@ -197,8 +198,50 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             end
                         end
 
-                        -- Column 2: UI icon
+                        -- Column 2: Preset dropdown
                         ctx:table_set_column_index(1)
+                        local preset_idx, num_presets = r.TrackFX_GetPresetIndex(
+                            state.track.pointer,
+                            expanded_modulator.pointer
+                        )
+                        if num_presets and num_presets > 0 then
+                            -- Static preset names matching our JSFX @presets section
+                            local preset_names = {
+                                "Sine Wave",
+                                "Triangle",
+                                "Sawtooth",
+                                "Square Wave",
+                                "Ramp Up",
+                                "Ramp Down",
+                                "Smooth Random",
+                                "Steps",
+                                "Bounce",
+                                "Exponential Rise",
+                                "Exponential Fall",
+                                "Wobble",
+                                "Shark Fin",
+                                "Growl"
+                            }
+
+                            local current_name = preset_names[preset_idx + 1] or "Custom"
+                            ctx:set_next_item_width(80)
+                            if ctx:begin_combo("##preset_" .. guid, current_name) then
+                                for i = 0, num_presets - 1 do
+                                    local name = preset_names[i + 1] or ("Preset " .. (i + 1))
+                                    if ctx:selectable(name, i == preset_idx) then
+                                        r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
+                                        interacted = true
+                                    end
+                                end
+                                ctx:end_combo()
+                            end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Waveform preset")
+                            end
+                        end
+
+                        -- Column 3: UI icon
+                        ctx:table_set_column_index(2)
                         if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20, opts.icon_font) then
                             expanded_modulator:show(3)
                             interacted = true
