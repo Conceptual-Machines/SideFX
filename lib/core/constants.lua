@@ -16,6 +16,7 @@ M.Icons = {
     package = "1F4E6",          -- 📦
     plug = "1F50C",             -- 🔌
     musical_keyboard = "1F3B9", -- 🎹
+    control_knobs = "1F39B",    -- 🎛️ (4 knobs for FX)
     wrench = "1F527",           -- 🔧
     speaker_high = "1F50A",     -- 🔊
     speaker_muted = "1F507",    -- 🔇
