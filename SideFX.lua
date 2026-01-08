@@ -106,6 +106,7 @@ local fx_list_column = require('lib.ui.fx_list_column')
 local device_chain = require('lib.ui.device_chain')
 local chain_column = require('lib.ui.chain_column')
 local rack_panel_main = require('lib.ui.rack_panel_main')
+local main_window = require('lib.ui.main_window')
 local toolbar = require('lib.ui.toolbar')
 local drag_drop = require('lib.ui.drag_drop')
 local rack_ui = require('lib.ui.rack_ui')
@@ -422,7 +423,7 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
     chain_column.draw(ctx, selected_chain, rack_h, {
         state = state,
         get_fx_display_name = get_fx_display_name,
-        refresh_fx_list = refresh_fx_list,
+                            refresh_fx_list = refresh_fx_list,
         get_device_main_fx = get_device_main_fx,
         get_device_utility = get_device_utility,
         is_rack_container = is_rack_container,
@@ -438,7 +439,7 @@ end
 local function draw_rack_panel(ctx, rack, avail_height, is_nested)
     return rack_panel_main.draw(ctx, rack, avail_height, is_nested, {
         state = state,
-        icon_font = icon_font,
+            icon_font = icon_font,
         state_module = state_module,
         refresh_fx_list = refresh_fx_list,
         get_rack_mixer = get_rack_mixer,
@@ -518,235 +519,36 @@ local function main()
         state_module.load_display_names()
     end
 
+    -- Create font reference tables so they can be updated by callbacks
+    local default_font_ref = { value = default_font }
+    local icon_font_ref = { value = icon_font }
+
+    -- Create window callbacks
+    local window_callbacks = main_window.create_callbacks({
+        state = state,
+        state_module = state_module,
+        default_font = default_font,
+        icon_font = icon_font,
+        reaper_theme = reaper_theme,
+        get_selected_track = get_selected_track,
+        check_fx_changes = check_fx_changes,
+        clear_multi_select = clear_multi_select,
+        draw_toolbar = draw_toolbar,
+        draw_plugin_browser = draw_plugin_browser,
+        draw_device_chain = draw_device_chain,
+        refresh_fx_list = refresh_fx_list,
+        EmojImGui = EmojImGui,
+        default_font_ref = default_font_ref,
+        icon_font_ref = icon_font_ref,
+    })
+
     Window.run({
         title = "SideFX",
         width = 1400,
         height = 800,
         dockable = true,
-
-        on_close = function(self)
-            -- Save expansion state and display names when window closes
-            if state.track then
-                state_module.save_expansion_state()
-                state_module.save_display_names()
-            end
-        end,
-
-        on_draw = function(self, ctx)
-            reaper_theme:apply(ctx)
-
-            -- Load fonts on first frame
-            if not default_font then
-                -- Create a larger, more legible default font
-                -- Try common system fonts that are known to be readable
-                local font_families = {
-                    "Segoe UI",      -- Windows default
-                    "Helvetica Neue", -- macOS default
-                    "Arial",         -- Fallback
-                    "DejaVu Sans",   -- Linux/common
-                }
-
-                for _, family in ipairs(font_families) do
-                    -- ImGui_CreateFont takes: family_or_file, size (flags are optional via separate call)
-                    default_font = r.ImGui_CreateFont(family, 14)
-                    if default_font then
-                        break
-                    end
-                end
-
-                -- If no font was created, try with a generic name
-                if not default_font then
-                    default_font = r.ImGui_CreateFont("", 14)
-                end
-            end
-
-            -- Push default font if available
-            if default_font then
-                ctx:push_font(default_font, 14)
-            end
-
-            -- Load icon font on first frame
-            if not icon_font then
-                icon_font = EmojImGui.Asset.Font(ctx.ctx, "OpenMoji")
-            end
-
-            -- Track change detection
-            local track, name = get_selected_track()
-
-            -- Check if current state.track is still valid (not deleted)
-            local state_track_valid = false
-            if state.track then
-                local ok = pcall(function()
-                    -- Try to access track info to validate pointer
-                    return state.track:get_info_value("IP_TRACKNUMBER")
-                end)
-                state_track_valid = ok
-                if not ok then
-                    -- Track was deleted, clear all related state
-                    state.track = nil
-                    state.top_level_fx = {}
-                    state.last_fx_count = 0
-                    state.expanded_path = {}
-                    state.expanded_racks = {}
-                    state.expanded_nested_chains = {}
-                    state.selected_fx = nil
-                    clear_multi_select()
-                end
-            end
-
-            local track_changed = (track and state.track and track.pointer ~= state.track.pointer)
-                or (track and not state.track)
-                or (not track and state.track)
-            if track_changed then
-                -- Save expansion state for previous track before switching
-                -- (save_expansion_state will handle invalid tracks safely)
-                if state_track_valid then
-                    state_module.save_expansion_state()
-                    state_module.save_display_names()
-                end
-
-                state.track, state.track_name = track, name
-                state.expanded_path = {}
-                state.expanded_racks = {}
-                state.expanded_nested_chains = {}
-                state.display_names = {}  -- Clear display names for new track
-                state.selected_fx = nil
-                clear_multi_select()
-                refresh_fx_list()
-
-                -- Load expansion state for new track
-            if state.track then
-                state_module.load_expansion_state()
-                state_module.load_display_names()
-            end
-            else
-                -- Check for external FX changes (e.g. user deleted FX in REAPER)
-                check_fx_changes()
-            end
-
-            -- Toolbar
-            draw_toolbar(ctx)
-            ctx:separator()
-
-            -- Layout dimensions
-            local browser_w = 260
-            local avail_w, avail_h = ctx:get_content_region_avail()
-
-            -- Plugin Browser (fixed left)
-            ctx:push_style_color(imgui.Col.ChildBg(), 0x1E1E22FF)
-            if ctx:begin_child("Browser", browser_w, 0, imgui.ChildFlags.Border()) then
-                ctx:text("Plugins")
-                ctx:separator()
-                draw_plugin_browser(ctx)
-                ctx:end_child()
-            end
-            ctx:pop_style_color()
-
-            ctx:same_line()
-
-            -- Calculate remaining width for device chain
-            local chain_w = avail_w - browser_w - 20
-
-            -- Device Chain (horizontal scroll, center area)
-            ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1EFF)
-            local chain_flags = imgui.WindowFlags.HorizontalScrollbar()
-            if ctx:begin_child("DeviceChain", chain_w, 0, imgui.ChildFlags.Border(), chain_flags) then
-
-                if not state.track then
-                    -- No track selected - show message with red border
-                    local avail_w, avail_h = ctx:get_content_region_avail()
-                    local msg_w = 300
-                    local msg_h = 60
-                    local msg_x = (avail_w - msg_w) / 2
-                    local msg_y = (avail_h - msg_h) / 2
-
-                    -- Position using dummy spacing
-                    if msg_y > 0 then
-                        ctx:dummy(0, msg_y)
-                    end
-                    if msg_x > 0 then
-                        ctx:dummy(msg_x, 0)
-                        ctx:same_line()
-                    end
-
-                    -- Red border using child window with manual border drawing
-                    ctx:push_style_color(imgui.Col.ChildBg(), 0x2A1A1AFF)  -- Slightly red-tinted background
-                    ctx:push_style_var(imgui.StyleVar.WindowPadding(), 20, 15)
-                    if ctx:begin_child("no_track_msg", msg_w, msg_h, 0) then
-                        -- Get window bounds for border drawing
-                        local window_min_x, window_min_y = r.ImGui_GetWindowPos(ctx.ctx)
-                        local window_max_x = window_min_x + r.ImGui_GetWindowWidth(ctx.ctx)
-                        local window_max_y = window_min_y + r.ImGui_GetWindowHeight(ctx.ctx)
-                        local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-                        local border_thickness = 2.0
-
-                        -- Draw red border rectangle around the child window
-                        r.ImGui_DrawList_AddRect(draw_list, window_min_x, window_min_y, window_max_x, window_max_y, 0xFF0000FF, 0, 0, border_thickness)
-
-                        -- Center the text using available space
-                        local text = "Select a track"
-                        local text_w, text_h = ctx:calc_text_size(text)
-                        local child_w, child_h = ctx:get_content_region_avail()
-                        local text_x = (child_w - text_w) / 2
-                        local text_y = (child_h - text_h) / 2
-                        if text_y > 0 then
-                            ctx:dummy(0, text_y)
-                        end
-                        if text_x > 0 then
-                            ctx:dummy(text_x, 0)
-                            ctx:same_line()
-                        end
-                        ctx:push_style_color(imgui.Col.Text(), 0xFFFFFFFF)
-                        ctx:text(text)
-                        ctx:pop_style_color()
-                    end
-                    ctx:end_child()
-                    ctx:pop_style_var()
-                    ctx:pop_style_color()
-                else
-                    -- Filter out invalid FX (from deleted tracks)
-                    local filtered_fx = {}
-                    for _, fx in ipairs(state.top_level_fx) do
-                        -- Validate FX is still accessible (track may have been deleted)
-                        local ok = pcall(function()
-                            return fx:get_name()
-                        end)
-                        if ok then
-                            table.insert(filtered_fx, fx)
-                        end
-                    end
-
-                    -- Draw the horizontal device chain (includes modulators)
-                    draw_device_chain(ctx, filtered_fx, chain_w, avail_h)
-                end
-
-                ctx:end_child()
-            end
-            ctx:pop_style_color()
-
-            reaper_theme:unapply(ctx)
-
-            -- Pop default font if we pushed it
-            if default_font then
-                ctx:pop_font()
-            end
-
-            -- Periodically save state (every 60 frames ~= 1 second at 60fps)
-            -- Only save if there are actual display names to avoid clearing saved data
-            if state.track and (not state.last_save_frame or (ctx.frame_count - state.last_save_frame) > 60) then
-                state_module.save_expansion_state()
-                -- Only save display names if there are any (don't clear saved data)
-                local has_display_names = false
-                for _ in pairs(state.display_names) do
-                    has_display_names = true
-                    break
-                end
-                if has_display_names then
-                    state_module.save_display_names()
-                end
-                state.last_save_frame = ctx.frame_count
-            end
-        end,
+        on_close = window_callbacks.on_close,
+        on_draw = window_callbacks.on_draw,
     })
 end
 
