@@ -308,8 +308,6 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
 
         -- Header Column 2: Device name/path/mix/delta/ui when expanded, buttons when collapsed
         r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-        -- Push ID scope to limit context menu to device columns only (not modulators)
-        ctx:push_id("device_area_" .. guid)
         if not is_device_collapsed then
             -- Expanded: show full device header
             if header.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag_guid, enabled, opts, colors, state_guid) then
@@ -362,39 +360,6 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
                 interacted = true
             end
         end
-
-        -- Inline context menu (must be inside device ID scope, after device content rendered)
-        if ctx:begin_popup_context_item("device_menu_" .. guid) then
-            if ctx:menu_item("Open FX Window") then
-                fx:show(3)
-            end
-            if ctx:menu_item(enabled and "Bypass" or "Enable") then
-                fx:set_enabled(not enabled)
-            end
-            ctx:separator()
-            if ctx:menu_item("Rename...") then
-                if opts.on_rename then
-                    opts.on_rename(fx)
-                else
-                    -- Fallback: use SideFX state system directly
-                    local state_module = require('lib.core.state')
-                    local sidefx_state = state_module.state
-                    sidefx_state.renaming_fx = guid
-                    sidefx_state.rename_text = name
-                end
-            end
-            ctx:separator()
-            if ctx:menu_item("Delete") then
-                if opts.on_delete then
-                    opts.on_delete(fx)
-                else
-                    fx:delete()
-                end
-            end
-            ctx:end_popup()
-        end
-
-        ctx:pop_id()  -- End device_area scope
 
         end)  -- end with_table (panel_outer)
     end)
@@ -631,6 +596,9 @@ local function draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, 
         if draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, name, device_id, drag_guid, enabled, opts, colors, panel_collapsed) then
             interacted = true
         end
+
+        -- Right-click context menu on device panel (called after all content drawn)
+        draw_context_menu(ctx, fx, guid, name, enabled, opts)
 
         ctx:end_child()  -- end panel
     end
