@@ -236,7 +236,7 @@ end
 -- @param has_payload boolean Whether there's a drag payload
 -- @param add_chain_to_rack function (rack, plugin) -> nil
 -- @param add_nested_rack_to_rack function (rack) -> nil
-local function draw_rack_drop_zone(ctx, rack, has_payload, add_chain_to_rack, add_nested_rack_to_rack)
+local function draw_rack_drop_zone(ctx, rack, has_payload, state, add_chain_to_rack, add_nested_rack_to_rack, move_chain_between_racks)
     ctx:spacing()
     local drop_h = 40
     if has_payload then
@@ -246,19 +246,42 @@ local function draw_rack_drop_zone(ctx, rack, has_payload, add_chain_to_rack, ad
         ctx:push_style_color(imgui.Col.Button(), 0x33333344)
         ctx:push_style_color(imgui.Col.ButtonHovered(), 0x44444466)
     end
-    ctx:button("+ Drop plugin or rack##rack_drop", -1, drop_h)
+    ctx:button("+ Drop plugin, rack, or chain##rack_drop", -1, drop_h)
     ctx:pop_style_color(2)
 
     if ctx:begin_drag_drop_target() then
+        -- Accept plugin drops
         local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
         if accepted and plugin_name then
             local plugin = { full_name = plugin_name, name = plugin_name }
             add_chain_to_rack(rack, plugin)
         end
+
+        -- Accept rack drops
         local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
         if rack_accepted then
             add_nested_rack_to_rack(rack)
         end
+
+        -- Accept chain drops (cross-rack move)
+        local chain_accepted, dragged_guid = ctx:accept_drag_drop_payload("CHAIN_REORDER")
+        if chain_accepted and dragged_guid then
+            reaper.ShowConsoleMsg("[drop_zone] Chain drop accepted. Dragged GUID: " .. dragged_guid .. "\n")
+            local dragged_chain = state.track:find_fx_by_guid(dragged_guid)
+            if dragged_chain then
+                local source_rack = dragged_chain:get_parent_container()
+                if source_rack and source_rack:get_guid() ~= rack:get_guid() then
+                    -- Different rack: move to end of target rack
+                    reaper.ShowConsoleMsg("[drop_zone] Moving chain to end of target rack\n")
+                    if move_chain_between_racks then
+                        move_chain_between_racks(source_rack, rack, dragged_guid, nil)
+                    end
+                else
+                    reaper.ShowConsoleMsg("[drop_zone] Same rack or no parent - ignoring\n")
+                end
+            end
+        end
+
         ctx:end_drag_drop_target()
     end
 end
@@ -434,7 +457,8 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
             -- Drop zone for creating new chains or nested racks
             local has_plugin = ctx:get_drag_drop_payload("PLUGIN_ADD")
             local has_rack = ctx:get_drag_drop_payload("RACK_ADD")
-            draw_rack_drop_zone(ctx, rack, has_plugin or has_rack, add_chain_to_rack, add_nested_rack_to_rack)
+            local has_chain = ctx:get_drag_drop_payload("CHAIN_REORDER")
+            draw_rack_drop_zone(ctx, rack, has_plugin or has_rack or has_chain, state, add_chain_to_rack, add_nested_rack_to_rack, move_chain_between_racks)
         end
 
         ctx:end_child()
