@@ -167,9 +167,10 @@ end
 -- @param refresh_fx_list function () -> nil
 -- @param add_device_to_chain function (chain, plugin) -> nil
 -- @param reorder_chain_in_rack function (rack, from_idx, to_idx) -> nil
+-- @param move_chain_between_racks function (source_rack, target_rack, chain_guid, target_chain_guid) -> nil
 -- @param add_chain_to_rack function (rack, plugin) -> nil
 -- @param add_nested_rack_to_rack function (rack) -> nil
-local function draw_chains_table(ctx, chains, rack, mixer, is_nested, state, get_fx_display_name, state_module, refresh_fx_list, add_device_to_chain, reorder_chain_in_rack, add_chain_to_rack, add_nested_rack_to_rack)
+local function draw_chains_table(ctx, chains, rack, mixer, is_nested, state, get_fx_display_name, state_module, refresh_fx_list, add_device_to_chain, reorder_chain_in_rack, move_chain_between_racks, add_chain_to_rack, add_nested_rack_to_rack)
     if not rack_ui then
         local ok, mod = pcall(require, 'lib.ui.rack_ui')
         if ok then rack_ui = mod end
@@ -428,7 +429,7 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
             ctx:pop_style_color()
 
             -- Draw chains table or empty state
-            draw_chains_table(ctx, chains, rack, mixer, is_nested, state, get_fx_display_name, state_module, refresh_fx_list, add_device_to_chain, reorder_chain_in_rack, add_chain_to_rack, add_nested_rack_to_rack)
+            draw_chains_table(ctx, chains, rack, mixer, is_nested, state, get_fx_display_name, state_module, refresh_fx_list, add_device_to_chain, reorder_chain_in_rack, move_chain_between_racks, add_chain_to_rack, add_nested_rack_to_rack)
 
             -- Drop zone for creating new chains or nested racks
             local has_plugin = ctx:get_drag_drop_payload("PLUGIN_ADD")
