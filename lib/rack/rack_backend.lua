@@ -33,7 +33,7 @@ function M.add_rack_to_track(position)
     local rack = rack_module.add_rack_to_track(position)
     if rack then
         -- Use expanded_racks for top-level racks (consistent with nested racks)
-        local state = state_module.get_state()
+        local state = state_module.state
         state.expanded_racks[rack:get_guid()] = true
         refresh_fx_list()
     end
@@ -55,7 +55,7 @@ function M.add_chain_to_rack(rack, plugin)
         -- Get chain GUID (stable identifier)
         local chain_guid = chain:get_guid()
         if chain_guid then
-            local state = state_module.get_state()
+            local state = state_module.state
             -- Force the chain to be expanded/selected so user can see it
             if rack_guid then
                 -- Ensure rack is expanded (works for both top-level and nested)
@@ -84,7 +84,7 @@ function M.add_nested_rack_to_rack(parent_rack)
         -- Get nested rack GUID (stable identifier)
         local nested_rack_guid = nested_rack:get_guid()
         if nested_rack_guid then
-            local state = state_module.get_state()
+            local state = state_module.state
             -- Find the chain that contains this nested rack
             local chain_container = nested_rack:get_parent_container()
             local chain_guid = chain_container and chain_container:get_guid()
@@ -131,7 +131,7 @@ function M.add_device_to_chain(chain, plugin)
 
     local device = rack_module.add_device_to_chain(chain, plugin)
     if device then
-        local state = state_module.get_state()
+        local state = state_module.state
         -- Force the chain to be expanded/selected so user can see the device that was just added
         if rack_guid then
             -- Ensure rack is expanded (works for both top-level and nested)
