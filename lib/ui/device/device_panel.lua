@@ -597,9 +597,6 @@ local function draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, 
             interacted = true
         end
 
-        -- Right-click context menu on device panel (called after all content drawn)
-        draw_context_menu(ctx, fx, guid, name, enabled, opts)
-
         ctx:end_child()  -- end panel
     end
 

@@ -218,6 +218,37 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         ctx:end_table()
     end
 
+    -- Right-click context menu on device header
+    if ctx:begin_popup_context_item("device_menu_" .. guid) then
+        if ctx:menu_item("Open FX Window") then
+            fx:show(3)
+        end
+        if ctx:menu_item(enabled and "Bypass" or "Enable") then
+            fx:set_enabled(not enabled)
+        end
+        ctx:separator()
+        if ctx:menu_item("Rename...") then
+            if opts.on_rename then
+                opts.on_rename(fx)
+            else
+                -- Fallback: use SideFX state system directly
+                local state_module = require('lib.core.state')
+                local sidefx_state = state_module.state
+                sidefx_state.renaming_fx = guid
+                sidefx_state.rename_text = name
+            end
+        end
+        ctx:separator()
+        if ctx:menu_item("Delete") then
+            if opts.on_delete then
+                opts.on_delete(fx)
+            else
+                fx:delete()
+            end
+        end
+        ctx:end_popup()
+    end
+
     return interacted
 end
 
