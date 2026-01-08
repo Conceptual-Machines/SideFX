@@ -29,15 +29,17 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         end
     end
 
-    -- Check for delta (fx parameter)
+    -- Check for delta (container parameter)
     local has_delta = false
     local delta_val, delta_idx
-    local ok_delta
-    ok_delta, delta_idx = pcall(function() return fx:get_param_from_ident(":delta") end)
-    if ok_delta and delta_idx and delta_idx >= 0 then
-        local ok_dv
-        ok_dv, delta_val = pcall(function() return fx:get_param_normalized(delta_idx) end)
-        has_delta = ok_dv and delta_val
+    if container then
+        local ok_delta
+        ok_delta, delta_idx = pcall(function() return container:get_param_from_ident(":delta") end)
+        if ok_delta and delta_idx and delta_idx >= 0 then
+            local ok_dv
+            ok_dv, delta_val = pcall(function() return container:get_param_normalized(delta_idx) end)
+            has_delta = ok_dv and delta_val
+        end
     end
 
     -- Calculate number of columns: drag | name | path | mix | delta | ui
@@ -184,7 +186,7 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
                 ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x666666FF)
             end
             if ctx:button((delta_on and "∆" or "—") .. "##delta_" .. state_guid, 28, 20) then
-                pcall(function() fx:set_param_normalized(delta_idx, delta_on and 0 or 1) end)
+                pcall(function() container:set_param_normalized(delta_idx, delta_on and 0 or 1) end)
                 interacted = true
             end
             ctx:pop_style_color(3)
@@ -210,7 +212,7 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
 end
 
 --- Draw device control buttons (right side of header) - ON, Delete, and Device collapse
-function M.draw_device_buttons(ctx, fx, state_guid, enabled, is_device_collapsed, device_collapsed, opts, colors)
+function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_device_collapsed, device_collapsed, opts, colors)
     local r = reaper
     local drawing = require('lib.ui.common.drawing')
     local imgui = require('imgui')
@@ -227,7 +229,7 @@ function M.draw_device_buttons(ctx, fx, state_guid, enabled, is_device_collapsed
         -- Column: ON/OFF toggle
         ctx:table_set_column_index(0)
         if drawing.draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, 24, 20, colors.bypass_on, colors.bypass_off) then
-            fx:set_enabled(not enabled)
+            container:set_enabled(not enabled)
             interacted = true
         end
         if r.ImGui_IsItemHovered(ctx.ctx) then

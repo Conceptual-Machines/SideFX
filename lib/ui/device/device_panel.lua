@@ -320,7 +320,7 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         -- Header Column 3: Control buttons (only when expanded)
         if not is_device_collapsed then
             r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
-            if header.draw_device_buttons(ctx, fx, state_guid, enabled, is_device_collapsed, device_collapsed, opts, colors) then
+            if header.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_device_collapsed, device_collapsed, opts, colors) then
                 interacted = true
             end
         end
@@ -621,7 +621,8 @@ function M.draw(ctx, fx, opts)
     -- Extract FX display info
     local name, device_id = extract_fx_display_info(fx, container)
 
-    local ok3, enabled = pcall(function() return fx:get_enabled() end)
+    -- Get enabled state from container
+    local ok3, enabled = pcall(function() return container:get_enabled() end)
     if not ok3 then enabled = false end
 
     -- Build list of visible params (exclude sidebar controls: wet, delta, bypass)

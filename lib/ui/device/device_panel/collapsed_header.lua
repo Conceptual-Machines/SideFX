@@ -28,7 +28,7 @@ function M.draw(ctx, fx, container, state_guid, enabled, device_collapsed, opts,
     -- === ROW 1: ON | × | ▼ ===
     -- ON/OFF toggle
     if drawing.draw_on_off_circle(ctx, "##on_off_collapsed_" .. state_guid, enabled, 24, 20, colors.bypass_on, colors.bypass_off) then
-        fx:set_enabled(not enabled)
+        container:set_enabled(not enabled)
         interacted = true
     end
     if r.ImGui_IsItemHovered(ctx.ctx) then
@@ -91,15 +91,17 @@ function M.draw(ctx, fx, container, state_guid, enabled, device_collapsed, opts,
         end
     end
 
-    -- Check for delta (fx parameter)
+    -- Check for delta (container parameter)
     local has_delta = false
     local delta_val, delta_idx
-    local ok_delta
-    ok_delta, delta_idx = pcall(function() return fx:get_param_from_ident(":delta") end)
-    if ok_delta and delta_idx and delta_idx >= 0 then
-        local ok_dv
-        ok_dv, delta_val = pcall(function() return fx:get_param_normalized(delta_idx) end)
-        has_delta = ok_dv and delta_val
+    if container then
+        local ok_delta
+        ok_delta, delta_idx = pcall(function() return container:get_param_from_ident(":delta") end)
+        if ok_delta and delta_idx and delta_idx >= 0 then
+            local ok_dv
+            ok_dv, delta_val = pcall(function() return container:get_param_normalized(delta_idx) end)
+            has_delta = ok_dv and delta_val
+        end
     end
 
     -- Delta button (if present)
@@ -116,7 +118,7 @@ function M.draw(ctx, fx, container, state_guid, enabled, device_collapsed, opts,
             ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x666666FF)
         end
         if ctx:button((delta_on and "∆" or "—") .. "##delta_collapsed_" .. state_guid, 20, 20) then
-            pcall(function() fx:set_param_normalized(delta_idx, delta_on and 0 or 1) end)
+            pcall(function() container:set_param_normalized(delta_idx, delta_on and 0 or 1) end)
             interacted = true
         end
         ctx:pop_style_color(3)
