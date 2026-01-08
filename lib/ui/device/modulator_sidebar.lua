@@ -48,6 +48,8 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
     state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
     state.expanded_mod_slot = state.expanded_mod_slot or {}
 
+    state.cached_preset_names = state.cached_preset_names or {}
+
     local is_mod_sidebar_collapsed = state.mod_sidebar_collapsed[state_guid] or false
 
     if is_mod_sidebar_collapsed then
@@ -198,7 +200,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             end
                         end
 
-                        -- Column 2: Preset dropdown
+                        -- Column 2: Preset dropdown (cached, read-only)
                         ctx:table_set_column_index(1)
 
                         -- Get current preset info from JSFX
@@ -208,27 +210,40 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         )
 
                         if num_presets and num_presets > 0 then
-                            -- Get current preset name
-                            local current_preset = expanded_modulator:get_preset() or "—"
+                            -- Check if we need to cache preset names for this modulator
+                            local mod_guid = expanded_modulator:get_guid()
+                            if not state.cached_preset_names[mod_guid] then
+                                -- Cache preset names by reading them once
+                                state.cached_preset_names[mod_guid] = {}
+                                local original_idx = preset_idx
+
+                                for i = 0, num_presets - 1 do
+                                    r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
+                                    local name = expanded_modulator:get_preset() or ("Preset " .. (i + 1))
+                                    state.cached_preset_names[mod_guid][i] = name
+                                end
+
+                                -- Restore original preset
+                                if original_idx >= 0 then
+                                    r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, original_idx)
+                                end
+                            end
+
+                            -- Display preset dropdown using cached names
+                            local cached_names = state.cached_preset_names[mod_guid]
+                            local current_preset_name = cached_names[preset_idx] or "—"
 
                             ctx:set_next_item_width(80)
-                            if ctx:begin_combo("##preset_" .. guid, current_preset) then
+                            if ctx:begin_combo("##preset_" .. guid, current_preset_name) then
                                 for i = 0, num_presets - 1 do
-                                    -- Temporarily set preset to get its name
-                                    r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
-                                    local preset_name = expanded_modulator:get_preset() or ("Preset " .. (i + 1))
+                                    local preset_name = cached_names[i] or ("Preset " .. (i + 1))
 
                                     if ctx:selectable(preset_name, i == preset_idx) then
-                                        -- Preset already set by SetPresetByIndex above
+                                        -- User selected a preset - apply it
+                                        r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
                                         interacted = true
                                     end
                                 end
-
-                                -- Restore original preset if user didn't change
-                                if not interacted and preset_idx >= 0 then
-                                    r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, preset_idx)
-                                end
-
                                 ctx:end_combo()
                             end
                             if ctx:is_item_hovered() then
