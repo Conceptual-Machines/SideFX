@@ -112,10 +112,20 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         -- Column 2: Device name (editable)
         ctx:table_set_column_index(1)
         local sidefx_state = require('lib.core.state').state
+
+        -- Check if context menu triggered rename
+        if sidefx_state.renaming_fx == guid and not rename_active[guid] then
+            rename_active[guid] = true
+            rename_buffer[guid] = sidefx_state.rename_text or name
+            sidefx_state.renaming_fx = nil
+            sidefx_state.rename_text = nil
+        end
+
         local is_renaming = rename_active[guid] or false
 
         if is_renaming then
             ctx:set_next_item_width(-1)
+            ctx:set_keyboard_focus_here()
             local changed, text = ctx:input_text("##rename_" .. guid, rename_buffer[guid] or name, imgui.InputTextFlags.EnterReturnsTrue())
             if changed then
                 sidefx_state.display_names[guid] = text
