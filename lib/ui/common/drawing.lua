@@ -17,9 +17,9 @@ function M.draw_ui_icon(ctx, label, width, height, icon_font)
     local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
     local icon = constants.icon_text(emojimgui, constants.Icons.wrench)
 
-    -- Push icon font if available
+    -- Push icon font if available (use 16pt for emoji icons)
     if icon_font then
-        ctx:push_font(icon_font)
+        ctx:push_font(icon_font, 16)
     end
 
     local clicked = ctx:button(icon .. label, width, height)
