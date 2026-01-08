@@ -144,7 +144,7 @@ function M.create_callbacks(opts)
             end
 
             -- Toolbar
-            draw_toolbar(ctx)
+            draw_toolbar(ctx, icon_font_ref)
             ctx:separator()
 
             -- Layout dimensions
@@ -156,7 +156,7 @@ function M.create_callbacks(opts)
             if ctx:begin_child("Browser", browser_w, 0, imgui.ChildFlags.Border()) then
                 ctx:text("Plugins")
                 ctx:separator()
-                draw_plugin_browser(ctx)
+                draw_plugin_browser(ctx, icon_font_ref)
                 ctx:end_child()
             end
             ctx:pop_style_color()

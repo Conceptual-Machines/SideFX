@@ -299,8 +299,8 @@ end
 -- UI: Plugin Browser
 --------------------------------------------------------------------------------
 
-local function draw_plugin_browser(ctx)
-    browser_panel.draw(ctx, state, icon_font, icon_size, add_plugin_to_track, filter_plugins)
+local function draw_plugin_browser(ctx, icon_font_ref)
+    browser_panel.draw(ctx, state, icon_font_ref.value, icon_size, add_plugin_to_track, filter_plugins)
 end
 
 --------------------------------------------------------------------------------
@@ -395,8 +395,8 @@ local is_modulator_fx = fx_utils.is_modulator_fx
 -- UI: Toolbar (v2 - horizontal layout)
 --------------------------------------------------------------------------------
 
-local function draw_toolbar(ctx)
-    toolbar.draw(ctx, state, icon_font, icon_size, get_fx_display_name, {
+local function draw_toolbar(ctx, icon_font_ref)
+    toolbar.draw(ctx, state, icon_font_ref.value, icon_size, get_fx_display_name, {
         on_refresh = refresh_fx_list,
         on_add_rack = add_rack_to_track,
         on_add_fx = function() end,  -- TODO: Implement
