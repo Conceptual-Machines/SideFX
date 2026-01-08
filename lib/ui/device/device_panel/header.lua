@@ -196,7 +196,7 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
                 ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x555555FF)
                 ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x666666FF)
             end
-            if ctx:button((delta_on and "∆" or "—") .. "##delta_" .. state_guid, 28, 20) then
+            if ctx:button((delta_on and "∆" or "—") .. "##delta_" .. state_guid, 24, 20) then
                 pcall(function() container:set_param_normalized(delta_idx, delta_on and 0 or 1) end)
                 interacted = true
             end
