@@ -6,10 +6,10 @@
 
 local r = reaper
 local imgui = require('imgui')
-local widgets = require('lib.ui.widgets')
+local widgets = require('lib.ui.common.widgets')
 local fx_utils = require('lib.fx_utils')
-local modulator_sidebar = require('lib.ui.modulator_sidebar')
-local drawing = require('lib.ui.drawing')
+local modulator_sidebar = require('lib.ui.device.modulator_sidebar')
+local drawing = require('lib.ui.common.drawing')
 local fx_naming = require('lib.fx_naming')
 local param_utils = require('lib.param_utils')
 
@@ -380,14 +380,14 @@ end
 
 --- Draw modulator sidebar column
 local function draw_modulator_column(ctx, fx, container, guid, state_guid, cfg, opts)
-    local modulator_sidebar = require('lib.ui.modulator_sidebar')
+    local modulator_sidebar = require('lib.ui.device.modulator_sidebar')
     return modulator_sidebar.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 end
 
 
 --- Module requires
-local params_column = require('lib.ui.device_panel.params')
-local sidebar_column = require('lib.ui.device_panel.sidebar')
+local params_column = require('lib.ui.device.device_panel.params')
+local sidebar_column = require('lib.ui.device.device_panel.sidebar')
 
 --- Draw chain sidebar column wrapper
 local function draw_sidebar_column(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors)

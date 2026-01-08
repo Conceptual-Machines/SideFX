@@ -288,7 +288,7 @@ end
 function M.draw(ctx, rack, avail_height, is_nested, opts)
     -- Lazy load modules
     if not rack_ui then
-        local ok, mod = pcall(require, 'lib.ui.rack_ui')
+        local ok, mod = pcall(require, 'lib.ui.rack.rack_ui')
         if ok then rack_ui = mod end
     end
     if not rack_module then
@@ -296,7 +296,7 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
         if ok then rack_module = mod end
     end
     if not drawing then
-        local ok, mod = pcall(require, 'lib.drawing')
+        local ok, mod = pcall(require, 'lib.ui.common.drawing')
         if ok then drawing = mod end
     end
 

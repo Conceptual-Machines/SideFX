@@ -421,7 +421,7 @@ function M.draw_chain_row(ctx, chain, index, width, opts)
     ctx:same_line(cfg.chain_label_width)
 
     -- FX buttons
-    local device_panel = require('ui.device_panel')
+    local device_panel = require('lib.ui.device.device_panel')
 
     for i, fx in ipairs(chain.fx_list) do
         if i > 1 then

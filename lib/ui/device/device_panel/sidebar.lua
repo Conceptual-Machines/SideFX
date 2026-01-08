@@ -7,7 +7,7 @@ local M = {}
 --- Draw Mix knob column (centered knob with label and percentage)
 local function draw_mix_column(ctx, container, mix_val, mix_idx)
     local r = reaper
-    local drawing = require('lib.ui.drawing')
+    local drawing = require('lib.ui.common.drawing')
     local interacted = false
 
     -- "Mix" label (centered)
@@ -88,7 +88,7 @@ end
 
 --- Draw Pan slider control
 local function draw_pan_control(ctx, utility, pan_val)
-    local widgets = require('lib.ui.widgets')
+    local widgets = require('lib.ui.common.widgets')
     local interacted = false
 
     pan_val = pan_val or 0.5

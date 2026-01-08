@@ -53,11 +53,11 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
 
     -- Lazy load UI components
     if not device_panel then
-        local ok, mod = pcall(require, 'ui.device_panel')
+        local ok, mod = pcall(require, 'lib.ui.device.device_panel')
         if ok then device_panel = mod end
     end
     if not rack_panel then
-        local ok, mod = pcall(require, 'ui.rack_panel')
+        local ok, mod = pcall(require, 'lib.ui.rack.rack_panel')
         if ok then rack_panel = mod end
     end
 

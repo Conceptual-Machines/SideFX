@@ -224,7 +224,7 @@ function M.draw(ctx, selected_chain, rack_h, opts)
 
     -- Lazy load device_panel
     if not device_panel then
-        local ok, mod = pcall(require, 'ui.device_panel')
+        local ok, mod = pcall(require, 'lib.ui.device.device_panel')
         if ok then device_panel = mod end
     end
 

@@ -7,7 +7,7 @@ local M = {}
 --- Draw a single parameter cell (knob + name)
 local function draw_param_cell(ctx, fx, param_idx)
     local r = reaper
-    local drawing = require('lib.ui.drawing')
+    local drawing = require('lib.ui.common.drawing')
     local imgui = require('imgui')
 
     -- Safely get param info (FX might have been deleted)

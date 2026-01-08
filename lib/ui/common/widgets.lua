@@ -282,5 +282,3 @@ function M.draw_drop_zone(ctx, position, is_empty, avail_height)
 end
 
 return M
-
-

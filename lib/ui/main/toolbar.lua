@@ -82,4 +82,3 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
 end
 
 return M
-

@@ -6,7 +6,7 @@
 
 local imgui = require('imgui')
 local r = reaper
-local rack_ui = require('lib.ui.rack_ui')
+local rack_ui = require('lib.ui.rack.rack_ui')
 
 local M = {}
 

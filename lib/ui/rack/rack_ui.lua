@@ -6,8 +6,8 @@
 
 local imgui = require('imgui')
 local r = reaper
-local widgets = require('lib.ui.widgets')
-local drawing = require('lib.ui.drawing')
+local widgets = require('lib.ui.common.widgets')
+local drawing = require('lib.ui.common.drawing')
 
 local M = {}
 

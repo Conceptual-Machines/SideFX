@@ -132,5 +132,3 @@ function M.move_fx_to_container(guid, target_container_guid, track)
 end
 
 return M
-
-
