@@ -97,6 +97,7 @@ local constants = require('lib.constants')
 
 -- UI modules
 local widgets = require('lib.ui.widgets')
+local drawing = require('lib.ui.drawing')
 local browser_panel = require('lib.ui.browser_panel')
 local fx_menu = require('lib.ui.fx_menu')
 local fx_detail_panel = require('lib.ui.fx_detail_panel')
@@ -821,102 +822,6 @@ local function draw_chain_add_button(ctx, chain_content_h, has_payload, selected
     end
 end
 
---- Draw dB scale marks for fader (vertical)
--- @param ctx ImGui context
--- @param draw_list ImGui draw list
--- @param scale_x number X position of scale
--- @param screen_y number Top Y position
--- @param fader_h number Height of fader
--- @param scale_w number Width of scale
-local function draw_db_scale_marks(ctx, draw_list, scale_x, screen_y, fader_h, scale_w)
-    local db_marks = {12, 6, 0, -6, -12, -18, -24}
-    for _, db in ipairs(db_marks) do
-        local mark_norm = (db + 24) / 36
-        local mark_y = screen_y + fader_h - (fader_h * mark_norm)
-        ctx:draw_list_add_line(draw_list, scale_x + scale_w - 6, mark_y, scale_x + scale_w, mark_y, 0x666666FF, 1)
-        if db == 0 or db == -12 or db == 12 then
-            local label = db == 0 and "0" or tostring(db)
-            ctx:draw_list_add_text(draw_list, scale_x, mark_y - 5, 0x888888FF, label)
-        end
-    end
-end
-
---- Draw fader visualization (background, fill, border, 0dB line)
--- @param ctx ImGui context
--- @param draw_list ImGui draw list
--- @param fader_x number X position
--- @param screen_y number Top Y position
--- @param fader_w number Width
--- @param fader_h number Height
--- @param gain_norm number Normalized gain (0-1)
-local function draw_fader_visualization(ctx, draw_list, fader_x, screen_y, fader_w, fader_h, gain_norm)
-    -- Fader background
-    ctx:draw_list_add_rect_filled(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x1A1A1AFF, 3)
-    -- Fader fill
-    local fill_h = fader_h * gain_norm
-    if fill_h > 2 then
-        local fill_top = screen_y + fader_h - fill_h
-        ctx:draw_list_add_rect_filled(draw_list, fader_x + 2, fill_top, fader_x + fader_w - 2, screen_y + fader_h - 2, 0x5588AACC, 2)
-    end
-    -- Fader border
-    ctx:draw_list_add_rect(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x555555FF, 3)
-    -- 0dB line
-    local zero_db_norm = 24 / 36
-    local zero_y = screen_y + fader_h - (fader_h * zero_db_norm)
-    ctx:draw_list_add_line(draw_list, fader_x, zero_y, fader_x + fader_w, zero_y, 0xFFFFFF44, 1)
-end
-
---- Draw stereo meter visualization (backgrounds and borders)
--- @param ctx ImGui context
--- @param draw_list ImGui draw list
--- @param meter_x number X position
--- @param screen_y number Top Y position
--- @param meter_w number Total width (both channels)
--- @param fader_h number Height
-local function draw_stereo_meters_visualization(ctx, draw_list, meter_x, screen_y, meter_w, fader_h)
-    local meter_l_x = meter_x
-    local meter_r_x = meter_x + meter_w / 2 + 1
-    local half_meter_w = meter_w / 2 - 1
-    -- Meter backgrounds
-    ctx:draw_list_add_rect_filled(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
-    ctx:draw_list_add_rect_filled(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
-    -- Meter borders
-    ctx:draw_list_add_rect(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
-    ctx:draw_list_add_rect(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
-end
-
---- Draw peak meter bars (left and right)
--- @param ctx ImGui context
--- @param draw_list ImGui draw list
--- @param meter_l_x number Left meter X position
--- @param meter_r_x number Right meter X position
--- @param screen_y number Top Y position
--- @param fader_h number Height
--- @param half_meter_w number Width of each meter
--- @param peak_l number Left peak value (0-1)
--- @param peak_r number Right peak value (0-1)
-local function draw_peak_meters(ctx, draw_list, meter_l_x, meter_r_x, screen_y, fader_h, half_meter_w, peak_l, peak_r)
-    local function draw_meter_bar(x, w, peak)
-        if peak > 0 then
-            local peak_db = 20 * math.log(peak, 10)
-            peak_db = math.max(-60, math.min(12, peak_db))
-            local peak_norm = (peak_db + 60) / 72
-            local meter_fill_h = fader_h * peak_norm
-            if meter_fill_h > 1 then
-                local meter_top = screen_y + fader_h - meter_fill_h
-                local meter_color
-                if peak_db > 0 then meter_color = 0xFF4444FF
-                elseif peak_db > -6 then meter_color = 0xFFAA44FF
-                elseif peak_db > -18 then meter_color = 0x44FF44FF
-                else meter_color = 0x44AA44FF end
-                ctx:draw_list_add_rect_filled(draw_list, x, meter_top, x + w, screen_y + fader_h - 1, meter_color, 0)
-            end
-        end
-    end
-    draw_meter_bar(meter_l_x + 1, half_meter_w - 1, peak_l)
-    draw_meter_bar(meter_r_x + 1, half_meter_w - 1, peak_r)
-end
-
 --- Draw collapsed fader control (full vertical fader with meters and scale)
 -- @param ctx ImGui context
 -- @param mixer ReaWrap mixer FX
@@ -949,9 +854,9 @@ local function draw_collapsed_fader_control(ctx, mixer, rack_guid)
     local meter_x = fader_x + fader_w + 2
 
     -- Draw scale, fader, and meters
-    draw_db_scale_marks(ctx, draw_list, scale_x, screen_y, fader_h, scale_w)
-    draw_fader_visualization(ctx, draw_list, fader_x, screen_y, fader_w, fader_h, gain_norm)
-    draw_stereo_meters_visualization(ctx, draw_list, meter_x, screen_y, meter_w, fader_h)
+    drawing.draw_db_scale_marks(ctx, draw_list, scale_x, screen_y, fader_h, scale_w)
+    drawing.draw_fader_visualization(ctx, draw_list, fader_x, screen_y, fader_w, fader_h, gain_norm)
+    drawing.draw_stereo_meters_visualization(ctx, draw_list, meter_x, screen_y, meter_w, fader_h)
 
     -- Draw peak meter bars if track available
     if state.track and state.track.pointer then
@@ -960,7 +865,7 @@ local function draw_collapsed_fader_control(ctx, mixer, rack_guid)
         local half_meter_w = meter_w / 2 - 1
         local meter_l_x = meter_x
         local meter_r_x = meter_x + meter_w / 2 + 1
-        draw_peak_meters(ctx, draw_list, meter_l_x, meter_r_x, screen_y, fader_h, half_meter_w, peak_l, peak_r)
+        drawing.draw_peak_meters(ctx, draw_list, meter_l_x, meter_r_x, screen_y, fader_h, half_meter_w, peak_l, peak_r)
     end
 
     -- Interactive slider
