@@ -88,6 +88,7 @@ local naming = require('lib.naming')
 local fx_utils = require('lib.fx_utils')
 local state_module = require('lib.state')
 local rack_module = require('lib.rack')
+local rack_backend = require('lib.rack_backend')
 local device_module = require('lib.device')
 local container_module = require('lib.container')
 local modulator_module = require('lib.modulator')
@@ -148,6 +149,9 @@ local function refresh_fx_list()
     state_module.on_refresh = renumber_device_chain
     state_module.refresh_fx_list()
 end
+
+-- Initialize rack backend with dependencies
+rack_backend.init(rack_module, state_module, refresh_fx_list)
 
 -- Use fx_utils module for display name
 local get_fx_display_name = fx_utils.get_display_name
@@ -241,131 +245,22 @@ local function add_plugin_by_name(plugin_name, position)
 end
 
 --------------------------------------------------------------------------------
--- R-Container (Rack) Functions (from lib/rack.lua)
+-- R-Container (Rack) Functions (from lib/rack_backend.lua)
 --------------------------------------------------------------------------------
 
--- Use rack module functions
-local get_rack_mixer = fx_utils.get_rack_mixer
+-- Use rack backend functions with state management
+local add_rack_to_track = rack_backend.add_rack_to_track
+local add_chain_to_rack = rack_backend.add_chain_to_rack
+local add_nested_rack_to_rack = rack_backend.add_nested_rack_to_rack
+local add_device_to_chain = rack_backend.add_device_to_chain
+local add_rack_to_chain = rack_backend.add_rack_to_chain
+local reorder_chain_in_rack = rack_backend.reorder_chain_in_rack
+local renumber_chains_in_rack = rack_backend.renumber_chains_in_rack
 
--- Use widgets module for pan slider and fader
+-- Use helper functions from other modules
+local get_rack_mixer = fx_utils.get_rack_mixer
 local draw_pan_slider = widgets.draw_pan_slider
 local draw_fader = widgets.draw_fader
-
--- Rack operations (uses state singleton via rack_module)
-local function add_rack_to_track(position)
-    local rack = rack_module.add_rack_to_track(position)
-    if rack then
-        -- Use expanded_racks for top-level racks (consistent with nested racks)
-        state.expanded_racks[rack:get_guid()] = true
-        refresh_fx_list()
-    end
-    return rack
-end
-
-local function add_chain_to_rack(rack, plugin)
-    -- Get rack info before adding chain (while reference is still valid)
-    local rack_guid = rack:get_guid()
-    local rack_parent = rack:get_parent_container()
-    local is_nested = (rack_parent ~= nil)
-
-    local chain = rack_module.add_chain_to_rack(rack, plugin)
-    if chain then
-        -- Get chain GUID (stable identifier)
-        local chain_guid = chain:get_guid()
-        if chain_guid then
-            -- Force the chain to be expanded/selected so user can see it
-            if rack_guid then
-                -- Ensure rack is expanded (works for both top-level and nested)
-                state.expanded_racks[rack_guid] = true
-                -- Track which chain is selected (works for both top-level and nested)
-                state.expanded_nested_chains[rack_guid] = chain_guid
-            end
-            state_module.save_expansion_state()
-        end
-        refresh_fx_list()
-    end
-    return chain
-end
-
-local function add_nested_rack_to_rack(parent_rack)
-    -- Get parent rack info before adding nested rack
-    local parent_rack_guid = parent_rack:get_guid()
-    local parent_rack_parent = parent_rack:get_parent_container()
-    local is_parent_nested = (parent_rack_parent ~= nil)
-
-    local nested_rack = rack_module.add_nested_rack_to_rack(parent_rack)
-    if nested_rack then
-        -- Get nested rack GUID (stable identifier)
-        local nested_rack_guid = nested_rack:get_guid()
-        if nested_rack_guid then
-            -- Find the chain that contains this nested rack
-            local chain_container = nested_rack:get_parent_container()
-            local chain_guid = chain_container and chain_container:get_guid()
-
-            -- Force the nested rack to be expanded so user can see it
-            state.expanded_racks[nested_rack_guid] = true
-
-            -- Also select the chain that contains the nested rack
-            if chain_guid then
-                if parent_rack_guid then
-                    -- Ensure parent rack is expanded (works for both top-level and nested)
-                    state.expanded_racks[parent_rack_guid] = true
-                    -- Track which chain is selected (works for both top-level and nested)
-                    state.expanded_nested_chains[parent_rack_guid] = chain_guid
-                end
-            end
-            state_module.save_expansion_state()
-        end
-        refresh_fx_list()
-    end
-    return nested_rack
-end
-
-local function add_device_to_chain(chain, plugin)
-    -- Get chain GUID before adding device (GUIDs are stable)
-    local chain_guid = chain:get_guid()
-    if not chain_guid then
-        return nil
-    end
-
-    -- Determine expansion state BEFORE adding device (while chain reference is still valid)
-    local parent_rack = chain:get_parent_container()
-    local is_nested = false
-    local rack_guid = nil
-    if parent_rack then
-        rack_guid = parent_rack:get_guid()
-        local rack_parent = parent_rack:get_parent_container()
-        is_nested = (rack_parent ~= nil)
-    end
-
-    local device = rack_module.add_device_to_chain(chain, plugin)
-    if device then
-        -- Force the chain to be expanded/selected so user can see the device that was just added
-        if rack_guid then
-            -- Ensure rack is expanded (works for both top-level and nested)
-            state.expanded_racks[rack_guid] = true
-            -- Track which chain is selected (works for both top-level and nested)
-            state.expanded_nested_chains[rack_guid] = chain_guid
-        end
-        state_module.save_expansion_state()
-        refresh_fx_list()
-    end
-    return device
-end
-
-local function add_rack_to_chain(chain)
-    local rack = rack_module.add_rack_to_chain(chain)
-    if rack then refresh_fx_list() end
-    return rack
-end
-
-local function reorder_chain_in_rack(rack, chain_guid, target_chain_guid)
-    local result = rack_module.reorder_chain_in_rack(rack, chain_guid, target_chain_guid)
-    if result then refresh_fx_list() end
-    return result
-end
-
-local renumber_chains_in_rack = rack_module.renumber_chains_in_rack
 
 --------------------------------------------------------------------------------
 -- Container Operations
