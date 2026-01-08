@@ -368,6 +368,7 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
                 rack:delete()
                 refresh_fx_list()
             end,
+            on_drop = opts.on_drop,  -- Pass through on_drop for rack swapping
         })
 
         -- Get mixer for controls

@@ -436,7 +436,8 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
 end
 
 -- Draw the rack panel (main rack UI without chain column)
-local function draw_rack_panel(ctx, rack, avail_height, is_nested)
+local function draw_rack_panel(ctx, rack, avail_height, is_nested, callbacks)
+    callbacks = callbacks or {}
     return rack_panel_main.draw(ctx, rack, avail_height, is_nested, {
         state = state,
             icon_font = icon_font,
@@ -451,6 +452,7 @@ local function draw_rack_panel(ctx, rack, avail_height, is_nested)
         add_chain_to_rack = add_chain_to_rack,
         add_nested_rack_to_rack = add_nested_rack_to_rack,
         drawing = drawing,
+        on_drop = callbacks.on_drop,  -- Pass through on_drop callback for rack swapping
     })
 end
 

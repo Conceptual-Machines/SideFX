@@ -175,7 +175,21 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
 
         if item.is_rack then
             -- Draw rack with chain column
-            chain_item.draw_rack_item(ctx, fx, avail_height)
+            chain_item.draw_rack_item(ctx, fx, avail_height, {
+                on_drop = function(dragged_guid, target_guid)
+                    -- Handle FX/container reordering (works for both devices and racks)
+                    local dragged = state.track:find_fx_by_guid(dragged_guid)
+                    local target = state.track:find_fx_by_guid(target_guid)
+                    if dragged and target then
+                        r.TrackFX_CopyToTrack(
+                            state.track.pointer, dragged.pointer,
+                            state.track.pointer, target.pointer,
+                            true  -- move
+                        )
+                        refresh_fx_list()
+                    end
+                end,
+            })
         elseif is_container then
             -- Draw unknown container
             chain_item.draw_container_item(ctx, fx)

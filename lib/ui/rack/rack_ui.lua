@@ -385,6 +385,44 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
 
         ctx:end_table()
     end
+
+    -- Make entire header draggable for rack reordering
+    if ctx:begin_drag_drop_source() then
+        local rack_guid = rack:get_guid()
+        ctx:set_drag_drop_payload("FX_GUID", rack_guid)
+        ctx:text("Moving: " .. rack_name)
+        ctx:end_drag_drop_source()
+    end
+
+    -- Add hover tooltip
+    if ctx:is_item_hovered() then
+        ctx:set_tooltip("Drag to reorder rack")
+    end
+
+    -- Accept drops from other racks or devices for swapping
+    if ctx:begin_drag_drop_target() then
+        local accepted, dragged_guid = ctx:accept_drag_drop_payload("FX_GUID")
+        local rack_guid = rack:get_guid()
+
+        if accepted and dragged_guid and dragged_guid ~= rack_guid then
+            if callbacks.on_drop then
+                callbacks.on_drop(dragged_guid, rack_guid)
+            end
+        end
+
+        -- Preserve existing drop behavior for plugins and nested racks
+        local plugin_accepted = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+        if plugin_accepted and callbacks.on_add_to_rack then
+            callbacks.on_add_to_rack(plugin_accepted)
+        end
+
+        local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+        if rack_accepted and callbacks.on_add_nested_rack then
+            callbacks.on_add_nested_rack()
+        end
+
+        ctx:end_drag_drop_target()
+    end
 end
 
 --------------------------------------------------------------------------------

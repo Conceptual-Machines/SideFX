@@ -131,9 +131,9 @@ end
 -- @param ctx ImGui context
 -- @param fx ReaWrap rack FX
 -- @param avail_height number Available height
-function M.draw_rack_item(ctx, fx, avail_height)
+function M.draw_rack_item(ctx, fx, avail_height, callbacks)
     -- Draw rack using helper function (top-level rack, explicitly not nested)
-    local rack_data = draw_rack_panel(ctx, fx, avail_height, false)
+    local rack_data = draw_rack_panel(ctx, fx, avail_height, false, callbacks)
 
     -- Draw selected chain column if expanded
     local rack_guid = fx:get_guid()
