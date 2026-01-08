@@ -398,12 +398,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     ctx:separator()
                     ctx:spacing()
 
-                    -- Parameter Links section
-                    ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
-                    ctx:text("PARAMETER LINKS")
-                    ctx:pop_style_color()
-                    ctx:spacing()
-
+                    -- Parameter Links section (no label, tooltip on controls)
                     -- Find existing links for this modulator on the parent device
                     local existing_links = {}
 
@@ -437,7 +432,8 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                     if ok_pname and param_name then
                                         table.insert(existing_links, {
                                             param_idx = param_idx,
-                                            param_name = param_name
+                                            param_name = param_name,
+                                            scale = link_info.scale or 1.0
                                         })
                                     end
                                 end
@@ -445,42 +441,16 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         end
                     end
 
-                    -- Show existing links
-                    if #existing_links > 0 then
-                        ctx:push_style_color(imgui.Col.Text(), 0x88FF88FF)
-                        ctx:text(string.format("Active Links: %d", #existing_links))
-                        ctx:pop_style_color()
-                        ctx:spacing()
-
-                        for i, link in ipairs(existing_links) do
-                            ctx:text("• " .. link.param_name)
-                            ctx:same_line()
-                            if ctx:button("X##remove_link_" .. i .. "_" .. guid, 20, 0) then
-                                -- Remove this link using ReaWrap's high-level API
-                                if fx:remove_param_link(link.param_idx) then
-                                    interacted = true
-                                end
-                            end
-                            if ctx:is_item_hovered() then
-                                ctx:set_tooltip("Remove link")
-                            end
-                        end
-
-                        ctx:spacing()
-                        ctx:separator()
-                        ctx:spacing()
-                    end
-
                     -- Modulator can only modulate its parent device (fx parameter)
                     -- No device selector needed - use the device that owns this container
                     local target_device = fx  -- The device being displayed
 
-                    -- Parameter selector for parent device
+                    -- Parameter selector dropdown at TOP
                     if target_device then
                         local ok_params, param_count = pcall(function() return target_device:get_num_params() end)
 
                         if ok_params and param_count and param_count > 0 then
-                            local current_param_name = "Select Parameter..."
+                            local current_param_name = "Link Parameter..."
                             ctx:set_next_item_width(control_width)
                             if ctx:begin_combo("##link_param_" .. guid, current_param_name) then
                                 for param_idx = 0, param_count - 1 do
@@ -511,11 +481,54 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                 end
                                 ctx:end_combo()
                             end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Link modulator to parameter")
+                            end
                         end
                     else
                         ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
                         ctx:text("No target device")
                         ctx:pop_style_color()
+                    end
+
+                    ctx:spacing()
+
+                    -- Show existing links with individual amount sliders
+                    if #existing_links > 0 then
+                        for i, link in ipairs(existing_links) do
+                            -- Parameter name
+                            ctx:text("• " .. link.param_name)
+
+                            -- Amount slider (narrower, on same line)
+                            ctx:same_line()
+                            local amount_width = 80
+                            ctx:set_next_item_width(amount_width)
+                            local amount_pct = link.scale * 100
+                            local changed, new_amount_pct = ctx:slider_double("##amount_" .. link.param_idx .. "_" .. guid, amount_pct, -200, 200, "%.0f%%")
+                            if changed then
+                                -- Update the scale using set_named_config_param
+                                local plink_prefix = string.format("param.%d.plink.", link.param_idx)
+                                local new_scale = new_amount_pct / 100
+                                if fx:set_named_config_param(plink_prefix .. "scale", tostring(new_scale)) then
+                                    interacted = true
+                                end
+                            end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Modulation amount")
+                            end
+
+                            -- Remove button
+                            ctx:same_line()
+                            if ctx:button("X##remove_link_" .. i .. "_" .. guid, 20, 0) then
+                                -- Remove this link using ReaWrap's high-level API
+                                if fx:remove_param_link(link.param_idx) then
+                                    interacted = true
+                                end
+                            end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Remove link")
+                            end
+                        end
                     end
                 end
             end
