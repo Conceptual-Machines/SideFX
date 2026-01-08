@@ -420,9 +420,8 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
             ctx:same_line()
             ctx:push_style_color(imgui.Col.Button(), 0x446688FF)
             if ctx:small_button("+ Chain") then
-                local chain = rack_module.add_empty_chain_to_rack(rack)
-                if chain then
-                    refresh_fx_list()
+                if add_chain_to_rack then
+                    add_chain_to_rack(rack)
                 end
             end
             ctx:pop_style_color()
