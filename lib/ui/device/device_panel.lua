@@ -277,7 +277,6 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
     local num_cols = is_device_collapsed and 2 or 3
 
     -- Use pcall to ensure ID stack cleanup even on errors
-    ctx:push_id("device_area_" .. guid)
     local ok_render, render_err = pcall(function()
         ctx:with_table("panel_outer_" .. guid, num_cols, r.ImGui_TableFlags_BordersInnerV(), function()
             -- Column 1: Modulators (left) - fixed width
@@ -309,6 +308,8 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
 
         -- Header Column 2: Device name/path/mix/delta/ui when expanded, buttons when collapsed
         r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+        -- Push ID scope to limit context menu to device columns only (not modulators)
+        ctx:push_id("device_area_" .. guid)
         if not is_device_collapsed then
             -- Expanded: show full device header
             if header.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag_guid, enabled, opts, colors, state_guid) then
@@ -362,19 +363,7 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
             end
         end
 
-        end)  -- end with_table (panel_outer)
-    end)
-    ctx:pop_id()  -- Always called, even on error
-
-    if not ok_render then
-        r.ShowConsoleMsg("Error rendering device panel: " .. tostring(render_err) .. "\n")
-    end
-
-    -- Right-click context menu (called after pcall and ID scope cleanup)
-    -- Note: This must be called outside the ID scope since draw_context_menu
-    -- is defined later in the file and not available in the pcall closure
-    if ok_render then
-        ctx:push_id("device_area_" .. guid)
+        -- Inline context menu (must be inside device ID scope, after device content rendered)
         if ctx:begin_popup_context_item("device_menu_" .. guid) then
             if ctx:menu_item("Open FX Window") then
                 fx:show(3)
@@ -404,7 +393,14 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
             end
             ctx:end_popup()
         end
-        ctx:pop_id()
+
+        ctx:pop_id()  -- End device_area scope
+
+        end)  -- end with_table (panel_outer)
+    end)
+
+    if not ok_render then
+        r.ShowConsoleMsg("Error rendering device panel: " .. tostring(render_err) .. "\n")
     end
 
     return interacted
