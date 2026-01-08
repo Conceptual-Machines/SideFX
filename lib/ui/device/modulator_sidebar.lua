@@ -51,14 +51,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
     local is_mod_sidebar_collapsed = state.mod_sidebar_collapsed[state_guid] or false
 
     if is_mod_sidebar_collapsed then
-        -- Collapsed: show minimal expand button
-        if ctx:button("▶##expand_mod_" .. guid, 20, 30) then
-            state.mod_sidebar_collapsed[state_guid] = false
-            interacted = true
-        end
-        if ctx:is_item_hovered() then
-            ctx:set_tooltip("Expand Modulators")
-        end
+        -- Collapsed: button is now in header, show nothing here
     else
         -- Expanded: show grid (header now handled by parent device_panel)
 
