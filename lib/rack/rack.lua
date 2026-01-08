@@ -6,9 +6,9 @@
 
 local r = reaper
 
-local naming = require('lib.naming')
-local fx_utils = require('lib.fx_utils')
-local state_module = require('lib.state')
+local naming = require('lib.utils.naming')
+local fx_utils = require('lib.fx.fx_utils')
+local state_module = require('lib.core.state')
 
 local M = {}
 

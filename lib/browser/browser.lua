@@ -6,7 +6,7 @@
 
 local Plugins = require('plugins')
 local helpers = require('helpers')
-local state_mod = require('lib.state')
+local state_mod = require('lib.core.state')
 
 local M = {}
 
@@ -63,4 +63,3 @@ function M.filter_plugins()
 end
 
 return M
-

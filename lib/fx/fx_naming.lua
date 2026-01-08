@@ -38,7 +38,7 @@ function M.get_display_name(fx)
     -- Check for custom display name first (SideFX-only renaming)
     local ok_guid, guid = pcall(function() return fx:get_guid() end)
     if ok_guid and guid then
-        local state_module = require('lib.state')
+        local state_module = require('lib.core.state')
         local state = state_module.state
         if state.display_names[guid] then
             return state.display_names[guid]

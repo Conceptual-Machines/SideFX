@@ -5,7 +5,7 @@
 -- @license MIT
 
 local r = reaper
-local state_mod = require('lib.state')
+local state_mod = require('lib.core.state')
 
 local M = {}
 
@@ -32,9 +32,9 @@ function M.save_chain(preset_name)
     local state = state_mod.state
     if not state.track or not preset_name or preset_name == "" then return false end
     if not presets_folder then return false end
-    
+
     M.ensure_folder()
-    
+
     -- Use REAPER's native FX chain preset system
     local path = presets_folder .. "chains/" .. preset_name .. ".RfxChain"
     r.TrackFX_SavePresetBank(state.track.pointer, path)
@@ -48,7 +48,7 @@ function M.load_chain(preset_name)
     local state = state_mod.state
     if not state.track or not preset_name then return false end
     if not presets_folder then return false end
-    
+
     local path = presets_folder .. "chains/" .. preset_name .. ".RfxChain"
     r.Undo_BeginBlock()
     -- Clear existing FX using ReaWrap
@@ -70,4 +70,3 @@ function M.get_folder()
 end
 
 return M
-

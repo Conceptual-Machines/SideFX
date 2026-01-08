@@ -6,7 +6,7 @@
 
 local imgui = require('imgui')
 local r = reaper
-local fx_utils = require('lib.fx_utils')
+local fx_utils = require('lib.fx.fx_utils')
 
 local M = {}
 

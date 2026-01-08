@@ -6,8 +6,8 @@
 
 local r = reaper
 
-local state_module = require('lib.state')
-local fx_utils = require('lib.fx_utils')
+local state_module = require('lib.core.state')
+local fx_utils = require('lib.fx.fx_utils')
 
 local M = {}
 
@@ -316,8 +316,8 @@ function M.add_modulator_to_device(device_container, modulator_type, track)
     if not track or not device_container then return nil end
     if not device_container:is_container() then return nil end
 
-    local naming = require('lib.naming')
-    local fx_utils = require('lib.fx_utils')
+    local naming = require('lib.utils.naming')
+    local fx_utils = require('lib.fx.fx_utils')
 
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
@@ -397,7 +397,7 @@ function M.add_modulator_to_device(device_container, modulator_type, track)
 
         -- Initialize default parameter values
         -- Set LFO Mode to Loop (0) by default
-        local PARAM = require('lib.modulator_constants')
+        local PARAM = require('lib.modulator.modulator_constants')
         moved_modulator:set_param(PARAM.PARAM_LFO_MODE, 0)
     end
 

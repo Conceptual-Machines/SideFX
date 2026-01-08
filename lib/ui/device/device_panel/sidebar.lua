@@ -114,7 +114,7 @@ end
 local function draw_gain_fader_control(ctx, utility, gain_val)
     local r = reaper
     local imgui = require('imgui')
-    local state_module = require('lib.state')
+    local state_module = require('lib.core.state')
     local interacted = false
 
     gain_val = gain_val or 0.5

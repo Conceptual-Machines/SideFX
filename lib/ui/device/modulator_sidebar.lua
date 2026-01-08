@@ -5,10 +5,10 @@ local M = {}
 
 local r = reaper
 local imgui = require('imgui')
-local state_module = require('lib.state')
-local PARAM = require('lib.modulator_constants')
+local state_module = require('lib.core.state')
+local PARAM = require('lib.modulator.modulator_constants')
 local drawing = require('lib.ui.common.drawing')
-local modulator_module = require('lib.modulator')
+local modulator_module = require('lib.modulator.modulator')
 
 -- Modulator types
 local MODULATOR_TYPES = {

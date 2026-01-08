@@ -316,8 +316,8 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
         return -- Rack has been deleted
     end
 
-    local fx_utils = require('lib.fx_utils')
-    local state_module = require('lib.state')
+    local fx_utils = require('lib.fx.fx_utils')
+    local state_module = require('lib.core.state')
 
 
     local rack_name = fx_utils.get_rack_display_name(rack)
@@ -413,7 +413,7 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
     is_nested_rack = (is_nested_rack == true)
     local ok_name, chain_raw_name = pcall(function() return chain:get_name() end)
     -- Use chain label name (just the name, no [R1_C1] in the row)
-    local fx_utils = require('lib.fx_utils')
+    local fx_utils = require('lib.fx.fx_utils')
     local chain_name = ok_name and fx_utils.get_chain_label_name(chain) or "Unknown"
     local ok_en, chain_enabled = pcall(function() return chain:get_enabled() end)
     chain_enabled = ok_en and chain_enabled or false
@@ -443,7 +443,7 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
     local is_renaming_chain = (state.renaming_fx == chain_guid)
     local chain_btn_id = "chain_btn_" .. chain_guid
 
-    local state_module = require('lib.state')
+    local state_module = require('lib.core.state')
 
     if is_renaming_chain then
         draw_chain_rename_input(ctx, chain_guid, state, state_module)

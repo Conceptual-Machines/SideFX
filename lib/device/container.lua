@@ -13,7 +13,7 @@ local M = {}
 local _state_module = nil
 local function get_state()
     if not _state_module then
-        _state_module = require('lib.state')
+        _state_module = require('lib.core.state')
     end
     return _state_module.state
 end
@@ -83,7 +83,7 @@ function M.dissolve_container(container)
 
     -- Re-lookup container (pointer may have changed after moves)
     container = state.track:find_fx_by_guid(container_guid)
-    
+
     -- Delete the now-empty container
     if container then
         container:delete()

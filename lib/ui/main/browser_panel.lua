@@ -6,7 +6,7 @@
 
 local imgui = require('imgui')
 local helpers = require('helpers')
-local constants = require('lib.constants')
+local constants = require('lib.core.constants')
 
 local M = {}
 

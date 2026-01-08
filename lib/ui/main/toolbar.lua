@@ -5,7 +5,7 @@
 -- @license MIT
 
 local imgui = require('imgui')
-local constants = require('lib.constants')
+local constants = require('lib.core.constants')
 
 local M = {}
 

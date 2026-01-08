@@ -37,5 +37,3 @@ function M.icon_text(emojimgui, icon_id)
 end
 
 return M
-
-

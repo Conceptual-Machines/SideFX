@@ -7,11 +7,11 @@
 local r = reaper
 local imgui = require('imgui')
 local widgets = require('lib.ui.common.widgets')
-local fx_utils = require('lib.fx_utils')
+local fx_utils = require('lib.fx.fx_utils')
 local modulator_sidebar = require('lib.ui.device.modulator_sidebar')
 local drawing = require('lib.ui.common.drawing')
-local fx_naming = require('lib.fx_naming')
-local param_utils = require('lib.param_utils')
+local fx_naming = require('lib.fx.fx_naming')
+local param_utils = require('lib.utils.param_utils')
 
 local M = {}
 
@@ -206,7 +206,7 @@ local function draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_g
             -- Device name (editable)
             ctx:table_set_column_index(1)
 
-            local sidefx_state = require('lib.state').state
+            local sidefx_state = require('lib.core.state').state
             local is_renaming = rename_active[guid] or false
 
             if is_renaming then
@@ -217,7 +217,7 @@ local function draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_g
                 if changed then
                     -- Save new display name
                     sidefx_state.display_names[guid] = text
-                    local state_module = require('lib.state')
+                    local state_module = require('lib.core.state')
                     state_module.save_display_names()
                     rename_active[guid] = nil
                     rename_buffer[guid] = ""
@@ -519,7 +519,7 @@ end
 -- @param container ReaWrap container FX object (optional)
 -- @return string name, string device_id
 local function extract_fx_display_info(fx, container)
-    local fx_utils = require('lib.fx_utils')
+    local fx_utils = require('lib.fx.fx_utils')
     local name = "Unknown"
     local device_id = nil
 
@@ -543,7 +543,7 @@ end
 -- @param cfg table Configuration table
 -- @return boolean is_collapsed, number width
 local function setup_modulator_sidebar_state(state_guid, cfg)
-    local state_module = require('lib.state')
+    local state_module = require('lib.core.state')
     local state = state_module.state
 
     -- Initialize modulator sidebar state tables if needed
@@ -601,7 +601,7 @@ local function draw_context_menu(ctx, fx, guid, name, enabled, opts)
             else
                 -- Fallback: use SideFX state system directly
                 -- Use FX GUID for renaming since we display the FX name
-                local state_module = require('lib.state')
+                local state_module = require('lib.core.state')
                 local sidefx_state = state_module.state
                 sidefx_state.renaming_fx = guid  -- Use FX GUID
                 sidefx_state.rename_text = name
