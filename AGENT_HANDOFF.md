@@ -7,7 +7,7 @@ This session focused on debugging and fixing a critical parameter modulation bug
 ## What Was Accomplished
 
 ### 1. UI Improvements (Completed ✅)
-- **File**: `lib/ui/modulator_panel.lua`
+- **File**: `lib/ui/device/modulator_panel.lua`
 - Added window/screen icon to modulator panel (matching device panel styling)
 - Changed X button background to dark red (`0x663333FF`) to match device panel
 - Replaced text "UI" button with icon button
@@ -109,18 +109,18 @@ The plan file at `~/.claude/plans/precious-booping-bonbon.md` outlines a phased 
 ## Important Files
 
 ### Core Files Modified
-1. **lib/modulator.lua** - Modulator operations, parameter linking (CRITICAL FIX HERE)
-2. **lib/ui/modulator_panel.lua** - Modulator UI rendering (UI improvements)
+1. **lib/modulator/modulator.lua** - Modulator operations, parameter linking (CRITICAL FIX HERE)
+2. **lib/ui/device/modulator_panel.lua** - Modulator UI rendering (device-specific modulators, UI improvements)
 3. **debug_check_plinks.lua** - New diagnostic script
 
 ### Files to Modify Next (For Phase 1)
 1. **jsfx/SideFX_Modulator.jsfx** - Add "-" prefix to hide controlled parameters
-2. **lib/ui/modulator_panel.lua** - Add parameter controls (Rate, Phase, Depth, Trigger, LFO mode)
-3. **lib/state.lua** - Add UI state fields (`modulator_expanded`, `modulator_advanced`)
+2. **lib/ui/device/modulator_panel.lua** - Add parameter controls (Rate, Phase, Depth, Trigger, LFO mode)
+3. **lib/core/state.lua** - Add UI state fields (`modulator_expanded`, `modulator_advanced`)
 
 ### Reference Files
-- **lib/ui/device_panel.lua** - Pattern reference for control rendering
-- **lib/fx_utils.lua** - FX type detection utilities
+- **lib/ui/device/device_panel.lua** - Pattern reference for control rendering
+- **lib/fx/fx_utils.lua** - FX type detection utilities
 - **/Users/Luca_Romagnoli/Code/personal/ReaScript/ReaWrap/** - OOP wrapper over REAPER API
 
 ## Key Learnings
@@ -167,7 +167,7 @@ Before continuing with Phase 1 parameter controls, verify:
 
 **Recommended Approach**:
 1. Start with JSFX changes (hide parameters with "-" prefix)
-2. Add parameter mapping constants to modulator_panel.lua
+2. Add parameter mapping constants to lib/ui/device/modulator_panel.lua
 3. Implement Rate controls first (Free/Sync toggle + conditional slider/dropdown)
 4. Add Phase and Depth sliders
 5. Add Trigger and LFO mode controls

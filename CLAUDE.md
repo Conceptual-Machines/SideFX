@@ -89,12 +89,12 @@ SideFX uses REAPER's Container FX with naming conventions to create nested struc
 - `naming.lua`: Generate consistent container names (D{n}, R{n}, C{n} patterns)
 
 **UI Rendering** (`lib/ui/`):
-- `rack_ui.lua`: Main UI orchestration, horizontal scrolling device chain
-- `device_panel.lua`: Collapsible device panels with inline parameter controls
-- `modulator_panel.lua`: Modulator UI with link management
-- `browser_panel.lua`: Plugin search/filter browser
-- `toolbar.lua`: Top action bar (add device, add modulator, create rack)
-- `widgets.lua`: Reusable UI components
+- `rack/rack_ui.lua`: Main UI orchestration, horizontal scrolling device chain
+- `device/device_panel.lua`: Collapsible device panels with inline parameter controls
+- `device/modulator_panel.lua`: Modulator UI with link management (per-device modulators)
+- `main/browser_panel.lua`: Plugin search/filter browser
+- `main/toolbar.lua`: Top action bar (add device, add modulator, create rack)
+- `common/widgets.lua`: Reusable UI components
 
 **JSFX Plugins** (`jsfx/`):
 - `SideFX_Mixer.jsfx`: 16-chain mixer for rack parallel routing
@@ -146,14 +146,14 @@ fx:is_container()                   -- Check if FX is a container
 ## Important Files Reference
 
 **When modifying parameter controls:**
-- `lib/ui/device_panel.lua` - Pattern reference for control rendering (sliders, toggles, dropdowns)
-- `lib/ui/modulator_panel.lua` - Modulator parameter controls
+- `lib/ui/device/device_panel.lua` - Pattern reference for control rendering (sliders, toggles, dropdowns)
+- `lib/ui/device/modulator_panel.lua` - Modulator parameter controls (device-specific modulators)
 - JSFX files in `jsfx/` - Add "-" prefix to hide parameters from JSFX UI
 
 **When modifying container/FX operations:**
-- `lib/modulator.lua` - Parameter link creation (lines 140-200 especially)
-- `lib/rack.lua` - Rack creation logic
-- `lib/device.lua` - Device container wrapping
+- `lib/modulator/modulator.lua` - Parameter link creation (lines 140-200 especially)
+- `lib/rack/rack.lua` - Rack creation logic
+- `lib/device/device.lua` - Device container wrapping
 
 **When debugging:**
 - `debug_check_plinks.lua` - Inspect actual parameter link values in REAPER

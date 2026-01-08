@@ -16,26 +16,44 @@
   + Release workflow runs automatically on merge to main
 ]]></changelog>
         <source main="main">SideFX.lua</source>
-        <source file="lib/browser.lua">lib/browser.lua</source>
-        <source file="lib/constants.lua">lib/constants.lua</source>
-        <source file="lib/container.lua">lib/container.lua</source>
-        <source file="lib/device.lua">lib/device.lua</source>
-        <source file="lib/fx_utils.lua">lib/fx_utils.lua</source>
-        <source file="lib/modulator.lua">lib/modulator.lua</source>
-        <source file="lib/naming.lua">lib/naming.lua</source>
-        <source file="lib/presets.lua">lib/presets.lua</source>
-        <source file="lib/rack.lua">lib/rack.lua</source>
-        <source file="lib/state.lua">lib/state.lua</source>
-        <source file="lib/ui/browser_panel.lua">lib/ui/browser_panel.lua</source>
-        <source file="lib/ui/device_panel.lua">lib/ui/device_panel.lua</source>
-        <source file="lib/ui/drag_drop.lua">lib/ui/drag_drop.lua</source>
-        <source file="lib/ui/fx_detail_panel.lua">lib/ui/fx_detail_panel.lua</source>
-        <source file="lib/ui/fx_menu.lua">lib/ui/fx_menu.lua</source>
-        <source file="lib/ui/modulator_panel.lua">lib/ui/modulator_panel.lua</source>
-        <source file="lib/ui/rack_panel.lua">lib/ui/rack_panel.lua</source>
-        <source file="lib/ui/rack_ui.lua">lib/ui/rack_ui.lua</source>
-        <source file="lib/ui/toolbar.lua">lib/ui/toolbar.lua</source>
-        <source file="lib/ui/widgets.lua">lib/ui/widgets.lua</source>
+        <source file="lib/browser/browser.lua">lib/browser/browser.lua</source>
+        <source file="lib/core/constants.lua">lib/core/constants.lua</source>
+        <source file="lib/core/state.lua">lib/core/state.lua</source>
+        <source file="lib/device/container.lua">lib/device/container.lua</source>
+        <source file="lib/device/device.lua">lib/device/device.lua</source>
+        <source file="lib/fx/fx_naming.lua">lib/fx/fx_naming.lua</source>
+        <source file="lib/fx/fx_utils.lua">lib/fx/fx_utils.lua</source>
+        <source file="lib/modulator/modulator_constants.lua">lib/modulator/modulator_constants.lua</source>
+        <source file="lib/modulator/modulator.lua">lib/modulator/modulator.lua</source>
+        <source file="lib/rack/rack_backend.lua">lib/rack/rack_backend.lua</source>
+        <source file="lib/rack/rack.lua">lib/rack/rack.lua</source>
+        <source file="lib/ui/chain/chain_column.lua">lib/ui/chain/chain_column.lua</source>
+        <source file="lib/ui/chain/chain_item.lua">lib/ui/chain/chain_item.lua</source>
+        <source file="lib/ui/chain/device_chain.lua">lib/ui/chain/device_chain.lua</source>
+        <source file="lib/ui/common/drag_drop.lua">lib/ui/common/drag_drop.lua</source>
+        <source file="lib/ui/common/drawing.lua">lib/ui/common/drawing.lua</source>
+        <source file="lib/ui/common/widgets.lua">lib/ui/common/widgets.lua</source>
+        <source file="lib/ui/device/device_panel.lua">lib/ui/device/device_panel.lua</source>
+        <source file="lib/ui/device/device_panel/collapsed_header.lua">lib/ui/device/device_panel/collapsed_header.lua</source>
+        <source file="lib/ui/device/device_panel/device_column.lua">lib/ui/device/device_panel/device_column.lua</source>
+        <source file="lib/ui/device/device_panel/header.lua">lib/ui/device/device_panel/header.lua</source>
+        <source file="lib/ui/device/device_panel/modulator_header.lua">lib/ui/device/device_panel/modulator_header.lua</source>
+        <source file="lib/ui/device/device_panel/params.lua">lib/ui/device/device_panel/params.lua</source>
+        <source file="lib/ui/device/device_panel/sidebar.lua">lib/ui/device/device_panel/sidebar.lua</source>
+        <source file="lib/ui/device/modulator_panel.lua">lib/ui/device/modulator_panel.lua</source>
+        <source file="lib/ui/device/modulator_sidebar.lua">lib/ui/device/modulator_sidebar.lua</source>
+        <source file="lib/ui/fx/fx_detail_panel.lua">lib/ui/fx/fx_detail_panel.lua</source>
+        <source file="lib/ui/fx/fx_list_column.lua">lib/ui/fx/fx_list_column.lua</source>
+        <source file="lib/ui/fx/fx_menu.lua">lib/ui/fx/fx_menu.lua</source>
+        <source file="lib/ui/main/browser_panel.lua">lib/ui/main/browser_panel.lua</source>
+        <source file="lib/ui/main/main_window.lua">lib/ui/main/main_window.lua</source>
+        <source file="lib/ui/main/toolbar.lua">lib/ui/main/toolbar.lua</source>
+        <source file="lib/ui/rack/rack_panel_main.lua">lib/ui/rack/rack_panel_main.lua</source>
+        <source file="lib/ui/rack/rack_panel.lua">lib/ui/rack/rack_panel.lua</source>
+        <source file="lib/ui/rack/rack_ui.lua">lib/ui/rack/rack_ui.lua</source>
+        <source file="lib/utils/naming.lua">lib/utils/naming.lua</source>
+        <source file="lib/utils/param_utils.lua">lib/utils/param_utils.lua</source>
+        <source file="lib/utils/presets.lua">lib/utils/presets.lua</source>
       </version>
       <version name="0.1.0" author="Nomad Monad" time="2026-01-01T00:00:00Z">
         <changelog><![CDATA[v0.1.0 (2026-01-01)
@@ -46,28 +64,45 @@
   + Modulator routing
   + Plugin browser with search]]></changelog>
         <source main="main">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/SideFX.lua</source>
-        <source file="lib/browser.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/browser.lua</source>
-        <source file="lib/constants.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/constants.lua</source>
-        <source file="lib/container.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/container.lua</source>
-        <source file="lib/device.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/device.lua</source>
-        <source file="lib/fx_utils.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/fx_utils.lua</source>
-        <source file="lib/modulator.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/modulator.lua</source>
-        <source file="lib/naming.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/naming.lua</source>
-        <source file="lib/presets.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/presets.lua</source>
-        <source file="lib/rack.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/rack.lua</source>
-        <source file="lib/state.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/state.lua</source>
-        <source file="lib/ui/browser_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/browser_panel.lua</source>
-        <source file="lib/ui/device_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/device_panel.lua</source>
-        <source file="lib/ui/drag_drop.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/drag_drop.lua</source>
-        <source file="lib/ui/fx_detail_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/fx_detail_panel.lua</source>
-        <source file="lib/ui/fx_menu.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/fx_menu.lua</source>
-        <source file="lib/ui/modulator_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/modulator_panel.lua</source>
-        <source file="lib/ui/rack_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/rack_panel.lua</source>
-        <source file="lib/ui/rack_ui.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/rack_ui.lua</source>
-        <source file="lib/ui/toolbar.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/toolbar.lua</source>
-        <source file="lib/ui/widgets.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/widgets.lua</source>
+        <source file="lib/browser/browser.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/browser/browser.lua</source>
+        <source file="lib/core/constants.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/core/constants.lua</source>
+        <source file="lib/core/state.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/core/state.lua</source>
+        <source file="lib/device/container.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/device/container.lua</source>
+        <source file="lib/device/device.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/device/device.lua</source>
+        <source file="lib/fx/fx_naming.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/fx/fx_naming.lua</source>
+        <source file="lib/fx/fx_utils.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/fx/fx_utils.lua</source>
+        <source file="lib/modulator/modulator_constants.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/modulator/modulator_constants.lua</source>
+        <source file="lib/modulator/modulator.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/modulator/modulator.lua</source>
+        <source file="lib/rack/rack_backend.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/rack/rack_backend.lua</source>
+        <source file="lib/rack/rack.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/rack/rack.lua</source>
+        <source file="lib/ui/chain/chain_column.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/chain/chain_column.lua</source>
+        <source file="lib/ui/chain/chain_item.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/chain/chain_item.lua</source>
+        <source file="lib/ui/chain/device_chain.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/chain/device_chain.lua</source>
+        <source file="lib/ui/common/drag_drop.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/common/drag_drop.lua</source>
+        <source file="lib/ui/common/drawing.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/common/drawing.lua</source>
+        <source file="lib/ui/common/widgets.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/common/widgets.lua</source>
+        <source file="lib/ui/device/device_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/device/device_panel.lua</source>
+        <source file="lib/ui/device/device_panel/collapsed_header.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/device/device_panel/collapsed_header.lua</source>
+        <source file="lib/ui/device/device_panel/device_column.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/device/device_panel/device_column.lua</source>
+        <source file="lib/ui/device/device_panel/header.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/device/device_panel/header.lua</source>
+        <source file="lib/ui/device/device_panel/modulator_header.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/device/device_panel/modulator_header.lua</source>
+        <source file="lib/ui/device/device_panel/params.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/device/device_panel/params.lua</source>
+        <source file="lib/ui/device/device_panel/sidebar.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/device/device_panel/sidebar.lua</source>
+        <source file="lib/ui/device/modulator_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/device/modulator_panel.lua</source>
+        <source file="lib/ui/device/modulator_sidebar.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/device/modulator_sidebar.lua</source>
+        <source file="lib/ui/fx/fx_detail_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/fx/fx_detail_panel.lua</source>
+        <source file="lib/ui/fx/fx_list_column.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/fx/fx_list_column.lua</source>
+        <source file="lib/ui/fx/fx_menu.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/fx/fx_menu.lua</source>
+        <source file="lib/ui/main/browser_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/main/browser_panel.lua</source>
+        <source file="lib/ui/main/main_window.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/main/main_window.lua</source>
+        <source file="lib/ui/main/toolbar.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/main/toolbar.lua</source>
+        <source file="lib/ui/rack/rack_panel_main.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/rack/rack_panel_main.lua</source>
+        <source file="lib/ui/rack/rack_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/rack/rack_panel.lua</source>
+        <source file="lib/ui/rack/rack_ui.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/ui/rack/rack_ui.lua</source>
+        <source file="lib/utils/naming.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/utils/naming.lua</source>
+        <source file="lib/utils/param_utils.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/utils/param_utils.lua</source>
+        <source file="lib/utils/presets.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/lib/utils/presets.lua</source>
       </version>
     </reapack>
   </category>
 </index>
-
