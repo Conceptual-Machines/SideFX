@@ -276,12 +276,12 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
     -- When collapsed: 2 columns (modulators | device content)
     local num_cols = is_device_collapsed and 2 or 3
 
-    -- Push ID scope for device area (to restrict context menu)
+    -- Use pcall to ensure ID stack cleanup even on errors
     ctx:push_id("device_area_" .. guid)
-
-    ctx:with_table("panel_outer_" .. guid, num_cols, r.ImGui_TableFlags_BordersInnerV(), function()
-        -- Column 1: Modulators (left) - fixed width
-        r.ImGui_TableSetupColumn(ctx.ctx, "modulators", r.ImGui_TableColumnFlags_WidthFixed(), mod_sidebar_w)
+    local ok_render, render_err = pcall(function()
+        ctx:with_table("panel_outer_" .. guid, num_cols, r.ImGui_TableFlags_BordersInnerV(), function()
+            -- Column 1: Modulators (left) - fixed width
+            r.ImGui_TableSetupColumn(ctx.ctx, "modulators", r.ImGui_TableColumnFlags_WidthFixed(), mod_sidebar_w)
 
         -- Column 2: Device Content (center) - stretches when expanded, fixed narrow when collapsed
         if is_device_collapsed then
@@ -362,13 +362,16 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
             end
         end
 
-    end)  -- end with_table (panel_outer)
+        end)  -- end with_table (panel_outer)
 
-    -- Right-click context menu (outside table, but inside device ID scope)
-    draw_context_menu(ctx, fx, guid, name, enabled, opts)
+        -- Right-click context menu (outside table, but inside device ID scope)
+        draw_context_menu(ctx, fx, guid, name, enabled, opts)
+    end)
+    ctx:pop_id()  -- Always called, even on error
 
-    -- Pop ID scope after table is fully closed
-    ctx:pop_id()  -- End device_area scope
+    if not ok_render then
+        r.ShowConsoleMsg("Error rendering device panel: " .. tostring(render_err) .. "\n")
+    end
 
     return interacted
 end
