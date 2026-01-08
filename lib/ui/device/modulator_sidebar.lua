@@ -483,11 +483,6 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         ctx:spacing()
                     end
 
-                    -- Link selection state (parameter only - device is implicit)
-                    local link_state_key = "mod_link_" .. guid .. "_" .. expanded_slot_idx
-                    state.mod_selected_target[link_state_key] = state.mod_selected_target[link_state_key] or {}
-                    local link_state = state.mod_selected_target[link_state_key]
-
                     -- Modulator can only modulate its parent device (fx parameter)
                     -- No device selector needed - use the device that owns this container
                     local target_device = fx  -- The device being displayed
@@ -497,43 +492,36 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         local ok_params, param_count = pcall(function() return target_device:get_num_params() end)
 
                         if ok_params and param_count and param_count > 0 then
-                            local current_param_name = link_state.param_name or "Select Parameter..."
+                            local current_param_name = "Select Parameter..."
                             ctx:set_next_item_width(control_width)
                             if ctx:begin_combo("##link_param_" .. guid, current_param_name) then
                                 for param_idx = 0, param_count - 1 do
                                     local ok_pname, param_name = pcall(function() return target_device:get_param_name(param_idx) end)
                                     if ok_pname and param_name then
-                                        if ctx:selectable(param_name, link_state.param_idx == param_idx) then
-                                            link_state.param_idx = param_idx
-                                            link_state.param_name = param_name
-                                            interacted = true
+                                        -- Check if already linked
+                                        local is_linked = false
+                                        for _, link in ipairs(existing_links) do
+                                            if link.param_idx == param_idx then
+                                                is_linked = true
+                                                break
+                                            end
+                                        end
+
+                                        if ctx:selectable(param_name .. (is_linked and " ✓" or ""), false) then
+                                            -- Auto-create link immediately when parameter is selected
+                                            local success = target_device:create_param_link(
+                                                expanded_modulator,
+                                                PARAM.PARAM_OUTPUT,  -- Modulator output parameter
+                                                param_idx,
+                                                1.0  -- 100% modulation scale
+                                            )
+                                            if success then
+                                                interacted = true
+                                            end
                                         end
                                     end
                                 end
                                 ctx:end_combo()
-                            end
-
-                            -- Add Link button
-                            if link_state.param_idx ~= nil then
-                                if ctx:button("Add Link##" .. guid, control_width, 0) then
-                                    -- Create modulation link using ReaWrap's high-level API
-                                    local target_param = link_state.param_idx
-
-                                    -- Use ReaWrap's create_param_link - it handles all the complexity
-                                    local success = target_device:create_param_link(
-                                        expanded_modulator,
-                                        PARAM.PARAM_OUTPUT,  -- Modulator output parameter
-                                        target_param,
-                                        1.0  -- 100% modulation scale
-                                    )
-
-                                    if success then
-                                        -- Clear selection after adding link
-                                        link_state.param_idx = nil
-                                        link_state.param_name = nil
-                                        interacted = true
-                                    end
-                                end
                             end
                         end
                     else
