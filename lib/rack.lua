@@ -1078,6 +1078,33 @@ local function rename_devices_in_chain(chain, new_prefix)
     end
 end
 
+--- Renumber all chains in a rack and their contents
+-- @param rack ReaWrap rack container FX object
+-- @param rack_idx number Rack index for naming
+local function renumber_all_chains_in_rack(rack, rack_idx)
+    local chain_idx = 0
+    for child in rack:iter_container_children() do
+        local ok, name = pcall(function() return child:get_name() end)
+        if ok and name then
+            -- Skip system containers (prefixed with _ or Mixer)
+            if not name:match("^_") and not name:find("Mixer") then
+                chain_idx = chain_idx + 1
+                local old_prefix = name:match("^(R%d+_C%d+)")
+                if old_prefix then
+                    local new_prefix = naming.build_chain_name(rack_idx, chain_idx)
+                    if old_prefix ~= new_prefix then
+                        local new_name = name:gsub("^R%d+_C%d+", new_prefix)
+                        child:set_named_config_param("renamed_name", new_name)
+
+                        -- Rename devices and nested FX in chain
+                        rename_devices_in_chain(child, new_prefix)
+                    end
+                end
+            end
+        end
+    end
+end
+
 --- Renumber chains within a rack after reordering.
 -- @param rack TrackFX Rack container
 function M.renumber_chains_in_rack(rack)
@@ -1100,26 +1127,8 @@ function M.renumber_chains_in_rack(rack)
     rack_name = rack:get_name()
     rack_idx = naming.parse_rack_index(rack_name) or 1
 
-    local chain_idx = 0
-    for child in rack:iter_container_children() do
-        local ok, name = pcall(function() return child:get_name() end)
-        if ok and name then
-            if not name:match("^_") and not name:find("Mixer") then
-                chain_idx = chain_idx + 1
-                local old_prefix = name:match("^(R%d+_C%d+)")
-                if old_prefix then
-                    local new_prefix = naming.build_chain_name(rack_idx, chain_idx)
-                    if old_prefix ~= new_prefix then
-                        local new_name = name:gsub("^R%d+_C%d+", new_prefix)
-                        child:set_named_config_param("renamed_name", new_name)
-
-                        -- Rename devices and nested FX in chain
-                        rename_devices_in_chain(child, new_prefix)
-                    end
-                end
-            end
-        end
-    end
+    -- Renumber all chains in rack
+    renumber_all_chains_in_rack(rack, rack_idx)
 end
 
 return M
