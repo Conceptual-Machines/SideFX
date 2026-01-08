@@ -98,6 +98,7 @@ local constants = require('lib.constants')
 -- UI modules
 local widgets = require('lib.ui.widgets')
 local drawing = require('lib.ui.drawing')
+local chain_item = require('lib.ui.chain_item')
 local browser_panel = require('lib.ui.browser_panel')
 local fx_menu = require('lib.ui.fx_menu')
 local fx_detail_panel = require('lib.ui.fx_detail_panel')
@@ -1321,6 +1322,20 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
         if ok then rack_panel = mod end
     end
 
+    -- Initialize chain_item with dependencies
+    chain_item.init({
+        get_fx_display_name = get_fx_display_name,
+        device_panel = device_panel,
+        state = state,
+        icon_font = icon_font,
+        refresh_fx_list = refresh_fx_list,
+        add_plugin_by_name = add_plugin_by_name,
+        add_rack_to_track = add_rack_to_track,
+        get_device_utility = get_device_utility,
+        draw_selected_chain_column_if_expanded = draw_selected_chain_column_if_expanded,
+        draw_rack_panel = draw_rack_panel,
+    })
+
     -- Build display list - handles D-containers and legacy FX
     local display_fx = {}
     for i, fx in ipairs(fx_list) do
@@ -1410,12 +1425,9 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
     local display_idx = 0
     for _, item in ipairs(display_fx) do
         local fx = item.fx
-        local utility = item.utility
-        local original_idx = item.original_idx
         display_idx = display_idx + 1
         ctx:push_id("device_" .. display_idx)
 
-        local guid = fx:get_guid()
         local is_container = fx:is_container()
 
         if display_idx > 1 then
@@ -1423,160 +1435,34 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
         end
 
         if item.is_rack then
-            -- Draw rack using helper function (top-level rack, explicitly not nested)
-            local rack_data = draw_rack_panel(ctx, fx, avail_height, false)
-
-            -- Draw selected chain column if expanded
-            local rack_guid = fx:get_guid()
-            draw_selected_chain_column_if_expanded(ctx, rack_data, rack_guid)
+            -- Draw rack with chain column
+            chain_item.draw_rack_item(ctx, fx, avail_height)
         elseif is_container then
-            -- Unknown container type - show basic view
-            ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
-            if ctx:begin_child("container_" .. guid, 180, 100, imgui.ChildFlags.Border()) then
-                ctx:text(get_fx_display_name(fx):sub(1, 15))
-                if ctx:small_button("Open") then
-                    fx:show(3)
-                end
-                ctx:end_child()
-            end
-            ctx:pop_style_color()
+            -- Draw unknown container
+            chain_item.draw_container_item(ctx, fx)
         else
-            -- Regular FX - draw as device panel
-            if device_panel then
-                -- Determine what to use for drag/delete operations
-                local container = item.container  -- D-container if exists
-                local drag_target = container or fx
-
-                device_panel.draw(ctx, fx, {
-                    avail_height = avail_height - 10,
-                    utility = utility,  -- Paired SideFX_Utility for gain/pan
-                    container = container,  -- Pass container reference
-                    container_name = container and container:get_name() or nil,
-                    icon_font = icon_font,
-                    track = state.track,
-                    refresh_fx_list = refresh_fx_list,
-                    on_delete = function(fx_to_delete)
-                        if container then
-                            -- Delete the whole D-container
-                            container:delete()
-                        else
-                            -- Legacy: delete FX and paired utility
-                            if utility then
-                                utility:delete()
-                            end
-                            fx_to_delete:delete()
-                        end
+            -- Draw device (full UI or fallback)
+            chain_item.draw_device_item(ctx, fx, item, avail_height, {
+                on_drop = function(dragged_guid, target_guid)
+                    -- Handle FX/container reordering
+                    local dragged = state.track:find_fx_by_guid(dragged_guid)
+                    local target = state.track:find_fx_by_guid(target_guid)
+                    if dragged and target then
+                        r.TrackFX_CopyToTrack(
+                            state.track.pointer, dragged.pointer,
+                            state.track.pointer, target.pointer,
+                            true  -- move
+                        )
                         refresh_fx_list()
-                    end,
-                    on_drop = function(dragged_guid, target_guid)
-                        -- Handle FX/container reordering
-                        local dragged = state.track:find_fx_by_guid(dragged_guid)
-                        local target = state.track:find_fx_by_guid(target_guid)
-                        if dragged and target then
-                            r.TrackFX_CopyToTrack(
-                                state.track.pointer, dragged.pointer,
-                                state.track.pointer, target.pointer,
-                                true  -- move
-                            )
-                            refresh_fx_list()
-                        end
-                    end,
-                    on_plugin_drop = function(plugin_name, insert_before_idx)
-                        -- Add plugin before this FX/container
-                        local insert_pos = container and container.pointer or insert_before_idx
-                        add_plugin_by_name(plugin_name, insert_pos)
-                    end,
-                    on_rack_drop = function(insert_before_idx)
-                        -- Add rack before this FX/container
-                        local insert_pos = container and container.pointer or insert_before_idx
-                        add_rack_to_track(insert_pos)
-                    end,
-                })
-            else
-                -- Fallback if device_panel not loaded
-                local name = get_fx_display_name(fx)
-                local enabled = fx:get_enabled()
-                local total_params = fx:get_num_params()
-                local panel_h = avail_height - 10
-                local param_row_h = 38
-                local sidebar_w = 36
-                local col_w = 180
-                local params_per_col = math.floor((panel_h - 40) / param_row_h)
-                params_per_col = math.max(1, params_per_col)
-                local num_cols = math.ceil(total_params / params_per_col)
-                num_cols = math.max(1, num_cols)
-                local panel_w = col_w * num_cols + sidebar_w + 16
-
-                ctx:push_style_color(imgui.Col.ChildBg(), enabled and 0x2A2A2AFF or 0x1A1A1AFF)
-                if ctx:begin_child("fx_" .. guid, panel_w, panel_h, imgui.ChildFlags.Border()) then
-                    ctx:text(name:sub(1, 35))
-                    ctx:separator()
-
-                    -- Params area (left)
-                    local params_w = col_w * num_cols
-                    if ctx:begin_child("params_" .. guid, params_w, panel_h - 40, 0) then
-                        if total_params > 0 and ctx:begin_table("params_fb_" .. guid, num_cols, imgui.TableFlags.SizingStretchSame()) then
-                            for row = 0, params_per_col - 1 do
-                                ctx:table_next_row()
-                                for col = 0, num_cols - 1 do
-                                    local p = col * params_per_col + row
-                                    ctx:table_set_column_index(col)
-                                    if p < total_params then
-                                        local pname = fx:get_param_name(p)
-                                        local pval = fx:get_param_normalized(p) or 0
-                                        ctx:push_id(p)
-                                        ctx:text((pname or "P" .. p):sub(1, 14))
-                                        ctx:set_next_item_width(-8)
-                                        local changed, new_val = ctx:slider_double("##p", pval, 0, 1, "%.2f")
-                                        if changed then
-                                            fx:set_param_normalized(p, new_val)
-                                        end
-                                        ctx:pop_id()
-                                    end
-                                end
-                            end
-                            ctx:end_table()
-                        end
-                        ctx:end_child()
                     end
-
-                    -- Sidebar (right)
-                    ctx:same_line()
-                    local sb_w = 60
-                    if ctx:begin_child("sidebar_" .. guid, sb_w, panel_h - 40, 0) then
-                        if ctx:button("UI", sb_w - 4, 24) then fx:show(3) end
-                        ctx:push_style_color(imgui.Col.Button(), enabled and 0x44AA44FF or 0xAA4444FF)
-                        if ctx:button(enabled and "ON" or "OFF", sb_w - 4, 24) then
-                            fx:set_enabled(not enabled)
-                        end
-                        ctx:pop_style_color()
-
-                        -- Wet/Dry
-                        local wet_idx = fx:get_param_from_ident(":wet")
-                        if wet_idx >= 0 then
-                            ctx:text("Wet")
-                            local wet_val = fx:get_param(wet_idx)
-                            ctx:set_next_item_width(sb_w - 4)
-                            local wet_changed, new_wet = ctx:v_slider_double("##wet", sb_w - 4, 60, wet_val, 0, 1, "")
-                            if wet_changed then fx:set_param(wet_idx, new_wet) end
-                        end
-
-                        -- Utility controls
-                        if utility then
-                            ctx:text("Gain")
-                            local gain_val = utility:get_param_normalized(0) or 0.5
-                            ctx:set_next_item_width(sb_w - 4)
-                            local gain_changed, new_gain = ctx:v_slider_double("##gain", sb_w - 4, 60, gain_val, 0, 1, "")
-                            if gain_changed then utility:set_param_normalized(0, new_gain) end
-                        end
-
-                        ctx:end_child()
-                    end
-
-                    ctx:end_child()
-                end
-                ctx:pop_style_color()
-            end
+                end,
+                on_plugin_drop = function(plugin_name, insert_pos)
+                    add_plugin_by_name(plugin_name, insert_pos)
+                end,
+                on_rack_drop = function(insert_pos)
+                    add_rack_to_track(insert_pos)
+                end,
+            })
         end
 
         ctx:pop_id()
