@@ -848,18 +848,28 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
     -- Check if device controls are collapsed
     local is_device_collapsed = device_collapsed[state_guid] or false
 
-    -- Outer table: 2 rows × 3 columns (modulators | device content | gain/pan)
-    -- Row 1: Header row (aligned across all columns)
-    -- Row 2: Content row (aligned across all columns)
-    ctx:with_table("panel_outer_" .. guid, 3, r.ImGui_TableFlags_BordersInnerV(), function()
+    -- Outer table: dynamically 2 or 3 columns based on collapse state
+    -- When expanded: 3 columns (modulators | device content | gain/pan)
+    -- When collapsed: 2 columns (modulators | device content)
+    local num_cols = is_device_collapsed and 2 or 3
+    ctx:with_table("panel_outer_" .. guid, num_cols, r.ImGui_TableFlags_BordersInnerV(), function()
         -- Column 1: Modulators (left) - fixed width
         r.ImGui_TableSetupColumn(ctx.ctx, "modulators", r.ImGui_TableColumnFlags_WidthFixed(), mod_sidebar_w)
 
-        -- Column 2: Device Content (center) - stretches
-        r.ImGui_TableSetupColumn(ctx.ctx, "device_content", r.ImGui_TableColumnFlags_WidthStretch())
+        -- Column 2: Device Content (center) - stretches when expanded, fixed narrow when collapsed
+        if is_device_collapsed then
+            -- Collapsed: narrow fixed width (buttons + name + fader)
+            local collapsed_width = 150  -- Comfortable width for collapsed view
+            r.ImGui_TableSetupColumn(ctx.ctx, "device_content", r.ImGui_TableColumnFlags_WidthFixed(), collapsed_width)
+        else
+            -- Expanded: stretch to fit params
+            r.ImGui_TableSetupColumn(ctx.ctx, "device_content", r.ImGui_TableColumnFlags_WidthStretch())
+        end
 
-        -- Column 3: Gain/Pan (right) - fixed width
-        r.ImGui_TableSetupColumn(ctx.ctx, "gain_pan", r.ImGui_TableColumnFlags_WidthFixed(), gain_pan_w)
+        -- Column 3: Gain/Pan (right) - fixed width (only when expanded)
+        if not is_device_collapsed then
+            r.ImGui_TableSetupColumn(ctx.ctx, "gain_pan", r.ImGui_TableColumnFlags_WidthFixed(), gain_pan_w)
+        end
 
         -- === ROW 1: HEADER ===
         r.ImGui_TableNextRow(ctx.ctx)
@@ -888,23 +898,139 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         ctx:text("Modulators")
         ctx:pop_style_color()
 
-        -- Header Column 2: Device name/path/mix/delta/ui (only when expanded)
+        -- Header Column 2: Device name/path/mix/delta/ui when expanded, buttons when collapsed
         r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
         if not is_device_collapsed then
+            -- Expanded: show full device header
             if draw_device_name_path(ctx, fx, container, guid, name, device_id, drag_guid, enabled, opts, colors, state_guid) then
                 interacted = true
             end
-        end
-        -- When collapsed, leave this column empty in header (content shows below)
+        else
+            -- Collapsed: show buttons (Mix | Delta | UI | ON | Expand) in header
+            local drawing = require('lib.ui.common.drawing')
+            local needs_sameline = false
 
-        -- Header Column 3: Control buttons (on/delete/collapse only when expanded)
-        r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+            -- Check for mix (container parameter)
+            local has_mix = false
+            local mix_val, mix_idx
+            if container then
+                local ok_mix
+                ok_mix, mix_idx = pcall(function() return container:get_param_from_ident(":wet") end)
+                if ok_mix and mix_idx and mix_idx >= 0 then
+                    local ok_mv
+                    ok_mv, mix_val = pcall(function() return container:get_param_normalized(mix_idx) end)
+                    has_mix = ok_mv and mix_val
+                end
+            end
+
+            -- === ROW 1: ON | × | ▶ ===
+            -- ON/OFF toggle
+            if drawing.draw_on_off_circle(ctx, "##on_off_collapsed_" .. state_guid, enabled, 24, 20, colors.bypass_on, colors.bypass_off) then
+                fx:set_enabled(not enabled)
+                interacted = true
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip(enabled and "Bypass" or "Enable")
+            end
+
+            -- Delete button
+            ctx:same_line()
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x884444FF)
+            if ctx:button("×##delete_collapsed_" .. state_guid, 20, 20) then
+                if opts.on_delete then
+                    opts.on_delete(fx)
+                else
+                    fx:delete()
+                end
+                interacted = true
+            end
+            ctx:pop_style_color(2)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Delete device")
+            end
+
+            -- Expand button
+            ctx:same_line()
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+            if ctx:button("▶##expand_collapsed_" .. state_guid, 20, 20) then
+                device_collapsed[state_guid] = false
+                interacted = true
+            end
+            ctx:pop_style_color(3)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Expand device controls")
+            end
+
+            -- === ROW 2: UI | Mix | Delta ===
+            -- UI button (start new row)
+            if drawing.draw_ui_icon(ctx, "##ui_collapsed_" .. state_guid, 24, 20) then
+                pcall(function() fx:show(3) end)
+                interacted = true
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Open plugin UI")
+            end
+
+            -- Mix knob (if present)
+            if has_mix then
+                ctx:same_line()
+                local knob_size = 24
+                local mix_changed, new_mix = drawing.draw_knob(ctx, "##mix_knob_collapsed_" .. state_guid, mix_val, knob_size)
+                if mix_changed then
+                    pcall(function() container:set_param_normalized(mix_idx, new_mix) end)
+                    interacted = true
+                end
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    local mix_pct = math.floor(mix_val * 100)
+                    ctx:set_tooltip(string.format("Mix: %d%% (parallel blend)", mix_pct))
+                end
+            end
+
+            -- Check for delta (fx parameter)
+            local has_delta = false
+            local delta_val, delta_idx
+            local ok_delta
+            ok_delta, delta_idx = pcall(function() return fx:get_param_from_ident(":delta") end)
+            if ok_delta and delta_idx and delta_idx >= 0 then
+                local ok_dv
+                ok_dv, delta_val = pcall(function() return fx:get_param_normalized(delta_idx) end)
+                has_delta = ok_dv and delta_val
+            end
+
+            -- Delta button (if present)
+            if has_delta then
+                ctx:same_line()
+                local delta_on = delta_val > 0.5
+                if delta_on then
+                    ctx:push_style_color(r.ImGui_Col_Button(), 0x6666CCFF)
+                    ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x7777DDFF)
+                    ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x8888EEFF)
+                else
+                    ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
+                    ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x555555FF)
+                    ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x666666FF)
+                end
+                if ctx:button((delta_on and "∆" or "—") .. "##delta_collapsed_" .. state_guid, 28, 20) then
+                    pcall(function() fx:set_param_normalized(delta_idx, delta_on and 0 or 1) end)
+                    interacted = true
+                end
+                ctx:pop_style_color(3)
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    ctx:set_tooltip(delta_on and "Delta Solo: ON (wet - dry)\nClick to toggle" or "Delta Solo: OFF\nClick to toggle")
+                end
+            end
+        end
+
+        -- Header Column 3: Control buttons (only when expanded)
         if not is_device_collapsed then
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
             if draw_device_buttons(ctx, fx, state_guid, enabled, is_device_collapsed, opts, colors) then
                 interacted = true
             end
         end
-        -- When collapsed, leave this column empty in header (buttons show in content area)
 
         -- Separator row between header and content
         r.ImGui_TableNextRow(ctx.ctx)
@@ -912,8 +1038,10 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         ctx:separator()
         r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
         ctx:separator()
-        r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
-        ctx:separator()
+        if not is_device_collapsed then
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+            ctx:separator()
+        end
 
         -- === ROW 2: CONTENT ===
         r.ImGui_TableNextRow(ctx.ctx)
@@ -932,53 +1060,25 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
                 interacted = true
             end
         else
-            -- Collapsed: show vertical stack (buttons | name | fader/pan)
-            local drawing = require('lib.ui.common.drawing')
-
-            -- Row 1: Buttons (UI | ON | Expand)
-            if drawing.draw_ui_icon(ctx, "##ui_collapsed_" .. state_guid, 24, 20) then
-                pcall(function() fx:show(3) end)
-                interacted = true
-            end
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip("Open plugin UI")
-            end
-
-            ctx:same_line()
-            if drawing.draw_on_off_circle(ctx, "##on_off_collapsed_" .. state_guid, enabled, 24, 20, colors.bypass_on, colors.bypass_off) then
-                fx:set_enabled(not enabled)
-                interacted = true
-            end
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip(enabled and "Bypass" or "Enable")
-            end
-
-            ctx:same_line()
-            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
-            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
-            if ctx:button("▶##expand_collapsed_" .. state_guid, 20, 20) then
-                device_collapsed[state_guid] = false
-                interacted = true
-            end
-            ctx:pop_style_color(3)
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip("Expand device controls")
-            end
-
-            -- Row 2: Device name
+            -- Collapsed: show vertical stack (name | gain/pan) - buttons are in header
+            -- Row 1: Device name
             ctx:push_style_color(r.ImGui_Col_Text(), 0xCCCCCCFF)
             local display_name = fx_naming.truncate(name, 30)
             ctx:text(display_name)
             ctx:pop_style_color()
 
-            ctx:separator()
+            -- Row 2: Gain/Pan controls (in same column when collapsed)
+            if draw_sidebar_column(ctx, fx, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, opts, colors) then
+                interacted = true
+            end
         end
 
-        -- Content Column 3: Gain/Pan controls
-        r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
-        if draw_sidebar_column(ctx, fx, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, opts, colors) then
-            interacted = true
+        -- Content Column 3: Gain/Pan controls (only when expanded - column doesn't exist when collapsed)
+        if not is_device_collapsed then
+            r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+            if draw_sidebar_column(ctx, fx, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, opts, colors) then
+                interacted = true
+            end
         end
     end)  -- end with_table (panel_outer)
 
@@ -1036,13 +1136,20 @@ local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg,
         -- Calculate device content width (for params) based on collapse state
         local device_content_width
         if is_device_collapsed then
-            device_content_width = 300  -- Fixed narrow width when device collapsed (just header)
+            device_content_width = 150  -- Fixed width when device collapsed (buttons + name + fader)
         else
             device_content_width = cfg.column_width * num_columns  -- Full width for params
         end
 
-        -- Calculate device wrapper width: device_content + gain_pan
-        local device_wrapper_width = device_content_width + gain_pan_w
+        -- Calculate device wrapper width: device_content + gain_pan (only when expanded)
+        local device_wrapper_width
+        if is_device_collapsed then
+            -- Collapsed: no separate gain/pan column, it's in the device column
+            device_wrapper_width = device_content_width
+        else
+            -- Expanded: device content + gain/pan column
+            device_wrapper_width = device_content_width + gain_pan_w
+        end
 
         -- Calculate total panel width: modulator column + device wrapper + padding
         content_width = cfg.column_width * num_columns
