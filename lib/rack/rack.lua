@@ -1044,16 +1044,26 @@ end
 -- @param target_chain_guid string|nil Target chain GUID to insert before (nil = end)
 -- @return boolean Success
 function M.move_chain_between_racks(source_rack, target_rack, chain_guid, target_chain_guid)
-    if not state.track or not source_rack or not target_rack or not chain_guid then return false end
+    r.ShowConsoleMsg("[rack.lua] move_chain_between_racks called\n")
+    r.ShowConsoleMsg("[rack.lua] chain_guid: " .. tostring(chain_guid) .. "\n")
+    r.ShowConsoleMsg("[rack.lua] target_chain_guid: " .. tostring(target_chain_guid) .. "\n")
+
+    if not state.track or not source_rack or not target_rack or not chain_guid then
+        r.ShowConsoleMsg("[rack.lua] ERROR: Missing parameters\n")
+        return false
+    end
     if not fx_utils.is_rack_container(source_rack) or not fx_utils.is_rack_container(target_rack) then
+        r.ShowConsoleMsg("[rack.lua] ERROR: Not rack containers\n")
         return false
     end
 
     -- Can't move to same rack (use reorder instead)
     if source_rack:get_guid() == target_rack:get_guid() then
+        r.ShowConsoleMsg("[rack.lua] Same rack detected, calling reorder instead\n")
         return M.reorder_chain_in_rack(source_rack, chain_guid, target_chain_guid)
     end
 
+    r.ShowConsoleMsg("[rack.lua] Starting cross-rack move...\n")
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
 
@@ -1064,18 +1074,22 @@ function M.move_chain_between_racks(source_rack, target_rack, chain_guid, target
     -- Find chain in source rack
     local chain = state.track:find_fx_by_guid(chain_guid)
     if not chain then
+        r.ShowConsoleMsg("[rack.lua] ERROR: Could not find chain by GUID\n")
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Move Chain (failed)", -1)
         return false
     end
+    r.ShowConsoleMsg("[rack.lua] Found chain\n")
 
     -- Verify chain is in source rack
     local parent = chain:get_parent_container()
     if not parent or parent:get_guid() ~= source_rack_guid then
+        r.ShowConsoleMsg("[rack.lua] ERROR: Chain parent doesn't match source rack\n")
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Move Chain (failed)", -1)
         return false
     end
+    r.ShowConsoleMsg("[rack.lua] Verified chain is in source rack\n")
 
     -- Find target position in target rack
     local target_pos = 0
@@ -1098,31 +1112,39 @@ function M.move_chain_between_racks(source_rack, target_rack, chain_guid, target
     if not target_chain_guid then
         target_pos = mixer_pos or target_pos
     end
+    r.ShowConsoleMsg("[rack.lua] Target position: " .. target_pos .. "\n")
 
     -- Extract chain from source rack
+    r.ShowConsoleMsg("[rack.lua] Extracting chain from source rack...\n")
     chain:move_out_of_container()
 
     -- Re-find everything by GUID after move
+    r.ShowConsoleMsg("[rack.lua] Re-finding FX by GUID...\n")
     chain = state.track:find_fx_by_guid(chain_guid)
     source_rack = state.track:find_fx_by_guid(source_rack_guid)
     target_rack = state.track:find_fx_by_guid(target_rack_guid)
 
     if not chain or not source_rack or not target_rack then
+        r.ShowConsoleMsg("[rack.lua] ERROR: Could not re-find FX after extraction\n")
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Move Chain (failed)", -1)
         return false
     end
+    r.ShowConsoleMsg("[rack.lua] Successfully re-found all FX\n")
 
     -- Insert into target rack
+    r.ShowConsoleMsg("[rack.lua] Inserting into target rack at position " .. target_pos .. "\n")
     target_rack:add_fx_to_container(chain, target_pos)
 
     -- Renumber chains in both racks
+    r.ShowConsoleMsg("[rack.lua] Renumbering chains in both racks...\n")
     M.renumber_chains_in_rack(source_rack)
     M.renumber_chains_in_rack(target_rack)
 
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Move Chain Between Racks", -1)
 
+    r.ShowConsoleMsg("[rack.lua] Cross-rack move completed successfully\n")
     return true
 end
 
