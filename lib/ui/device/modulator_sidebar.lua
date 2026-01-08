@@ -173,25 +173,18 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     -- Set control width shorter for compact layout
                     local control_width = 180
 
-                    -- Rate section: RATE label | Free/Sync buttons | UI icon
+                    -- Rate section: Free/Sync buttons | UI icon (no label)
                     -- Read tempo mode BEFORE table so it's accessible inside and outside
                     local tempo_mode = expanded_modulator:get_param(PARAM.PARAM_TEMPO_MODE)
 
-                    if ctx:begin_table("##rate_table_" .. guid, 3, imgui.TableFlags.SizingStretchProp()) then
-                        ctx:table_setup_column("Label", imgui.TableColumnFlags.WidthFixed(), 45)
+                    if ctx:begin_table("##rate_table_" .. guid, 2, imgui.TableFlags.SizingStretchProp()) then
                         ctx:table_setup_column("Mode", imgui.TableColumnFlags.WidthStretch())
                         ctx:table_setup_column("UI", imgui.TableColumnFlags.WidthFixed(), 30)
 
                         ctx:table_next_row()
 
-                        -- Column 1: RATE label
+                        -- Column 1: Free/Sync buttons
                         ctx:table_set_column_index(0)
-                        ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
-                        ctx:text("RATE")
-                        ctx:pop_style_color()
-
-                        -- Column 2: Free/Sync buttons
-                        ctx:table_set_column_index(1)
                         if tempo_mode then
                             if ctx:radio_button("Free##tempo_" .. guid, tempo_mode < 0.5) then
                                 expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 0)
@@ -204,8 +197,8 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             end
                         end
 
-                        -- Column 3: UI icon
-                        ctx:table_set_column_index(2)
+                        -- Column 2: UI icon
+                        ctx:table_set_column_index(1)
                         if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20) then
                             expanded_modulator:show(3)
                             interacted = true
@@ -218,16 +211,20 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     end
                     ctx:spacing()
 
-                    -- Show Hz slider when Free mode, Sync Rate dropdown when Sync mode
+                    -- Rate slider/dropdown (narrower width)
+                    local rate_width = 120
                     if tempo_mode and tempo_mode < 0.5 then
                         -- Free mode - show Hz slider (slider2)
                         local ok_rate, rate_hz = pcall(function() return expanded_modulator:get_param_normalized(1) end)
                         if ok_rate then
-                            ctx:set_next_item_width(control_width)
+                            ctx:set_next_item_width(rate_width)
                             local changed, new_rate = ctx:slider_double("Hz##rate_" .. guid, rate_hz, 0.01, 20, "%.2f")
                             if changed then
                                 expanded_modulator:set_param_normalized(1, new_rate)
                                 interacted = true
+                            end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Rate (Hz)")
                             end
                         end
                     else
@@ -236,7 +233,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         if ok_sync then
                             local sync_rates = {"8 bars", "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/4T", "1/4.", "1/8", "1/8T", "1/8.", "1/16", "1/16T", "1/16.", "1/32", "1/32T", "1/32.", "1/64"}
                             local current_idx = math.floor(sync_rate_idx * 17 + 0.5)
-                            ctx:set_next_item_width(control_width)
+                            ctx:set_next_item_width(rate_width)
                             if ctx:begin_combo("##sync_rate_" .. guid, sync_rates[current_idx + 1] or "1/4") then
                                 for i, rate_name in ipairs(sync_rates) do
                                     if ctx:selectable(rate_name, i - 1 == current_idx) then
@@ -246,42 +243,50 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                 end
                                 ctx:end_combo()
                             end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Sync Rate")
+                            end
                         end
                     end
 
                     ctx:spacing()
 
-                    -- Phase (slider5)
+                    -- Phase and Depth on same line (no labels)
+                    local param_width = 88
                     local ok_phase, phase = pcall(function() return expanded_modulator:get_param_normalized(4) end)
                     if ok_phase then
-                        ctx:set_next_item_width(control_width)
+                        ctx:set_next_item_width(param_width)
                         local phase_deg = phase * 360
-                        local changed, new_phase_deg = ctx:slider_double("Phase##phase_" .. guid, phase_deg, 0, 360, "%.0f°")
+                        local changed, new_phase_deg = ctx:slider_double("##phase_" .. guid, phase_deg, 0, 360, "%.0f°")
                         if changed then
                             expanded_modulator:set_param_normalized(4, new_phase_deg / 360)
                             interacted = true
                         end
+                        if ctx:is_item_hovered() then
+                            ctx:set_tooltip("Phase")
+                        end
                     end
 
-                    -- Depth (slider6)
+                    ctx:same_line()
+
                     local ok_depth, depth = pcall(function() return expanded_modulator:get_param_normalized(5) end)
                     if ok_depth then
-                        ctx:set_next_item_width(control_width)
+                        ctx:set_next_item_width(param_width)
                         local depth_pct = depth * 100
-                        local changed, new_depth_pct = ctx:slider_double("Depth##depth_" .. guid, depth_pct, 0, 100, "%.0f%%")
+                        local changed, new_depth_pct = ctx:slider_double("##depth_" .. guid, depth_pct, 0, 100, "%.0f%%")
                         if changed then
                             expanded_modulator:set_param_normalized(5, new_depth_pct / 100)
                             interacted = true
+                        end
+                        if ctx:is_item_hovered() then
+                            ctx:set_tooltip("Depth")
                         end
                     end
 
                     ctx:spacing()
 
-                    -- Trigger Mode section
-                    ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
-                    ctx:text("TRIGGER")
-                    ctx:pop_style_color()
-                    ctx:spacing()
+                    -- Trigger and Mode on same line (no labels)
+                    local trigger_width = 100
 
                     -- Trigger Mode dropdown
                     local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_TRIGGER_MODE) end)
@@ -289,7 +294,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     if ok_trig then
                         local trigger_modes = {"Free", "Transport", "MIDI", "Audio"}
                         trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
-                        ctx:set_next_item_width(control_width)
+                        ctx:set_next_item_width(trigger_width)
                         if ctx:begin_combo("##trigger_mode_" .. guid, trigger_modes[trig_idx + 1] or "Free") then
                             for i, mode_name in ipairs(trigger_modes) do
                                 if ctx:selectable(mode_name, i - 1 == trig_idx) then
@@ -299,15 +304,12 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             end
                             ctx:end_combo()
                         end
+                        if ctx:is_item_hovered() then
+                            ctx:set_tooltip("Trigger Mode")
+                        end
                     end
 
-                    ctx:spacing()
-
-                    -- LFO Mode section
-                    ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
-                    ctx:text("MODE")
-                    ctx:pop_style_color()
-                    ctx:spacing()
+                    ctx:same_line()
 
                     -- LFO Mode: Loop/One Shot (discrete parameter)
                     local lfo_mode = expanded_modulator:get_param(PARAM.PARAM_LFO_MODE)
