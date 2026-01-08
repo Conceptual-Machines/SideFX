@@ -124,7 +124,7 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
                 rename_active[guid] = nil
                 rename_buffer[guid] = ""
             end
-            if ctx:is_item_deactivated() then
+            if ctx:is_item_deactivated_after_edit() then
                 rename_active[guid] = nil
                 rename_buffer[guid] = ""
             end
