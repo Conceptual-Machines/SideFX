@@ -731,6 +731,96 @@ local function draw_device_in_chain(ctx, dev, chain_content_h, selected_chain, c
     end
 end
 
+--- Draw chain column header with name and identifier
+-- @param ctx ImGui context
+-- @param chain_name string Display name of chain
+-- @param chain_id string|nil Chain identifier (e.g., "R1_C1")
+local function draw_chain_header(ctx, chain_name, chain_id)
+    ctx:table_next_row(0, 20)  -- Smaller row height (20px)
+    ctx:table_set_column_index(0)
+    if default_font then
+        ctx:push_font(default_font, 12)  -- 12px smaller font for header
+    end
+    ctx:text_colored(0xAAAAAAFF, "Chain:")
+    ctx:same_line()
+    ctx:text(chain_name)
+    if chain_id then
+        ctx:same_line()
+        ctx:text_colored(0x888888FF, " [" .. chain_id .. "]")
+    end
+    if default_font then
+        ctx:pop_font()
+    end
+    ctx:separator()
+end
+
+--- Draw empty chain content with drop zone
+-- @param ctx ImGui context
+-- @param chain_content_h number Available height for content
+-- @param has_payload boolean Whether there's a drag/drop payload
+-- @param selected_chain TrackFX Selected chain container
+local function draw_empty_chain_content(ctx, chain_content_h, has_payload, selected_chain)
+    if has_payload then
+        ctx:push_style_color(imgui.Col.Button(), 0x4488FF66)
+    else
+        ctx:push_style_color(imgui.Col.Button(), 0x33333344)
+    end
+    ctx:button("+ Drop plugin or rack to add first device", 250, chain_content_h - 20)
+    ctx:pop_style_color()
+
+    if ctx:begin_drag_drop_target() then
+        local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+        if accepted and plugin_name then
+            r.ShowConsoleMsg(string.format("SideFX: Empty chain drag-drop accepted: plugin=%s\n", plugin_name))
+            local plugin = { full_name = plugin_name, name = plugin_name }
+            add_device_to_chain(selected_chain, plugin)
+        end
+        local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+        if rack_accepted then
+            add_rack_to_chain(selected_chain)
+        end
+        ctx:end_drag_drop_target()
+    end
+end
+
+--- Draw add button at end of chain with conditional styling
+-- @param ctx ImGui context
+-- @param chain_content_h number Available height
+-- @param has_payload boolean Whether there's a drag/drop payload
+-- @param selected_chain TrackFX Selected chain container
+local function draw_chain_add_button(ctx, chain_content_h, has_payload, selected_chain)
+    ctx:same_line(0, 4)
+    local add_btn_h = chain_content_h - 20
+    if has_payload then
+        ctx:push_style_color(imgui.Col.Button(), 0x4488FF66)
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x66AAFF88)
+        ctx:button("+##chain_drop", 40, add_btn_h)
+        ctx:pop_style_color(2)
+    else
+        ctx:push_style_color(imgui.Col.Button(), 0x3A4A5A88)
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x4A6A8AAA)
+        ctx:button("+##chain_add", 40, add_btn_h)
+        ctx:pop_style_color(2)
+    end
+
+    if ctx:begin_drag_drop_target() then
+        local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+        if accepted and plugin_name then
+            local plugin = { full_name = plugin_name, name = plugin_name }
+            add_device_to_chain(selected_chain, plugin)
+        end
+        local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+        if rack_accepted then
+            add_rack_to_chain(selected_chain)
+        end
+        ctx:end_drag_drop_target()
+    end
+
+    if ctx:is_item_hovered() then
+        ctx:set_tooltip("Drag plugin or rack here to add")
+    end
+end
+
 -- Draw expanded chain column with devices
 local function draw_chain_column(ctx, selected_chain, rack_h)
     local selected_chain_guid = selected_chain:get_guid()
@@ -767,60 +857,21 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
         -- Use table layout so header width matches content width
         local table_flags = imgui.TableFlags.SizingStretchSame()
         if ctx:begin_table("chain_table_" .. selected_chain_guid, 1, table_flags) then
-            -- Row 1: Header (smaller)
-            ctx:table_next_row(0, 20)  -- Smaller row height (20px instead of default)
-            ctx:table_set_column_index(0)
-            -- Use smaller font for header
-            if default_font then
-                ctx:push_font(default_font, 12)  -- 12px instead of 14px
-            end
-            ctx:text_colored(0xAAAAAAFF, "Chain:")
-            ctx:same_line()
-            ctx:text(chain_name)
-            if chain_id then
-                ctx:same_line()
-                ctx:text_colored(0x888888FF, " [" .. chain_id .. "]")
-            end
-            if default_font then
-                ctx:pop_font()
-            end
-            ctx:separator()
+            -- Draw header with chain name and identifier
+            draw_chain_header(ctx, chain_name, chain_id)
 
             -- Row 2: Content
             ctx:table_next_row()
             ctx:table_set_column_index(0)
 
             -- Chain contents - auto-resize to fit devices
-            -- Use same background as wrapper for seamless appearance
             ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
-            -- ChildFlags: Border (1) + AutoResizeX (16) + AlwaysAutoResize (64) = 81
-            local chain_content_flags = 81
+            local chain_content_flags = 81  -- Border (1) + AutoResizeX (16) + AlwaysAutoResize (64)
             if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, chain_content_flags) then
 
             if #devices == 0 then
                 -- Empty chain - show drop zone
-                if has_plugin_payload or has_rack_payload then
-                    ctx:push_style_color(imgui.Col.Button(), 0x4488FF66)
-                else
-                    ctx:push_style_color(imgui.Col.Button(), 0x33333344)
-                end
-                ctx:button("+ Drop plugin or rack to add first device", 250, chain_content_h - 20)
-                ctx:pop_style_color()
-
-                if ctx:begin_drag_drop_target() then
-                    local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
-                    if accepted and plugin_name then
-                        r.ShowConsoleMsg(string.format("SideFX: Empty chain drag-drop accepted: plugin=%s\n", plugin_name))
-                        local plugin = { full_name = plugin_name, name = plugin_name }
-                        add_device_to_chain(selected_chain, plugin)
-                    end
-                    -- Accept rack drops -> create nested rack
-                    local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
-                    if rack_accepted then
-                        add_rack_to_chain(selected_chain)
-                    end
-                    ctx:end_drag_drop_target()
-                end
+                draw_empty_chain_content(ctx, chain_content_h, has_plugin_payload or has_rack_payload, selected_chain)
             else
                 -- Draw each device or rack HORIZONTALLY with arrows
                 ctx:begin_group()
@@ -858,38 +909,8 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                     end
                 end
 
-                -- Drop zone / add button at end of chain
-                ctx:same_line(0, 4)
-                local add_btn_h = chain_content_h - 20
-                if has_plugin_payload or has_rack_payload then
-                    ctx:push_style_color(imgui.Col.Button(), 0x4488FF66)
-                    ctx:push_style_color(imgui.Col.ButtonHovered(), 0x66AAFF88)
-                    ctx:button("+##chain_drop", 40, add_btn_h)
-                    ctx:pop_style_color(2)
-                else
-                    ctx:push_style_color(imgui.Col.Button(), 0x3A4A5A88)
-                    ctx:push_style_color(imgui.Col.ButtonHovered(), 0x4A6A8AAA)
-                    ctx:button("+##chain_add", 40, add_btn_h)
-                    ctx:pop_style_color(2)
-                end
-
-                if ctx:begin_drag_drop_target() then
-                    local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
-                    if accepted and plugin_name then
-                        local plugin = { full_name = plugin_name, name = plugin_name }
-                        add_device_to_chain(selected_chain, plugin)
-                    end
-                    -- Accept rack drops -> create nested rack
-                    local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
-                    if rack_accepted then
-                        add_rack_to_chain(selected_chain)
-                    end
-                    ctx:end_drag_drop_target()
-                end
-
-                if ctx:is_item_hovered() then
-                    ctx:set_tooltip("Drag plugin or rack here to add")
-                end
+                -- Draw add button at end of chain
+                draw_chain_add_button(ctx, chain_content_h, has_plugin_payload or has_rack_payload, selected_chain)
 
                 ctx:end_group()
             end
