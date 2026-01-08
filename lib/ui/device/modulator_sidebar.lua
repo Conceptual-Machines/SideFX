@@ -200,44 +200,49 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
                         -- Column 2: Preset dropdown
                         ctx:table_set_column_index(1)
-                        local preset_idx, num_presets = r.TrackFX_GetPresetIndex(
-                            state.track.pointer,
-                            expanded_modulator.pointer
-                        )
-                        if num_presets and num_presets > 0 then
-                            -- Static preset names matching our JSFX @presets section
-                            local preset_names = {
-                                "Sine Wave",
-                                "Triangle",
-                                "Sawtooth",
-                                "Square Wave",
-                                "Ramp Up",
-                                "Ramp Down",
-                                "Smooth Random",
-                                "Steps",
-                                "Bounce",
-                                "Exponential Rise",
-                                "Exponential Fall",
-                                "Wobble",
-                                "Shark Fin",
-                                "Growl"
-                            }
 
-                            local current_name = preset_names[preset_idx + 1] or "Custom"
-                            ctx:set_next_item_width(80)
-                            if ctx:begin_combo("##preset_" .. guid, current_name) then
-                                for i = 0, num_presets - 1 do
-                                    local name = preset_names[i + 1] or ("Preset " .. (i + 1))
-                                    if ctx:selectable(name, i == preset_idx) then
-                                        r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
-                                        interacted = true
+                        -- Define waveform presets (num_points, then X,Y pairs for sliders 40-71)
+                        local presets = {
+                            {name = "Sine Wave", num=4, points={{0,0},{0.33,0.5},{0.67,1},{1,1}}},
+                            {name = "Triangle", num=3, points={{0,0},{0.5,1},{1,0}}},
+                            {name = "Sawtooth", num=2, points={{0,1},{1,0}}},
+                            {name = "Square", num=4, points={{0,1},{0.49,1},{0.51,0},{1,0}}},
+                            {name = "Ramp Up", num=2, points={{0,0},{1,1}}},
+                            {name = "Ramp Down", num=2, points={{0,1},{1,0}}},
+                            {name = "Smooth Rnd", num=6, points={{0,0},{0.15,0.8},{0.35,0.3},{0.6,0.9},{0.8,0.2},{1,0.5}}},
+                            {name = "Steps", num=6, points={{0,0.2},{0.25,0.2},{0.25,0.6},{0.5,0.6},{0.5,0.9},{1,0.9}}},
+                            {name = "Bounce", num=6, points={{0,0},{0.3,0.9},{0.5,0.4},{0.7,0.7},{0.8,0.2},{1,0}}},
+                            {name = "Exp Rise", num=4, points={{0,0},{0.2,0.1},{0.6,0.5},{1,1}}},
+                            {name = "Exp Fall", num=4, points={{0,1},{0.4,0.5},{0.8,0.1},{1,0}}},
+                            {name = "Wobble", num=9, points={{0,0.5},{0.1,0.8},{0.25,0.2},{0.4,0.7},{0.5,0.5},{0.6,0.3},{0.75,0.4},{0.9,0.6},{1,0.5}}},
+                            {name = "Shark Fin", num=3, points={{0,0},{0.5,1},{1,0}}},
+                            {name = "Growl", num=5, points={{0,0},{0.25,0.8},{0.5,0.3},{0.75,0.8},{1,0}}},
+                        }
+
+                        ctx:set_next_item_width(80)
+                        if ctx:begin_combo("##preset_" .. guid, "Preset") then
+                            for _, preset in ipairs(presets) do
+                                if ctx:selectable(preset.name, false) then
+                                    -- Set number of points (slider 30)
+                                    expanded_modulator:set_param_normalized(30, (preset.num - 2) / 14)
+
+                                    -- Set curve points (sliders 40-71)
+                                    for i, pt in ipairs(preset.points) do
+                                        if i <= preset.num then
+                                            local x_slider = 40 + (i - 1) * 2
+                                            local y_slider = 41 + (i - 1) * 2
+                                            expanded_modulator:set_param_normalized(x_slider, pt[1])
+                                            expanded_modulator:set_param_normalized(y_slider, pt[2])
+                                        end
                                     end
+
+                                    interacted = true
                                 end
-                                ctx:end_combo()
                             end
-                            if ctx:is_item_hovered() then
-                                ctx:set_tooltip("Waveform preset")
-                            end
+                            ctx:end_combo()
+                        end
+                        if ctx:is_item_hovered() then
+                            ctx:set_tooltip("Load waveform preset")
                         end
 
                         -- Column 3: UI icon
