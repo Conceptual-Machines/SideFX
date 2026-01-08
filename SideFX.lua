@@ -659,6 +659,78 @@ local rack_panel = nil    -- Lazy loaded
 
 -- draw_chain_row moved to rack_ui module
 
+--- Draw arrow separator between devices in chain
+-- @param ctx ImGui context
+-- @param is_first boolean Whether this is the first device (no arrow)
+local function draw_device_separator(ctx, is_first)
+    if is_first then return end
+    ctx:same_line()
+    ctx:push_style_color(imgui.Col.Text(), 0x555555FF)
+    ctx:text("→")
+    ctx:pop_style_color()
+    ctx:same_line()
+end
+
+--- Find a chain by GUID in a list of chains
+-- @param chains table Array of chain FX objects
+-- @param target_guid string GUID to search for
+-- @return TrackFX|nil Chain FX or nil if not found
+local function find_chain_by_guid(chains, target_guid)
+    for _, chain in ipairs(chains) do
+        local ok_guid, chain_guid = pcall(function() return chain:get_guid() end)
+        if ok_guid and chain_guid and chain_guid == target_guid then
+            return chain
+        end
+    end
+    return nil
+end
+
+--- Draw nested rack and its selected chain column
+-- @param ctx ImGui context
+-- @param dev TrackFX Rack container FX
+-- @param chain_content_h number Available height for content
+-- @return nil (modifies UI)
+local function draw_nested_rack_in_chain(ctx, dev, chain_content_h)
+    local rack_data = draw_rack_panel(ctx, dev, chain_content_h - 20, true)
+
+    -- If a chain in this nested rack is selected, show its chain column
+    local rack_guid = dev:get_guid()
+    local nested_chain_guid = state.expanded_nested_chains[rack_guid]
+    if rack_data.is_expanded and nested_chain_guid then
+        local nested_chain = find_chain_by_guid(rack_data.chains, nested_chain_guid)
+        if nested_chain then
+            ctx:same_line()
+            draw_chain_column(ctx, nested_chain, rack_data.rack_h)
+        end
+    end
+end
+
+--- Draw device panel or fallback button
+-- @param ctx ImGui context
+-- @param dev TrackFX Device container FX
+-- @param chain_content_h number Available height for content
+-- @param selected_chain TrackFX Selected chain container
+-- @param callbacks table Callbacks table (passed to device_panel.draw)
+-- @return nil (modifies UI)
+local function draw_device_in_chain(ctx, dev, chain_content_h, selected_chain, callbacks)
+    local dev_main_fx = get_device_main_fx(dev)
+    local dev_utility = get_device_utility(dev)
+    local dev_name = fx_utils.get_device_display_name(dev)
+    local dev_enabled = dev:get_enabled()
+
+    if dev_main_fx and device_panel then
+        device_panel.draw(ctx, dev_main_fx, callbacks)
+    else
+        -- Fallback: simple button
+        local btn_color = dev_enabled and 0x3A5A4AFF or 0x2A2A35FF
+        ctx:push_style_color(imgui.Col.Button(), btn_color)
+        if ctx:button(dev_name:sub(1, 20) .. "##dev_fallback_" .. dev:get_guid(), 120, chain_content_h - 20) then
+            dev:show(3)
+        end
+        ctx:pop_style_color()
+    end
+end
+
 -- Draw expanded chain column with devices
 local function draw_chain_column(ctx, selected_chain, rack_h)
     local selected_chain_guid = selected_chain:get_guid()
@@ -754,79 +826,35 @@ local function draw_chain_column(ctx, selected_chain, rack_h)
                 ctx:begin_group()
 
                 for k, dev in ipairs(devices) do
-                    local dev_name = fx_utils.get_device_display_name(dev)
-                    local dev_enabled = dev:get_enabled()
+                    -- Draw arrow separator between devices
+                    draw_device_separator(ctx, k == 1)
 
-                    -- Arrow connector between items
-                    if k > 1 then
-                        ctx:same_line()
-                        ctx:push_style_color(imgui.Col.Text(), 0x555555FF)
-                        ctx:text("→")
-                        ctx:pop_style_color()
-                        ctx:same_line()
-                    end
-
-                    -- Check if it's a rack or a device
+                    -- Draw device or nested rack
                     if is_rack_container(dev) then
-                        -- It's a rack - draw using rack panel (mark as nested)
-                        local rack_data = draw_rack_panel(ctx, dev, chain_content_h - 20, true)
-
-                        -- If a chain in this nested rack is selected, show its chain column
-                        -- Use the rack's GUID to look up which chain is expanded for this specific rack
-                        local rack_guid = dev:get_guid()
-                        local nested_chain_guid = state.expanded_nested_chains[rack_guid]
-                        if rack_data.is_expanded and nested_chain_guid then
-                            local nested_chain = nil
-                            for _, chain in ipairs(rack_data.chains) do
-                                local ok_guid, chain_guid = pcall(function() return chain:get_guid() end)
-                                if ok_guid and chain_guid and chain_guid == nested_chain_guid then
-                                    nested_chain = chain
-                                    break
-                                end
-                            end
-
-                            if nested_chain then
-                                ctx:same_line()
-                                draw_chain_column(ctx, nested_chain, rack_data.rack_h)
-                            end
-                        end
+                        draw_nested_rack_in_chain(ctx, dev, chain_content_h)
                     else
-                        -- It's a device - find the actual FX inside the device container
-                        local dev_main_fx = get_device_main_fx(dev)
-                        local dev_utility = get_device_utility(dev)
-
-                        if dev_main_fx and device_panel then
-                            device_panel.draw(ctx, dev_main_fx, {
-                                avail_height = chain_content_h - 20,
-                                utility = dev_utility,
-                                container = dev,
-                                icon_font = icon_font,
-                                track = state.track,
-                                refresh_fx_list = refresh_fx_list,
-                                on_delete = function()
-                                    dev:delete()
-                                    refresh_fx_list()
-                                end,
-                                on_rename = function(fx)
-                                    -- Rename the container (dev), not the main FX
-                                    local dev_guid = dev:get_guid()
-                                    state.renaming_fx = dev_guid
-                                    state.rename_text = get_fx_display_name(dev)
-                                end,
-                                on_plugin_drop = function(plugin_name, insert_before_idx)
-                                    local plugin = { full_name = plugin_name, name = plugin_name }
-                                    add_device_to_chain(selected_chain, plugin)
-                                end,
-                            })
-                        else
-                            -- Fallback: simple button
-                            local btn_color = dev_enabled and 0x3A5A4AFF or 0x2A2A35FF
-                            ctx:push_style_color(imgui.Col.Button(), btn_color)
-                            if ctx:button(dev_name:sub(1, 20) .. "##dev_" .. k, 120, chain_content_h - 20) then
-                                dev:show(3)
-                            end
-                            ctx:pop_style_color()
-                        end
+                        draw_device_in_chain(ctx, dev, chain_content_h, selected_chain, {
+                            avail_height = chain_content_h - 20,
+                            utility = get_device_utility(dev),
+                            container = dev,
+                            icon_font = icon_font,
+                            track = state.track,
+                            refresh_fx_list = refresh_fx_list,
+                            on_delete = function()
+                                dev:delete()
+                                refresh_fx_list()
+                            end,
+                            on_rename = function(fx)
+                                -- Rename the container (dev), not the main FX
+                                local dev_guid = dev:get_guid()
+                                state.renaming_fx = dev_guid
+                                state.rename_text = get_fx_display_name(dev)
+                            end,
+                            on_plugin_drop = function(plugin_name, insert_before_idx)
+                                local plugin = { full_name = plugin_name, name = plugin_name }
+                                add_device_to_chain(selected_chain, plugin)
+                            end,
+                        })
                     end
                 end
 
