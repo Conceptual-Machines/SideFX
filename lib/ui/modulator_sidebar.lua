@@ -8,6 +8,7 @@ local imgui = require('imgui')
 local state_module = require('lib.state')
 local PARAM = require('lib.modulator_constants')
 local drawing = require('lib.ui.drawing')
+local modulator_module = require('lib.modulator')
 
 -- Modulator types
 local MODULATOR_TYPES = {
@@ -35,83 +36,6 @@ local function get_device_modulators(device_container)
     end
 
     return modulators
-end
-
--- Helper function to add a modulator to device
-local function add_modulator_to_device(device_container, modulator_type, track)
-    if not track or not device_container then return nil end
-    if not device_container:is_container() then return nil end
-
-    r.Undo_BeginBlock()
-    r.PreventUIRefresh(1)
-
-    -- Get container GUID before operations (GUID is stable)
-    local container_guid = device_container:get_guid()
-    if not container_guid then
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Modulator to Device (failed)", -1)
-        return nil
-    end
-
-    -- Add modulator JSFX at track level first
-    local modulator = track:add_fx_by_name(modulator_type.jsfx, false, -1)
-    if not modulator or modulator.pointer < 0 then
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Modulator to Device (failed)", -1)
-        return nil
-    end
-
-    local mod_guid = modulator:get_guid()
-
-    -- Refind container by GUID (important for nested containers)
-    local fresh_container = track:find_fx_by_guid(container_guid)
-    if not fresh_container then
-        if modulator then modulator:delete() end
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Modulator to Device (container lost)", -1)
-        return nil
-    end
-
-    -- Refresh pointer for deeply nested containers
-    if fresh_container.pointer and fresh_container.pointer >= 0x2000000 and fresh_container.refresh_pointer then
-        fresh_container:refresh_pointer()
-    end
-
-    -- Refind modulator by GUID
-    modulator = track:find_fx_by_guid(mod_guid)
-    if not modulator then
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Modulator to Device (modulator lost)", -1)
-        return nil
-    end
-
-    -- Get insert position (append to end of container)
-    local insert_pos = fresh_container:get_container_child_count()
-
-    -- Move modulator into container
-    local success = fresh_container:add_fx_to_container(modulator, insert_pos)
-
-    if not success then
-        if modulator then modulator:delete() end
-        r.PreventUIRefresh(-1)
-        r.Undo_EndBlock("SideFX: Add Modulator to Device (move failed)", -1)
-        return nil
-    end
-
-    -- Refind modulator after move (pointer changed)
-    local moved_modulator = track:find_fx_by_guid(mod_guid)
-
-    -- Initialize default parameter values
-    if moved_modulator then
-        -- Set LFO Mode to Loop (0) by default
-        -- Use direct value setting for discrete parameter (0 = Loop, 1 = One Shot)
-        moved_modulator:set_param(PARAM.PARAM_LFO_MODE, 0)
-    end
-
-    r.PreventUIRefresh(-1)
-    r.Undo_EndBlock("SideFX: Add Modulator to Device", -1)
-
-    return moved_modulator
 end
 
 -- Main draw function for modulator sidebar
@@ -220,7 +144,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             -- Show modulator type dropdown (simplified for now - just add Bezier LFO)
                             local track = opts.track or state.track
                             if track and container then
-                                local new_mod = add_modulator_to_device(container, MODULATOR_TYPES[1], track)
+                                local new_mod = modulator_module.add_modulator_to_device(container, MODULATOR_TYPES[1], track)
                                 if new_mod then
                                     -- Refresh container pointer after adding (important for UI to update)
                                     if container.refresh_pointer then

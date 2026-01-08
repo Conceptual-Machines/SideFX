@@ -14,6 +14,19 @@ local M = {}
 -- Local reference to state singleton
 local state = state_module.state
 
+-- Optional refresh callback (set via init)
+local refresh_callback = nil
+
+--------------------------------------------------------------------------------
+-- Initialization
+--------------------------------------------------------------------------------
+
+--- Initialize modulator module with optional refresh callback
+-- @param on_refresh function|nil Callback to refresh FX list: () -> nil
+function M.init(on_refresh)
+    refresh_callback = on_refresh
+end
+
 --------------------------------------------------------------------------------
 -- Constants
 --------------------------------------------------------------------------------
@@ -53,6 +66,9 @@ function M.add_modulator()
     -- Add at position 0 (before instruments)
     local fx = state.track:add_fx_by_name(M.MODULATOR_JSFX, false, -1000)
     r.Undo_EndBlock("Add SideFX Modulator", -1)
+    if fx and refresh_callback then
+        refresh_callback()
+    end
     return fx
 end
 
@@ -63,6 +79,9 @@ function M.delete_modulator(fx_idx)
     r.Undo_BeginBlock()
     r.TrackFX_Delete(state.track.pointer, fx_idx)
     r.Undo_EndBlock("Delete SideFX Modulator", -1)
+    if refresh_callback then
+        refresh_callback()
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -280,6 +299,116 @@ function M.is_modulator_fx(fx)
     if not fx then return false end
     local name = fx:get_name()
     return name and (name:find(M.MODULATOR_JSFX) or name:find("SideFX Modulator"))
+end
+
+--------------------------------------------------------------------------------
+-- Device Modulator Operations
+--------------------------------------------------------------------------------
+
+--- Add a modulator inside a device container.
+-- Uses GUID-based refinding for robustness with nested containers.
+-- @param device_container TrackFX Device container
+-- @param modulator_type table Modulator type {id, name, jsfx}
+-- @param track TrackFX|nil Track (optional, uses state.track if nil)
+-- @return TrackFX|nil Created modulator FX or nil on failure
+function M.add_modulator_to_device(device_container, modulator_type, track)
+    track = track or state.track
+    if not track or not device_container then return nil end
+    if not device_container:is_container() then return nil end
+
+    local naming = require('lib.naming')
+    local fx_utils = require('lib.fx_utils')
+
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+
+    -- Get container GUID before operations (GUID is stable)
+    local container_guid = device_container:get_guid()
+    if not container_guid then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Modulator to Device (failed)", -1)
+        return nil
+    end
+
+    -- Add modulator JSFX at track level first
+    local modulator = track:add_fx_by_name(modulator_type.jsfx, false, -1)
+    if not modulator or modulator.pointer < 0 then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Modulator to Device (failed)", -1)
+        return nil
+    end
+
+    local mod_guid = modulator:get_guid()
+
+    -- Refind container by GUID (important for nested containers)
+    local fresh_container = track:find_fx_by_guid(container_guid)
+    if not fresh_container then
+        if modulator then modulator:delete() end
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Modulator to Device (container lost)", -1)
+        return nil
+    end
+
+    -- Refresh pointer for deeply nested containers
+    if fresh_container.pointer and fresh_container.pointer >= 0x2000000 and fresh_container.refresh_pointer then
+        fresh_container:refresh_pointer()
+    end
+
+    -- Refind modulator by GUID
+    modulator = track:find_fx_by_guid(mod_guid)
+    if not modulator then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Modulator to Device (modulator lost)", -1)
+        return nil
+    end
+
+    -- Get insert position (append to end of container)
+    local insert_pos = fresh_container:get_container_child_count()
+
+    -- Move modulator into container
+    local success = fresh_container:add_fx_to_container(modulator, insert_pos)
+
+    if not success then
+        if modulator then modulator:delete() end
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Modulator to Device (move failed)", -1)
+        return nil
+    end
+
+    -- Refind modulator after move (pointer changed)
+    local moved_modulator = track:find_fx_by_guid(mod_guid)
+
+    if moved_modulator then
+        -- Name the modulator with hierarchical convention
+        local device_path_str = naming.extract_path_from_name(fresh_container:get_name())
+        if device_path_str then
+            -- Count existing modulators in this device to get next index
+            local modulator_count = 0
+            for child in fresh_container:iter_container_children() do
+                if fx_utils.is_modulator_fx(child) then
+                    modulator_count = modulator_count + 1
+                end
+            end
+
+            -- Build modulator name using general hierarchical function
+            local mod_name = naming.build_hierarchical_name(device_path_str, "modulator", modulator_count, "SideFX Modulator")
+            moved_modulator:set_named_config_param("renamed_name", mod_name)
+        end
+
+        -- Initialize default parameter values
+        -- Set LFO Mode to Loop (0) by default
+        local PARAM = require('lib.modulator_constants')
+        moved_modulator:set_param(PARAM.PARAM_LFO_MODE, 0)
+    end
+
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Add Modulator to Device", -1)
+
+    if refresh_callback then
+        refresh_callback()
+    end
+
+    return moved_modulator
 end
 
 return M

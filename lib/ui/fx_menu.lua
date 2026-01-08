@@ -78,6 +78,58 @@ function M.draw(ctx, fx, guid, menu_id, enabled, is_container, depth, get_fx_dis
     end
 end
 
+--------------------------------------------------------------------------------
+-- Convenience wrapper for SideFX context menu
+--------------------------------------------------------------------------------
+
+--- Draw FX context menu with SideFX default callbacks
+-- @param ctx ImGui context wrapper
+-- @param fx ReaWrap FX object
+-- @param guid string FX GUID
+-- @param i number Index for unique menu ID
+-- @param enabled boolean Whether FX is enabled
+-- @param is_container boolean Whether FX is a container
+-- @param depth number Depth in hierarchy
+-- @param get_fx_display_name function Function to get display name: (fx) -> string
+-- @param callbacks table Callbacks object with:
+--   - state: State table (for renaming)
+--   - collapse_from_depth: (depth) -> nil
+--   - refresh_fx_list: () -> nil
+--   - dissolve_container: (fx) -> nil
+--   - add_to_new_container: (fx_list) -> nil
+--   - get_multi_select_count: () -> number
+--   - get_multi_selected_fx: () -> table
+--   - clear_multi_select: () -> nil
+function M.draw_with_sidefx_callbacks(ctx, fx, guid, i, enabled, is_container, depth, get_fx_display_name, callbacks)
+    M.draw(ctx, fx, guid, "fxmenu" .. i, enabled, is_container, depth, get_fx_display_name, {
+        on_open_fx = function(fx) fx:show(3) end,
+        on_toggle_enabled = function(fx) fx:set_enabled(not fx:get_enabled()) end,
+        on_rename = function(guid, display_name)
+            callbacks.state.renaming_fx = guid
+            callbacks.state.rename_text = display_name
+        end,
+        on_remove_from_container = function(fx, depth)
+            fx:move_out_of_container()
+            callbacks.collapse_from_depth(depth)
+            callbacks.refresh_fx_list()
+        end,
+        on_dissolve_container = function(fx, depth)
+            callbacks.dissolve_container(fx)
+            callbacks.collapse_from_depth(depth)
+            callbacks.refresh_fx_list()
+        end,
+        on_delete = function(fx, depth)
+            fx:delete()
+            callbacks.collapse_from_depth(depth)
+            callbacks.refresh_fx_list()
+        end,
+        on_add_to_container = function(fx_list)
+            callbacks.add_to_new_container(fx_list)
+        end,
+        get_multi_select_count = callbacks.get_multi_select_count,
+        get_multi_selected_fx = callbacks.get_multi_selected_fx,
+        clear_multi_select = callbacks.clear_multi_select,
+    })
+end
+
 return M
-
-
