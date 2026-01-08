@@ -211,14 +211,17 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     end
                     ctx:spacing()
 
-                    -- Rate slider/dropdown (narrower width)
-                    local rate_width = 120
+                    -- Rate and Phase on same line (no labels)
+                    local rate_width = 100
+                    local phase_width = 80
+
+                    -- Rate slider/dropdown
                     if tempo_mode and tempo_mode < 0.5 then
                         -- Free mode - show Hz slider (slider2)
                         local ok_rate, rate_hz = pcall(function() return expanded_modulator:get_param_normalized(1) end)
                         if ok_rate then
                             ctx:set_next_item_width(rate_width)
-                            local changed, new_rate = ctx:slider_double("Hz##rate_" .. guid, rate_hz, 0.01, 20, "%.2f")
+                            local changed, new_rate = ctx:slider_double("##rate_" .. guid, rate_hz, 0.01, 20, "%.2f Hz")
                             if changed then
                                 expanded_modulator:set_param_normalized(1, new_rate)
                                 interacted = true
@@ -249,13 +252,12 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         end
                     end
 
-                    ctx:spacing()
+                    ctx:same_line()
 
-                    -- Phase and Depth on same line (no labels)
-                    local param_width = 88
+                    -- Phase slider
                     local ok_phase, phase = pcall(function() return expanded_modulator:get_param_normalized(4) end)
                     if ok_phase then
-                        ctx:set_next_item_width(param_width)
+                        ctx:set_next_item_width(phase_width)
                         local phase_deg = phase * 360
                         local changed, new_phase_deg = ctx:slider_double("##phase_" .. guid, phase_deg, 0, 360, "%.0f°")
                         if changed then
@@ -264,22 +266,6 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         end
                         if ctx:is_item_hovered() then
                             ctx:set_tooltip("Phase")
-                        end
-                    end
-
-                    ctx:same_line()
-
-                    local ok_depth, depth = pcall(function() return expanded_modulator:get_param_normalized(5) end)
-                    if ok_depth then
-                        ctx:set_next_item_width(param_width)
-                        local depth_pct = depth * 100
-                        local changed, new_depth_pct = ctx:slider_double("##depth_" .. guid, depth_pct, 0, 100, "%.0f%%")
-                        if changed then
-                            expanded_modulator:set_param_normalized(5, new_depth_pct / 100)
-                            interacted = true
-                        end
-                        if ctx:is_item_hovered() then
-                            ctx:set_tooltip("Depth")
                         end
                     end
 
