@@ -483,7 +483,7 @@ local function draw_selected_chain_column_if_expanded(ctx, rack_data, rack_guid)
     end
 end
 
-local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
+local function draw_device_chain(ctx, fx_list, avail_width, avail_height, icon_font_ref)
     device_chain.draw(ctx, fx_list, avail_width, avail_height, {
         state = state,
         get_fx_display_name = get_fx_display_name,
@@ -496,7 +496,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height)
         is_rack_container = is_rack_container,
         is_utility_fx = is_utility_fx,
         chain_item = chain_item,
-        icon_font = icon_font,
+        icon_font = icon_font_ref and icon_font_ref.value or nil,
         draw_selected_chain_column_if_expanded = draw_selected_chain_column_if_expanded,
         draw_rack_panel = draw_rack_panel,
     })

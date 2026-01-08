@@ -208,7 +208,8 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
 
         -- Column: UI button
         ctx:table_set_column_index(col_idx)
-        if drawing.draw_ui_icon(ctx, "##ui_header_" .. state_guid, 24, 20) then
+        local icon_font = opts.icon_font
+        if drawing.draw_ui_icon(ctx, "##ui_header_" .. state_guid, 24, 20, icon_font) then
             pcall(function() fx:show(3) end)
             interacted = true
         end

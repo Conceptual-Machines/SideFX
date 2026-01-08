@@ -199,7 +199,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
                         -- Column 2: UI icon
                         ctx:table_set_column_index(1)
-                        if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20) then
+                        if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20, opts.icon_font) then
                             expanded_modulator:show(3)
                             interacted = true
                         end

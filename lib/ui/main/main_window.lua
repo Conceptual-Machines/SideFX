@@ -236,7 +236,7 @@ function M.create_callbacks(opts)
                     end
 
                     -- Draw the horizontal device chain (includes modulators)
-                    draw_device_chain(ctx, filtered_fx, chain_w, avail_h)
+                    draw_device_chain(ctx, filtered_fx, chain_w, avail_h, icon_font_ref)
                 end
 
                 ctx:end_child()
