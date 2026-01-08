@@ -305,6 +305,7 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
 
         -- Header Column 2: Device name/path/mix/delta/ui when expanded, buttons when collapsed
         r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+        ctx:push_id("device_area_" .. guid)  -- Scope for device-only context menu
         if not is_device_collapsed then
             -- Expanded: show full device header
             if header.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag_guid, enabled, opts, colors, state_guid) then
@@ -357,6 +358,10 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
                 interacted = true
             end
         end
+
+        -- Right-click context menu (only for device area, not modulators)
+        draw_context_menu(ctx, fx, guid, name, enabled, opts)
+        ctx:pop_id()  -- End device_area scope
     end)  -- end with_table (panel_outer)
 
     return interacted
@@ -653,9 +658,6 @@ function M.draw(ctx, fx, opts)
     if draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, is_sidebar_collapsed, cfg, visible_params, visible_count, collapsed_sidebar_w, mod_sidebar_w, state_guid, name, device_id, drag_guid, enabled, opts, colors, avail_height) then
         interacted = true
     end
-
-    -- Right-click context menu
-    draw_context_menu(ctx, fx, guid, name, enabled, opts)
 
     ctx:pop_id()
 
