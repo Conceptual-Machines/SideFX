@@ -1037,6 +1037,95 @@ function M.reorder_chain_in_rack(rack, chain_guid, target_chain_guid)
     return true
 end
 
+--- Move a chain from one rack to another
+-- @param source_rack TrackFX Source rack container
+-- @param target_rack TrackFX Target rack container
+-- @param chain_guid string Chain GUID to move
+-- @param target_chain_guid string|nil Target chain GUID to insert before (nil = end)
+-- @return boolean Success
+function M.move_chain_between_racks(source_rack, target_rack, chain_guid, target_chain_guid)
+    if not state.track or not source_rack or not target_rack or not chain_guid then return false end
+    if not fx_utils.is_rack_container(source_rack) or not fx_utils.is_rack_container(target_rack) then
+        return false
+    end
+
+    -- Can't move to same rack (use reorder instead)
+    if source_rack:get_guid() == target_rack:get_guid() then
+        return M.reorder_chain_in_rack(source_rack, chain_guid, target_chain_guid)
+    end
+
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+
+    -- Get GUIDs before operations
+    local source_rack_guid = source_rack:get_guid()
+    local target_rack_guid = target_rack:get_guid()
+
+    -- Find chain in source rack
+    local chain = state.track:find_fx_by_guid(chain_guid)
+    if not chain then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Move Chain (failed)", -1)
+        return false
+    end
+
+    -- Verify chain is in source rack
+    local parent = chain:get_parent_container()
+    if not parent or parent:get_guid() ~= source_rack_guid then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Move Chain (failed)", -1)
+        return false
+    end
+
+    -- Find target position in target rack
+    local target_pos = 0
+    local mixer_pos = nil
+
+    for child in target_rack:iter_container_children() do
+        local ok, name = pcall(function() return child:get_name() end)
+        if ok and name and (name:match("^_") or name:find("Mixer")) then
+            mixer_pos = target_pos
+            break
+        end
+
+        if target_chain_guid and child:get_guid() == target_chain_guid then
+            break
+        end
+        target_pos = target_pos + 1
+    end
+
+    -- If no specific target, insert before mixer (or at end)
+    if not target_chain_guid then
+        target_pos = mixer_pos or target_pos
+    end
+
+    -- Extract chain from source rack
+    chain:move_out_of_container()
+
+    -- Re-find everything by GUID after move
+    chain = state.track:find_fx_by_guid(chain_guid)
+    source_rack = state.track:find_fx_by_guid(source_rack_guid)
+    target_rack = state.track:find_fx_by_guid(target_rack_guid)
+
+    if not chain or not source_rack or not target_rack then
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Move Chain (failed)", -1)
+        return false
+    end
+
+    -- Insert into target rack
+    target_rack:add_fx_to_container(chain, target_pos)
+
+    -- Renumber chains in both racks
+    M.renumber_chains_in_rack(source_rack)
+    M.renumber_chains_in_rack(target_rack)
+
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("SideFX: Move Chain Between Racks", -1)
+
+    return true
+end
+
 --------------------------------------------------------------------------------
 -- Renaming Helpers
 --------------------------------------------------------------------------------

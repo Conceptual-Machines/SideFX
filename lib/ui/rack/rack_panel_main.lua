@@ -208,6 +208,7 @@ local function draw_chains_table(ctx, chains, rack, mixer, is_nested, state, get
                     end,
                     on_add_device_to_chain = add_device_to_chain,
                     on_reorder_chain = reorder_chain_in_rack,
+                    on_move_chain_between_racks = move_chain_between_racks,
                     on_rename_chain = function(chain_guid, custom_name)
                         state.renaming_fx = chain_guid
                         state.rename_text = custom_name or ""
@@ -310,6 +311,7 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
     local get_fx_display_name = opts.get_fx_display_name
     local add_device_to_chain = opts.add_device_to_chain
     local reorder_chain_in_rack = opts.reorder_chain_in_rack
+    local move_chain_between_racks = opts.move_chain_between_racks
     local add_chain_to_rack = opts.add_chain_to_rack
     local add_nested_rack_to_rack = opts.add_nested_rack_to_rack
     local drawing_module = opts.drawing or drawing

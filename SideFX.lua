@@ -265,6 +265,7 @@ local add_nested_rack_to_rack = rack_backend.add_nested_rack_to_rack
 local add_device_to_chain = rack_backend.add_device_to_chain
 local add_rack_to_chain = rack_backend.add_rack_to_chain
 local reorder_chain_in_rack = rack_backend.reorder_chain_in_rack
+local move_chain_between_racks = rack_backend.move_chain_between_racks
 local renumber_chains_in_rack = rack_backend.renumber_chains_in_rack
 
 -- Use helper functions from other modules
@@ -449,6 +450,7 @@ local function draw_rack_panel(ctx, rack, avail_height, is_nested, callbacks)
         get_fx_display_name = get_fx_display_name,
         add_device_to_chain = add_device_to_chain,
         reorder_chain_in_rack = reorder_chain_in_rack,
+        move_chain_between_racks = move_chain_between_racks,
         add_chain_to_rack = add_chain_to_rack,
         add_nested_rack_to_rack = add_nested_rack_to_rack,
         drawing = drawing,

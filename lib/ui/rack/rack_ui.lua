@@ -514,10 +514,23 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
 
     -- Drop target for chain reordering (on the rest of the row)
     if ctx:begin_drag_drop_target() then
-        -- Handle chain reorder
+        -- Handle chain reorder/move
         local accepted_chain, dragged_guid = ctx:accept_drag_drop_payload("CHAIN_REORDER")
         if accepted_chain and dragged_guid then
-            callbacks.on_reorder_chain(rack, dragged_guid, chain_guid)
+            -- Check if it's same rack or cross-rack move
+            local dragged_chain = state.track:find_fx_by_guid(dragged_guid)
+            if dragged_chain then
+                local source_rack = dragged_chain:get_parent_container()
+                if source_rack and source_rack:get_guid() == rack:get_guid() then
+                    -- Same rack: reorder
+                    callbacks.on_reorder_chain(rack, dragged_guid, chain_guid)
+                else
+                    -- Different rack: move between racks
+                    if callbacks.on_move_chain_between_racks and source_rack then
+                        callbacks.on_move_chain_between_racks(source_rack, rack, dragged_guid, chain_guid)
+                    end
+                end
+            end
         end
         ctx:end_drag_drop_target()
     end

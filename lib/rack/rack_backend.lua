@@ -165,6 +165,18 @@ function M.reorder_chain_in_rack(rack, chain_guid, target_chain_guid)
     return result
 end
 
+--- Move a chain from one rack to another
+-- @param source_rack TrackFX Source rack container
+-- @param target_rack TrackFX Target rack container
+-- @param chain_guid string Chain GUID to move
+-- @param target_chain_guid string|nil Target chain GUID (nil = end)
+-- @return boolean True if successful
+function M.move_chain_between_racks(source_rack, target_rack, chain_guid, target_chain_guid)
+    local result = rack_module.move_chain_between_racks(source_rack, target_rack, chain_guid, target_chain_guid)
+    if result then refresh_fx_list() end
+    return result
+end
+
 --- Renumber chains in a rack after reordering
 -- @param rack TrackFX Rack container
 function M.renumber_chains_in_rack(rack)
