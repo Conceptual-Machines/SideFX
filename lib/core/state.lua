@@ -774,19 +774,22 @@ function M.check_fx_chain_changes()
         end
         
         -- Check container child counts (detects deletions inside containers)
-        local guid = current.guids[i]
-        if snapshot.container_children[guid] and current.container_children[guid] then
-            if snapshot.container_children[guid] ~= current.container_children[guid] then
+        -- Only check if snapshot has container_children (backwards compatibility)
+        if snapshot.container_children then
+            local guid = current.guids[i]
+            if snapshot.container_children[guid] and current.container_children[guid] then
+                if snapshot.container_children[guid] ~= current.container_children[guid] then
+                    change_detected = true
+                    change_message = string.format("Container '%s' child count changed (%d -> %d)", 
+                        current.names[i], snapshot.container_children[guid], current.container_children[guid])
+                    break
+                end
+            elseif snapshot.container_children[guid] ~= current.container_children[guid] then
+                -- Container appeared or disappeared
                 change_detected = true
-                change_message = string.format("Container '%s' child count changed (%d -> %d)", 
-                    current.names[i], snapshot.container_children[guid], current.container_children[guid])
+                change_message = string.format("Container '%s' structure changed", current.names[i])
                 break
             end
-        elseif snapshot.container_children[guid] ~= current.container_children[guid] then
-            -- Container appeared or disappeared
-            change_detected = true
-            change_message = string.format("Container '%s' structure changed", current.names[i])
-            break
         end
     end
     end
