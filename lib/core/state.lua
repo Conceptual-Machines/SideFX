@@ -670,6 +670,7 @@ function M.capture_fx_chain_snapshot()
         guids = {},
         names = {},
         container_children = {},  -- {[container_guid] = child_count}
+        total_fx_count = r.TrackFX_GetCount(state.track.pointer),  -- Total including nested (cheap check)
         timestamp = r.time_precise(),
     }
     
@@ -728,6 +729,7 @@ function M.check_fx_chain_changes()
         guids = {},
         names = {},
         container_children = {},
+        total_fx_count = r.TrackFX_GetCount(state.track.pointer),  -- Total including nested
     }
     
     local ok = pcall(function()
@@ -764,9 +766,13 @@ function M.check_fx_chain_changes()
     local change_detected = false
     local change_message = ""
     
-    if current.count ~= snapshot.count then
+    -- First check total FX count (cheapest, catches any nested changes)
+    if snapshot.total_fx_count and current.total_fx_count ~= snapshot.total_fx_count then
         change_detected = true
-        change_message = string.format("FX count changed (%d -> %d)", snapshot.count, current.count)
+        change_message = string.format("Total FX count changed (%d -> %d)", snapshot.total_fx_count, current.total_fx_count)
+    elseif current.count ~= snapshot.count then
+        change_detected = true
+        change_message = string.format("Top-level FX count changed (%d -> %d)", snapshot.count, current.count)
     else
     -- Check order and names
     for i = 1, current.count do
