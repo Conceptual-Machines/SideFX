@@ -179,7 +179,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     local editor_key = "curve_" .. guid .. "_" .. expanded_slot_idx
                     state.curve_editor_state[editor_key] = state.curve_editor_state[editor_key] or {}
                     
-                    local editor_width = cfg.mod_sidebar_width - 20  -- Use available width
+                    local editor_width = ctx:get_content_region_avail_width()  -- Use actual available width
                     local editor_height = 120  -- Compact height for sidebar
                     
                     local editor_interacted, new_state = curve_editor.draw(
