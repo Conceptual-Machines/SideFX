@@ -9,6 +9,7 @@ local state_module = require('lib.core.state')
 local PARAM = require('lib.modulator.modulator_constants')
 local drawing = require('lib.ui.common.drawing')
 local modulator_module = require('lib.modulator.modulator')
+local curve_editor = require('lib.ui.common.curve_editor')
 
 -- Modulator types
 local MODULATOR_TYPES = {
@@ -172,6 +173,26 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                 if ok and param_count and param_count > 0 then
                     ctx:separator()
                     ctx:spacing()
+                    
+                    -- Curve Editor (main visual element)
+                    state.curve_editor_state = state.curve_editor_state or {}
+                    local editor_key = "curve_" .. guid .. "_" .. expanded_slot_idx
+                    state.curve_editor_state[editor_key] = state.curve_editor_state[editor_key] or {}
+                    
+                    local editor_width = cfg.mod_sidebar_width - 20  -- Use available width
+                    local editor_height = 120  -- Compact height for sidebar
+                    
+                    local editor_interacted, new_state = curve_editor.draw(
+                        ctx, expanded_modulator, editor_width, editor_height,
+                        state.curve_editor_state[editor_key]
+                    )
+                    state.curve_editor_state[editor_key] = new_state
+                    if editor_interacted then
+                        interacted = true
+                    end
+                    
+                    ctx:spacing()
+                    
                     -- Set control width shorter for compact layout
                     local control_width = 180
 

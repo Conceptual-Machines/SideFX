@@ -26,9 +26,23 @@ M.PARAM_SNAP = 13          -- slider27: Snap
 
 -- LFO Mode section (slider 28) - comes AFTER sliders 26-27 by number!
 M.PARAM_LFO_MODE = 14      -- slider28: Loop/One Shot
+M.PARAM_CURVE_SHAPE = 15   -- slider29: Global Curve Shape offset (-1 to +1)
 
 -- Curve section
-M.PARAM_NUM_POINTS = 15    -- slider30: Number of points
-M.PARAM_POINT_START = 16   -- slider40+: First curve point (X1)
+M.PARAM_NUM_POINTS = 16    -- slider30: Number of points
+M.PARAM_POINT_START = 17   -- slider40+: First curve point (X1)
+-- Points use 2 params each (X, Y), so point N is at PARAM_POINT_START + N*2
+
+-- Per-segment curve values (slider72-86)
+-- Parameters are indexed by slider number order, so we need to calculate offset
+-- slider72 comes after slider71 (last point Y), which is param 48 (17 + 16*2 - 1)
+M.PARAM_SEGMENT_CURVE_START = 49  -- slider72: Segment 0 curve
+-- Segment N curve is at PARAM_SEGMENT_CURVE_START + N
+
+-- Playhead position (slider87) - for UI display
+M.PARAM_PLAYHEAD_POSITION = 64    -- slider87: Current phase position (0-1)
+
+-- Helper: Max segments (16 points = 15 segments)
+M.MAX_SEGMENTS = 15
 
 return M

@@ -20,6 +20,7 @@ slider25:500<1,5000,1>-Release (ms)
 
 // LFO Mode
 slider28:0<0,1,1{Loop,One Shot}>-LFO Mode
+slider29:0<-1,1,0.01>-Curve Shape
 
 // Editor
 slider26:2<0,4,1{Off,4,8,16,32}>Grid
@@ -61,6 +62,27 @@ slider68:0.5<0,1,0.001>-P15X
 slider69:0.5<0,1,0.001>-P15Y
 slider70:0.5<0,1,0.001>-P16X
 slider71:0.5<0,1,0.001>-P16Y
+
+// Per-segment curve values (15 segments max between 16 points)
+// -1 = ease-out (bend inward), 0 = straight, +1 = ease-in (bend outward)
+slider72:0<-1,1,0.01>-Seg1 Curve
+slider73:0<-1,1,0.01>-Seg2 Curve
+slider74:0<-1,1,0.01>-Seg3 Curve
+slider75:0<-1,1,0.01>-Seg4 Curve
+slider76:0<-1,1,0.01>-Seg5 Curve
+slider77:0<-1,1,0.01>-Seg6 Curve
+slider78:0<-1,1,0.01>-Seg7 Curve
+slider79:0<-1,1,0.01>-Seg8 Curve
+slider80:0<-1,1,0.01>-Seg9 Curve
+slider81:0<-1,1,0.01>-Seg10 Curve
+slider82:0<-1,1,0.01>-Seg11 Curve
+slider83:0<-1,1,0.01>-Seg12 Curve
+slider84:0<-1,1,0.01>-Seg13 Curve
+slider85:0<-1,1,0.01>-Seg14 Curve
+slider86:0<-1,1,0.01>-Seg15 Curve
+
+// Current playhead position (for UI display, read-only from UI perspective)
+slider87:0<0,1,0.001>-Playhead Position
 
 @init
 MAX_NODES = 16;
@@ -155,6 +177,33 @@ function set_y(i, v) (
   (slider71 = v; slider_automate(slider71););
 );
 
+// Get segment curve value (0-14 for segments between points)
+function get_seg_curve(i) (
+  i == 0 ? slider72 : i == 1 ? slider73 : i == 2 ? slider74 : i == 3 ? slider75 :
+  i == 4 ? slider76 : i == 5 ? slider77 : i == 6 ? slider78 : i == 7 ? slider79 :
+  i == 8 ? slider80 : i == 9 ? slider81 : i == 10 ? slider82 : i == 11 ? slider83 :
+  i == 12 ? slider84 : i == 13 ? slider85 : slider86;
+);
+
+// Set segment curve value
+function set_seg_curve(i, v) (
+  i == 0 ? (slider72 = v; slider_automate(slider72);) :
+  i == 1 ? (slider73 = v; slider_automate(slider73);) :
+  i == 2 ? (slider74 = v; slider_automate(slider74);) :
+  i == 3 ? (slider75 = v; slider_automate(slider75);) :
+  i == 4 ? (slider76 = v; slider_automate(slider76);) :
+  i == 5 ? (slider77 = v; slider_automate(slider77);) :
+  i == 6 ? (slider78 = v; slider_automate(slider78);) :
+  i == 7 ? (slider79 = v; slider_automate(slider79);) :
+  i == 8 ? (slider80 = v; slider_automate(slider80);) :
+  i == 9 ? (slider81 = v; slider_automate(slider81);) :
+  i == 10 ? (slider82 = v; slider_automate(slider82);) :
+  i == 11 ? (slider83 = v; slider_automate(slider83);) :
+  i == 12 ? (slider84 = v; slider_automate(slider84);) :
+  i == 13 ? (slider85 = v; slider_automate(slider85);) :
+  (slider86 = v; slider_automate(slider86););
+);
+
 // Sort points and copy to temp arrays
 function sort_and_copy() local(i, j, min_idx, min_x, temp_x, temp_y, n) (
   n = slider30;
@@ -238,18 +287,53 @@ function update_spline() local(i, dx, m, m_next, cm, dx_next, n) (
   );
 );
 
-// Evaluate spline
-function eval_spline(x) local(i, diff, diff_sq, out, n) (
+// Apply curve shape to normalized t (0-1)
+// curve_shape: -1 = bend inward (ease-out/log), 0 = straight/linear, +1 = bend outward (ease-in/exp)
+function apply_curve(t, curve_shape) local(power) (
+  curve_shape == 0 ? t : (
+    // Convert curve_shape to power: -1 gives 0.5 (sqrt), +1 gives 2 (square)
+    power = pow(2, curve_shape);
+    pow(t, power);
+  );
+);
+
+// Evaluate curve with per-segment shape control
+// Each segment can have its own curve shape (-1 to +1)
+// slider29 acts as global offset added to per-segment values
+function eval_spline(x) local(i, n, seg_start, seg_end, seg_len, t_norm, t_curved, y_start, y_end, seg_curve, global_curve, final_curve) (
   n = slider30;
+  global_curve = slider29;  // Global curve offset
   x = max(0, min(1, x));
 
+  // Find which segment we're in (sorted by X)
   i = 0;
   while (i < n - 1 && mem_sorted_x[i + 1] < x) ( i += 1; );
   i = max(0, min(i, n - 2));
 
-  diff = x - mem_sorted_x[i];
-  diff_sq = diff * diff;
-  out = mem_sorted_y[i] + mem_c1[i] * diff + mem_c2[i] * diff_sq + mem_c3[i] * diff * diff_sq;
+  // Get segment boundaries
+  seg_start = mem_sorted_x[i];
+  seg_end = mem_sorted_x[i + 1];
+  seg_len = seg_end - seg_start;
+  seg_len < 0.0001 ? seg_len = 0.0001;
+
+  // Y values at segment endpoints
+  y_start = mem_sorted_y[i];
+  y_end = mem_sorted_y[i + 1];
+
+  // Normalized position within segment (0-1)
+  t_norm = (x - seg_start) / seg_len;
+  t_norm = max(0, min(1, t_norm));
+
+  // Get per-segment curve value and combine with global offset
+  seg_curve = get_seg_curve(i);
+  final_curve = max(-1, min(1, seg_curve + global_curve));
+
+  // Apply curve shape (0 = linear, negative = ease-out, positive = ease-in)
+  t_curved = apply_curve(t_norm, final_curve);
+
+  // Linear interpolation with curved t
+  out = y_start + (y_end - y_start) * t_curved;
+
   max(0, min(1, out));
 );
 
@@ -395,198 +479,22 @@ phase >= 1 ? phase -= 1;
 raw_lfo = eval_spline(phase);
 final_output = raw_lfo * slider6 * env_value;
 slider4 = final_output;
+slider87 = phase;  // Expose current playhead position for UI (read-only, no automate)
 slider_automate(slider4);
 
-@gfx 500 400
+@gfx 300 80
 gfx_clear = 0x1a1a1a;
 
-margin = 50;
-curve_x = margin;
-curve_y = margin;
-curve_w = gfx_w - margin * 2;
-curve_h = gfx_h - margin * 2 - 50;
-
-gfx_set(0.12, 0.12, 0.14, 1);
-gfx_rect(curve_x, curve_y, curve_w, curve_h);
-
-// Grid based on slider26: 0=Off, 1=4, 2=8, 3=16, 4=32
-grid_div = slider26 == 0 ? 0 : slider26 == 1 ? 4 : slider26 == 2 ? 8 : slider26 == 3 ? 16 : 32;
-gfx_set(0.22, 0.22, 0.25, 1);
-grid_div > 0 ? (
-  i = 0;
-  loop(grid_div + 1,
-    gx = curve_x + i * curve_w / grid_div;
-    gfx_line(gx, curve_y, gx, curve_y + curve_h);
-    i += 1;
-  );
-);
-// Y grid always 4
-i = 0;
-loop(5,
-  gy = curve_y + i * curve_h / 4;
-  gfx_line(curve_x, gy, curve_x + curve_w, gy);
-  i += 1;
-);
-
-// Draw curve
-gfx_set(0.2, 0.9, 0.5, 1);
-resolution = 200;
-i = 0;
-loop(resolution,
-  t = i / resolution;
-  t_next = (i + 1) / resolution;
-  y1 = eval_spline(t);
-  y2 = eval_spline(t_next);
-  px1 = curve_x + t * curve_w;
-  py1 = curve_y + curve_h - y1 * curve_h;
-  px2 = curve_x + t_next * curve_w;
-  py2 = curve_y + curve_h - y2 * curve_h;
-  gfx_line(px1, py1, px2, py2);
-  i += 1;
-);
-
-// LFO position
-gfx_set(1, 0.5, 0.2, 0.6);
-lfo_px = curve_x + phase * curve_w;
-gfx_line(lfo_px, curve_y, lfo_px, curve_y + curve_h);
-
-gfx_set(0.2, 0.9, 0.5, 1);
-out_py = curve_y + curve_h - final_output * curve_h;
-gfx_circle(lfo_px, out_py, 5, 1);
-
-// Mouse
-mouse_in_area = mouse_x >= curve_x && mouse_x <= curve_x + curve_w &&
-                mouse_y >= curve_y && mouse_y <= curve_y + curve_h;
-
-norm_mx = (mouse_x - curve_x) / curve_w;
-norm_my = 1.0 - (mouse_y - curve_y) / curve_h;
-
-node_threshold = 0.05;
-hover_node = find_nearest(norm_mx, norm_my, node_threshold);
-
-left_click = mouse_cap & 1;
-right_click = mouse_cap & 2;
-last_left = last_mouse_cap & 1;
-last_right = last_mouse_cap & 2;
-// Modifiers: Shift=4, Ctrl=8, Alt=16
-shift_held = mouse_cap & 4;
-ctrl_held = mouse_cap & 8;
-alt_held = mouse_cap & 16;
-
-left_click ? (
-  cap_mode == 0 && !last_left ? (
-    drag_node = find_nearest(norm_mx, norm_my, node_threshold);
-    drag_node >= 0 ? (
-      cap_mode = 1;
-      drag_start_x = get_x(drag_node);
-      drag_start_y = get_y(drag_node);
-    ) : mouse_in_area ? (
-      add_node(norm_mx, norm_my);
-      drag_node = find_nearest(norm_mx, norm_my, node_threshold);
-      drag_node >= 0 ? (
-        cap_mode = 1;
-        drag_start_x = norm_mx;
-        drag_start_y = norm_my;
-      );
-    );
-  ) : cap_mode == 1 && drag_node >= 0 ? (
-    new_x = max(0.001, min(0.999, norm_mx));
-    new_y = max(0, min(1, norm_my));
-
-    // Shift = Y-only (lock X), Ctrl = X-only (lock Y)
-    shift_held ? ( new_x = drag_start_x; );
-    ctrl_held ? ( new_y = drag_start_y; );
-
-    // Snap to grid (slider27=On, unless Alt held)
-    slider27 == 1 && !alt_held && grid_div > 0 ? (
-      new_x = floor(new_x * grid_div + 0.5) / grid_div;
-      new_y = floor(new_y * 4 + 0.5) / 4;
-    );
-
-    // Lock endpoints
-    drag_start_x < 0.01 ? ( new_x = 0; );
-    drag_start_x > 0.99 ? ( new_x = 1; );
-
-    set_x(drag_node, new_x);
-    set_y(drag_node, new_y);
-    update_spline();
-  );
-) : ( cap_mode == 1 ? cap_mode = 0; drag_node = -1; );
-
-right_click && !last_right && mouse_in_area ? (
-  click_node = find_nearest(norm_mx, norm_my, node_threshold);
-  click_node >= 0 && slider30 > 2 ? (
-    // Find indices of leftmost and rightmost points
-    min_x_idx = 0;
-    max_x_idx = 0;
-    min_x_val = get_x(0);
-    max_x_val = get_x(0);
-    i = 1;
-    loop(slider30 - 1,
-      node_x = get_x(i);
-      node_x < min_x_val ? (
-        min_x_val = node_x;
-        min_x_idx = i;
-      );
-      node_x > max_x_val ? (
-        max_x_val = node_x;
-        max_x_idx = i;
-      );
-      i += 1;
-    );
-    // Allow deletion if not leftmost or rightmost point
-    click_node != min_x_idx && click_node != max_x_idx ? remove_node(click_node);
-  );
-);
-
-last_mouse_cap = mouse_cap;
-
-// Draw nodes
-i = 0;
-n = slider30;
-loop(n,
-  nx = curve_x + get_x(i) * curve_w;
-  ny = curve_y + curve_h - get_y(i) * curve_h;
-  i == hover_node || i == drag_node ? (
-    gfx_set(1, 0.7, 0.3, 1); node_size = 8;
-  ) : ( gfx_set(1, 0.5, 0.1, 1); node_size = 6; );
-  gfx_circle(nx, ny, node_size, 1);
-  gfx_set(1, 1, 1, 0.5);
-  gfx_circle(nx, ny, node_size, 0);
-  i += 1;
-);
-
-// Status
-gfx_set(0.7, 0.7, 0.7, 1);
-gfx_x = curve_x; gfx_y = 12;
+// Simple status display - full editor is in SideFX UI
+gfx_set(0.5, 0.5, 0.5, 1);
+gfx_x = 20; gfx_y = 20;
 gfx_drawstr("SideFX Modulator");
 
-gfx_x = curve_x; gfx_y = curve_y + curve_h + 12;
-slider1 == 1 ? (
-  sr = slider3;
-  sr == 0 ? strcpy(#sn, "8 bars") : sr == 1 ? strcpy(#sn, "4 bars") :
-  sr == 2 ? strcpy(#sn, "2 bars") : sr == 3 ? strcpy(#sn, "1 bar") :
-  sr == 4 ? strcpy(#sn, "1/2") : sr == 5 ? strcpy(#sn, "1/4") :
-  sr == 6 ? strcpy(#sn, "1/4T") : sr == 7 ? strcpy(#sn, "1/4.") :
-  sr == 8 ? strcpy(#sn, "1/8") : sr == 9 ? strcpy(#sn, "1/8T") :
-  sr == 10 ? strcpy(#sn, "1/8.") : sr == 11 ? strcpy(#sn, "1/16") :
-  sr == 12 ? strcpy(#sn, "1/16T") : sr == 13 ? strcpy(#sn, "1/16.") :
-  sr == 14 ? strcpy(#sn, "1/32") : sr == 15 ? strcpy(#sn, "1/32T") :
-  sr == 16 ? strcpy(#sn, "1/32.") : strcpy(#sn, "1/64");
-  gfx_drawstr(sprintf(#, "SYNC: %s @ %.0f BPM | Out: %.3f", #sn, current_tempo, final_output));
-) : (
-  gfx_drawstr(sprintf(#, "FREE: %.2f Hz | Out: %.3f", rate, final_output));
-);
+gfx_set(0.4, 0.4, 0.4, 1);
+gfx_x = 20; gfx_y = 40;
+gfx_drawstr("Open SideFX for curve editor");
 
-gfx_y += 16;
-trigger_mode == 0 ? strcpy(#tm, "FREE") : trigger_mode == 1 ? strcpy(#tm, "TRANSPORT") :
-trigger_mode == 2 ? strcpy(#tm, "MIDI") : strcpy(#tm, "AUDIO");
-env_value > 0.01 ? gfx_set(0.2, 1, 0.5, 1) : gfx_set(0.3, 0.3, 0.3, 1);
-gfx_circle(curve_x + 5, gfx_y + 5, 5, 1);
-gfx_set(0.7, 0.7, 0.7, 1);
-gfx_x = curve_x + 16;
-gfx_drawstr(sprintf(#, "%s | Pts: %d", #tm, slider30));
-
-gfx_x = curve_x; gfx_y += 18;
-gfx_set(0.45, 0.45, 0.45, 1);
-gfx_drawstr("LMB: add/drag | RMB: delete | Shift: Y-only | Cmd/Ctrl: X-only | Alt: no snap");
+// Output indicator
+gfx_set(0.2, 0.8, 0.4, 1);
+gfx_x = 20; gfx_y = 60;
+gfx_drawstr(sprintf(#, "Output: %.3f", final_output));
