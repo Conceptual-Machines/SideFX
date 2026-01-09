@@ -277,7 +277,11 @@ end
 -- Device operations (uses state singleton via device_module)
 local function add_plugin_to_track(plugin, position)
     local result = device_module.add_plugin_to_track(plugin, position)
-    if result then refresh_fx_list() end
+    if result then 
+        refresh_fx_list()
+        -- Update snapshot after SideFX operation to prevent false warnings
+        state_module.capture_fx_chain_snapshot()
+    end
     return result
 end
 

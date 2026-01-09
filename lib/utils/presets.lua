@@ -243,7 +243,7 @@ function M.save_chain(preset_name)
         return true
     else
         -- Chain saved but metadata failed - still return true
-        return true
+    return true
     end
 end
 

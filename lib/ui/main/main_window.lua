@@ -183,10 +183,12 @@ function M.create_callbacks(opts)
         end,
 
         on_draw = function(self, ctx)
-            -- Handle pending deletion: refresh FX list and clear flag
+            -- Handle pending deletion: refresh FX list and update snapshot
             if state.deletion_pending then
                 state.deletion_pending = false
                 refresh_fx_list()
+                -- Update snapshot after SideFX deletion to prevent false warnings
+                state_module.capture_fx_chain_snapshot()
             end
             
             reaper_theme:apply(ctx)
