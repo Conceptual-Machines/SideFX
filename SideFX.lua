@@ -536,6 +536,7 @@ local function main()
     local window_callbacks = main_window.create_callbacks({
         state = state,
         state_module = state_module,
+        device_module = device_module,
         default_font = default_font,
         icon_font = icon_font,
         reaper_theme = reaper_theme,

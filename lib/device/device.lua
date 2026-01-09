@@ -132,4 +132,226 @@ function M.add_plugin_by_name(plugin_name, position)
     return M.add_plugin_to_track(plugin, position)
 end
 
+--------------------------------------------------------------------------------
+-- Track Conversion
+--------------------------------------------------------------------------------
+
+--- Convert a non-SideFX track to a SideFX track by wrapping existing FX in D-containers.
+-- @return boolean True if conversion was successful
+function M.convert_track_to_sidefx()
+    if not state.track then
+        r.ShowMessageBox("No track selected for conversion.", "SideFX", 0)
+        return false
+    end
+
+    -- Check if track already is a SideFX track
+    if state_module.is_sidefx_track(state.track) then
+        r.ShowMessageBox("Track is already a SideFX track.", "SideFX", 0)
+        return false
+    end
+
+    -- Get all top-level FX
+    local top_level_fx = {}
+    local has_containers = false
+    local has_nested_fx = false
+    
+    local ok_iter = pcall(function()
+        for fx in state.track:iter_track_fx_chain() do
+            local parent = fx:get_parent_container()
+            if not parent then
+                -- Get FX info before we start moving things
+                local ok_name, fx_name = pcall(function() return fx:get_name() end)
+                local ok_guid, fx_guid = pcall(function() return fx:get_guid() end)
+                local ok_is_container, is_container = pcall(function() return fx:is_container() end)
+                
+                if ok_name and ok_guid and fx_name and fx_guid then
+                    -- Check if it's a container (could be non-SideFX container)
+                    if ok_is_container and is_container then
+                        has_containers = true
+                        -- Check if container has children (nested structure)
+                        local ok_children, children = pcall(function()
+                            local children_list = {}
+                            for child in fx:iter_container_children() do
+                                table.insert(children_list, child)
+                            end
+                            return children_list
+                        end)
+                        if ok_children and children and #children > 0 then
+                            has_nested_fx = true
+                        end
+                    end
+                    
+                    -- Skip SideFX JSFX plugins (they shouldn't be top-level anyway)
+                    local name_lower = fx_name:lower()
+                    if not name_lower:find("sidefx_mixer") and 
+                       not name_lower:find("sidefx_utility") and 
+                       not name_lower:find("sidefx_modulator") then
+                        -- Skip if already in a SideFX container (check naming pattern)
+                        local is_sidefx_container = fx_name:match("^D%d+") or 
+                                                   fx_name:match("^R%d+") or 
+                                                   fx_name:match("^C%d+")
+                        if not is_sidefx_container then
+                            table.insert(top_level_fx, {
+                                fx = fx,
+                                guid = fx_guid,
+                                name = fx_name,
+                                is_container = ok_is_container and is_container or false,
+                            })
+                        end
+                    end
+                end
+            else
+                -- FX is nested in a container - this is a complicated case
+                has_nested_fx = true
+            end
+        end
+    end)
+
+    if not ok_iter then
+        r.ShowMessageBox("Can't convert to SideFX - error reading track FX.", "SideFX", 0)
+        return false
+    end
+
+    -- Handle edge cases where conversion is not straightforward
+    if has_nested_fx and has_containers then
+        r.ShowMessageBox("Can't convert to SideFX - track has nested containers.", "SideFX", 0)
+        return false
+    end
+
+    if #top_level_fx == 0 then
+        r.ShowMessageBox("No FX to convert on this track.", "SideFX", 0)
+        return false
+    end
+
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+
+    local converted_count = 0
+    local device_idx = fx_utils.get_next_device_index(state.track)
+
+    -- Convert each FX
+    for _, fx_info in ipairs(top_level_fx) do
+        -- Re-find FX by GUID (indices may have shifted)
+        local fx = state.track:find_fx_by_guid(fx_info.guid)
+        if not fx then
+            -- FX was deleted or moved, skip
+            goto continue
+        end
+
+            -- Check if this is a container with children (complicated case)
+            if fx_info.is_container then
+                local ok_children, has_children = pcall(function()
+                    local child_count = 0
+                    for _ in fx:iter_container_children() do
+                        child_count = child_count + 1
+                        if child_count > 0 then
+                            return true
+                        end
+                    end
+                    return false
+                end)
+                if ok_children and has_children then
+                    -- Container with children - can't convert easily
+                    r.PreventUIRefresh(-1)
+                    r.Undo_EndBlock("SideFX: Convert Track to SideFX (failed)", -1)
+                    r.ShowMessageBox("Can't convert to SideFX - track has containers with nested FX.", "SideFX", 0)
+                    return false
+                end
+            end
+
+        -- Get FX name and short name
+        local ok_name, fx_name = pcall(function() return fx:get_name() end)
+        if not ok_name or not fx_name then
+            goto continue
+        end
+
+        local short_name = naming.get_short_plugin_name(fx_name)
+        local container_name = naming.build_device_name(device_idx, short_name)
+        local fx_name_renamed = naming.build_device_fx_name(device_idx, short_name)
+        local util_name = naming.build_device_util_name(device_idx)
+
+        -- Get original position (before we create container)
+        local original_idx = fx.pointer
+        local container_position = original_idx >= 0 and (-1000 - original_idx) or -1
+
+        -- Create container at the original position
+        local container = state.track:add_fx_by_name("Container", false, container_position)
+        if not container or container.pointer < 0 then
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Convert Track to SideFX (failed)", -1)
+            r.ShowMessageBox("Can't convert to SideFX - failed to create container.", "SideFX", 0)
+            return false
+        end
+
+        -- Rename container
+        container:set_named_config_param("renamed_name", container_name)
+
+        -- Re-find FX by GUID (indices shifted after container creation)
+        fx = state.track:find_fx_by_guid(fx_info.guid)
+        if not fx then
+            -- FX disappeared, clean up container
+            container:delete()
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Convert Track to SideFX (failed)", -1)
+            r.ShowMessageBox("Can't convert to SideFX - FX structure changed during conversion.", "SideFX", 0)
+            return false
+        end
+
+        -- Move FX into container
+        local ok_move = pcall(function()
+            container:add_fx_to_container(fx, 0)
+        end)
+
+        if not ok_move then
+            container:delete()
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Convert Track to SideFX (failed)", -1)
+            r.ShowMessageBox("Can't convert to SideFX - failed to move FX into container.", "SideFX", 0)
+            return false
+        end
+
+        -- Re-find FX inside container and rename it
+        local fx_inside = fx_utils.get_device_main_fx(container)
+        if fx_inside then
+            -- Set wet/dry to 100% by default
+            local wet_idx = fx_inside:get_param_from_ident(":wet")
+            if wet_idx and wet_idx >= 0 then
+                fx_inside:set_param_normalized(wet_idx, 1.0)
+            end
+            -- Rename FX
+            fx_inside:set_named_config_param("renamed_name", fx_name_renamed)
+        end
+
+        -- Add utility to container
+        local util_fx = state.track:add_fx_by_name(M.UTILITY_JSFX, false, -1)
+        if util_fx and util_fx.pointer >= 0 then
+            container:add_fx_to_container(util_fx, 1)
+
+            local util_inside = fx_utils.get_device_utility(container)
+            if util_inside then
+                util_inside:set_named_config_param("renamed_name", util_name)
+            end
+        end
+
+        converted_count = converted_count + 1
+        device_idx = device_idx + 1
+
+        ::continue::
+    end
+
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock(string.format("SideFX: Convert Track to SideFX (%d FX converted)", converted_count), -1)
+
+    -- Mark track as SideFX track
+    if converted_count > 0 then
+        state_module.mark_track_as_sidefx(state.track)
+        -- Refresh FX list to show new structure
+        state_module.refresh_fx_list()
+        return true
+    else
+        r.ShowMessageBox("No FX were converted.", "SideFX", 0)
+        return false
+    end
+end
+
 return M

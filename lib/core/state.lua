@@ -577,20 +577,14 @@ function M.is_sidefx_track(track, cache_result)
     end
     
     -- Check for SideFX JSFX plugins (definitive markers)
+    local track_detection = require('lib.utils.track_detection')
     local ok_scan = pcall(function()
         for entry in track_obj:iter_all_fx_flat() do
             local fx = entry.fx
             local ok_name, name = pcall(function() return fx:get_name() end)
             if ok_name and name then
-                -- Check for SideFX JSFX plugins
-                if name:find("SideFX_Mixer") or 
-                   name:find("SideFX_Utility") or 
-                   name:find("SideFX_Modulator") then
-                    is_sidefx = true
-                    break
-                end
-                -- Also check for container naming patterns (R{n}, C{n}, D{n})
-                if name:match("^R%d+") or name:match("^C%d+") or name:match("^D%d+") then
+                -- Use track_detection utility for consistent detection
+                if track_detection.is_sidefx_fx_name(name) then
                     is_sidefx = true
                     break
                 end

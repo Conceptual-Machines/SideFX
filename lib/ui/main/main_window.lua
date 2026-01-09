@@ -28,6 +28,7 @@ local M = {}
 function M.create_callbacks(opts)
     local state = opts.state
     local state_module = opts.state_module
+    local device_module = opts.device_module
     local reaper_theme = opts.reaper_theme
     local get_selected_track = opts.get_selected_track
     local check_fx_changes = opts.check_fx_changes
@@ -239,7 +240,7 @@ function M.create_callbacks(opts)
                         -- Track has FX but is not a SideFX track - show warning message
                         local avail_w, avail_h = ctx:get_content_region_avail()
                         local msg_w = 400
-                        local msg_h = 80
+                        local msg_h = 120  -- Increased height for button
                         local msg_x = (avail_w - msg_w) / 2
                         local msg_y = (avail_h - msg_h) / 2
 
@@ -271,8 +272,10 @@ function M.create_callbacks(opts)
                             local text = string.format("Track '%s' is not a SideFX track", track_name)
                             local text_w, text_h = ctx:calc_text_size(text)
                             local child_w, child_h = ctx:get_content_region_avail()
+                            
+                            -- Center vertically (accounting for button below)
                             local text_x = (child_w - text_w) / 2
-                            local text_y = (child_h - text_h) / 2
+                            local text_y = (child_h - text_h - 35) / 2  -- Leave space for button
                             if text_y > 0 then
                                 ctx:dummy(0, text_y)
                             end
@@ -283,6 +286,25 @@ function M.create_callbacks(opts)
                             ctx:push_style_color(imgui.Col.Text(), 0xFFFFAAFF)  -- Yellow text for warning
                             ctx:text(text)
                             ctx:pop_style_color()
+                            
+                            -- Convert button
+                            ctx:dummy(0, 10)  -- Spacing
+                            local btn_w = 200
+                            local btn_x = (child_w - btn_w) / 2
+                            if btn_x > 0 then
+                                ctx:dummy(btn_x, 0)
+                                ctx:same_line()
+                            end
+                            
+                            if device_module and device_module.convert_track_to_sidefx then
+                                if ctx:button("Convert to SideFX Track", btn_w, 0) then
+                                    local success = device_module.convert_track_to_sidefx()
+                                    if success then
+                                        -- Refresh FX list to show converted structure
+                                        refresh_fx_list()
+                                    end
+                                end
+                            end
                         end
                         ctx:end_child()
                         ctx:pop_style_var()
