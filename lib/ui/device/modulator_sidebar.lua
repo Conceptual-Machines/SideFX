@@ -272,12 +272,16 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     -- Rate slider/dropdown
                     if tempo_mode and tempo_mode < 0.5 then
                         -- Free mode - show Hz slider (slider2)
-                        local ok_rate, rate_hz = pcall(function() return expanded_modulator:get_param_normalized(1) end)
+                        -- get_param_normalized returns 0-1, need to convert to Hz (0.01-20)
+                        local ok_rate, rate_norm = pcall(function() return expanded_modulator:get_param_normalized(1) end)
                         if ok_rate then
+                            local rate_hz = 0.01 + rate_norm * 19.99
                             ctx:set_next_item_width(rate_width)
                             local changed, new_rate = ctx:slider_double("##rate_" .. guid, rate_hz, 0.01, 20, "%.2f Hz")
                             if changed then
-                                expanded_modulator:set_param_normalized(1, new_rate)
+                                -- Convert Hz back to normalized 0-1
+                                local norm_val = (new_rate - 0.01) / 19.99
+                                expanded_modulator:set_param_normalized(1, norm_val)
                                 interacted = true
                             end
                             if ctx:is_item_hovered() then
