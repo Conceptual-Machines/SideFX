@@ -129,7 +129,7 @@ local function draw_fx_chain_warning_banner(ctx, state_module)
         ctx:push_style_color(imgui.Col.Button(), 0x336633FF)  -- Dark green
         ctx:push_style_color(imgui.Col.ButtonHovered(), 0x448844FF)  -- Lighter green
         if ctx:button("Refresh SideFX", button_w, 0) then
-            state_module.refresh_sidefx_from_reaper()
+            refresh_fx_list()
         end
         ctx:pop_style_color(2)
     end
@@ -183,12 +183,10 @@ function M.create_callbacks(opts)
         end,
 
         on_draw = function(self, ctx)
-            -- Handle pending deletion: refresh FX list and update snapshot
+            -- Handle pending deletion: refresh FX list
             if state.deletion_pending then
                 state.deletion_pending = false
                 refresh_fx_list()
-                -- Update snapshot after SideFX deletion to prevent false warnings
-                state_module.capture_fx_chain_snapshot()
             end
             
             reaper_theme:apply(ctx)
@@ -277,19 +275,10 @@ function M.create_callbacks(opts)
                 if state.track then
                     state_module.load_expansion_state()
                     state_module.load_display_names()
-                    -- Capture snapshot of FX chain when track changes
-                    state_module.capture_fx_chain_snapshot()
                 end
             else
                 -- Check for external FX changes (e.g. user deleted FX in REAPER)
                 check_fx_changes()
-                -- Also check for FX chain modifications (every 500ms)
-                state_module.check_fx_chain_changes()
-                
-                -- Capture snapshot on first frame if not already captured
-                if state.track and not state.fx_chain_snapshot then
-                    state_module.capture_fx_chain_snapshot()
-                end
             end
 
             -- Toolbar

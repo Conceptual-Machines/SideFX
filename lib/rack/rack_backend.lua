@@ -36,8 +36,6 @@ function M.add_rack_to_track(position)
         local state = state_module.state
         state.expanded_racks[rack:get_guid()] = true
         refresh_fx_list()
-        -- Update snapshot after SideFX operation to prevent false warnings
-        state_module.capture_fx_chain_snapshot()
     end
     return rack
 end
@@ -68,8 +66,6 @@ function M.add_chain_to_rack(rack, plugin)
             state_module.save_expansion_state()
         end
         refresh_fx_list()
-        -- Update snapshot after SideFX operation to prevent false warnings
-        state_module.capture_fx_chain_snapshot()
     end
     return chain
 end
@@ -81,8 +77,6 @@ function M.add_empty_chain_to_rack(rack)
     local chain = rack_module.add_empty_chain_to_rack(rack)
     if chain then
         refresh_fx_list()
-        -- Update snapshot after SideFX operation to prevent false warnings
-        state_module.capture_fx_chain_snapshot()
     end
     return chain
 end

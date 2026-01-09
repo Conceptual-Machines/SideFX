@@ -293,8 +293,6 @@ local function add_plugin_to_track(plugin, position)
     local result = device_module.add_plugin_to_track(plugin, position)
     if result then 
         refresh_fx_list()
-        -- Update snapshot after SideFX operation to prevent false warnings
-        state_module.capture_fx_chain_snapshot()
     end
     return result
 end
@@ -456,7 +454,7 @@ local function draw_toolbar(ctx, icon_font_ref)
         on_refresh_sidefx = function()
             -- Ensure callback is set before refreshing
             state_module.on_refresh = renumber_device_chain
-            state_module.refresh_sidefx_from_reaper()
+            refresh_fx_list()
         end,
         on_refresh = refresh_fx_list,
         on_add_rack = add_rack_to_track,
