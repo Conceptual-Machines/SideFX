@@ -13,6 +13,7 @@ local drawing = require('lib.ui.common.drawing')
 local fx_naming = require('lib.fx.fx_naming')
 local param_utils = require('lib.utils.param_utils')
 local state_module = require('lib.core.state')
+local state = state_module.state
 
 -- Device panel sub-modules
 local header = require('lib.ui.device.device_panel.header')
@@ -291,13 +292,7 @@ local function get_visible_params(fx)
     local visible_params = {}
     
     -- Get max params from config (default 64, max 128)
-    local state_module = require('lib.core.state')
     local MAX_VISIBLE_PARAMS = state_module.get_max_visible_params()
-    
-    -- Get plugin name to look up stored selections
-    local state_module = require('lib.core.state')
-    local state = state_module.state
-    local fx_naming = require('lib.fx.fx_naming')
     
     -- Get the actual plugin name (stripped of SideFX prefixes)
     local ok_name, fx_name = pcall(function() return fx:get_name() end)
@@ -387,7 +382,7 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
 
     -- Compute missing utility flag for this container
     local container_guid = container and container:get_guid() or nil
-    local show_missing_utility = container_guid and state_module.state.missing_utilities[container_guid] and not ignored_missing_utility[state_guid]
+    local show_missing_utility = container_guid and state.missing_utilities[container_guid] and not ignored_missing_utility[state_guid]
 
     -- Fixed width for gain/pan column (right side of nested table)
     local gain_pan_w = 100
@@ -613,9 +608,6 @@ end
 -- @param cfg table Configuration table
 -- @return boolean is_collapsed, number width
 local function setup_modulator_sidebar_state(state_guid, cfg)
-    local state_module = require('lib.core.state')
-    local state = state_module.state
-
     -- Initialize modulator sidebar state tables if needed
     state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
     state.expanded_mod_slot = state.expanded_mod_slot or {}
@@ -671,10 +663,8 @@ local function draw_context_menu(ctx, fx, guid, name, enabled, opts)
             else
                 -- Fallback: use SideFX state system directly
                 -- Use FX GUID for renaming since we display the FX name
-                local state_module = require('lib.core.state')
-                local sidefx_state = state_module.state
-                sidefx_state.renaming_fx = guid  -- Use FX GUID
-                sidefx_state.rename_text = name
+                state.renaming_fx = guid  -- Use FX GUID
+                state.rename_text = name
             end
         end
         ctx:separator()
