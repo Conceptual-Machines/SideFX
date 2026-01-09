@@ -144,7 +144,7 @@ function M.create_callbacks(opts)
             end
 
             -- Toolbar
-            draw_toolbar(ctx)
+            draw_toolbar(ctx, icon_font_ref)
             ctx:separator()
 
             -- Layout dimensions
@@ -156,7 +156,7 @@ function M.create_callbacks(opts)
             if ctx:begin_child("Browser", browser_w, 0, imgui.ChildFlags.Border()) then
                 ctx:text("Plugins")
                 ctx:separator()
-                draw_plugin_browser(ctx)
+                draw_plugin_browser(ctx, icon_font_ref)
                 ctx:end_child()
             end
             ctx:pop_style_color()
@@ -236,7 +236,7 @@ function M.create_callbacks(opts)
                     end
 
                     -- Draw the horizontal device chain (includes modulators)
-                    draw_device_chain(ctx, filtered_fx, chain_w, avail_h)
+                    draw_device_chain(ctx, filtered_fx, chain_w, avail_h, icon_font_ref)
                 end
 
                 ctx:end_child()

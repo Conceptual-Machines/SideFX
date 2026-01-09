@@ -48,6 +48,8 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
     state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
     state.expanded_mod_slot = state.expanded_mod_slot or {}
 
+    state.cached_preset_names = state.cached_preset_names or {}
+
     local is_mod_sidebar_collapsed = state.mod_sidebar_collapsed[state_guid] or false
 
     if is_mod_sidebar_collapsed then
@@ -173,25 +175,19 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     -- Set control width shorter for compact layout
                     local control_width = 180
 
-                    -- Rate section: RATE label | Free/Sync buttons | UI icon
+                    -- Rate section: Free/Sync buttons | Preset | UI icon (no label)
                     -- Read tempo mode BEFORE table so it's accessible inside and outside
                     local tempo_mode = expanded_modulator:get_param(PARAM.PARAM_TEMPO_MODE)
 
                     if ctx:begin_table("##rate_table_" .. guid, 3, imgui.TableFlags.SizingStretchProp()) then
-                        ctx:table_setup_column("Label", imgui.TableColumnFlags.WidthFixed(), 45)
                         ctx:table_setup_column("Mode", imgui.TableColumnFlags.WidthStretch())
+                        ctx:table_setup_column("Preset", imgui.TableColumnFlags.WidthFixed(), 80)
                         ctx:table_setup_column("UI", imgui.TableColumnFlags.WidthFixed(), 30)
 
                         ctx:table_next_row()
 
-                        -- Column 1: RATE label
+                        -- Column 1: Free/Sync buttons
                         ctx:table_set_column_index(0)
-                        ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
-                        ctx:text("RATE")
-                        ctx:pop_style_color()
-
-                        -- Column 2: Free/Sync buttons
-                        ctx:table_set_column_index(1)
                         if tempo_mode then
                             if ctx:radio_button("Free##tempo_" .. guid, tempo_mode < 0.5) then
                                 expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 0)
@@ -204,9 +200,60 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             end
                         end
 
+                        -- Column 2: Preset dropdown (cached, read-only)
+                        ctx:table_set_column_index(1)
+
+                        -- Get current preset info from JSFX
+                        local preset_idx, num_presets = r.TrackFX_GetPresetIndex(
+                            state.track.pointer,
+                            expanded_modulator.pointer
+                        )
+
+                        if num_presets and num_presets > 0 then
+                            -- Check if we need to cache preset names for this modulator
+                            local mod_guid = expanded_modulator:get_guid()
+                            if not state.cached_preset_names[mod_guid] then
+                                -- Cache preset names by reading them once
+                                state.cached_preset_names[mod_guid] = {}
+                                local original_idx = preset_idx
+
+                                for i = 0, num_presets - 1 do
+                                    r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
+                                    local name = expanded_modulator:get_preset() or ("Preset " .. (i + 1))
+                                    state.cached_preset_names[mod_guid][i] = name
+                                end
+
+                                -- Restore original preset
+                                if original_idx >= 0 then
+                                    r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, original_idx)
+                                end
+                            end
+
+                            -- Display preset dropdown using cached names
+                            local cached_names = state.cached_preset_names[mod_guid]
+                            local current_preset_name = cached_names[preset_idx] or "—"
+
+                            ctx:set_next_item_width(80)
+                            if ctx:begin_combo("##preset_" .. guid, current_preset_name) then
+                                for i = 0, num_presets - 1 do
+                                    local preset_name = cached_names[i] or ("Preset " .. (i + 1))
+
+                                    if ctx:selectable(preset_name, i == preset_idx) then
+                                        -- User selected a preset - apply it
+                                        r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
+                                        interacted = true
+                                    end
+                                end
+                                ctx:end_combo()
+                            end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Load waveform preset")
+                            end
+                        end
+
                         -- Column 3: UI icon
                         ctx:table_set_column_index(2)
-                        if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20) then
+                        if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20, opts.icon_font) then
                             expanded_modulator:show(3)
                             interacted = true
                         end
@@ -218,16 +265,30 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     end
                     ctx:spacing()
 
-                    -- Show Hz slider when Free mode, Sync Rate dropdown when Sync mode
+                    -- Rate and Phase on same line (no labels)
+                    local rate_width = 100
+                    local phase_width = 80
+
+                    -- Rate slider/dropdown
                     if tempo_mode and tempo_mode < 0.5 then
                         -- Free mode - show Hz slider (slider2)
-                        local ok_rate, rate_hz = pcall(function() return expanded_modulator:get_param_normalized(1) end)
+                        -- Range: 0.01 - 10 Hz (linear, matching JSFX slider)
+                        local ok_rate, rate_norm = pcall(function() return expanded_modulator:get_param_normalized(1) end)
                         if ok_rate then
-                            ctx:set_next_item_width(control_width)
-                            local changed, new_rate = ctx:slider_double("Hz##rate_" .. guid, rate_hz, 0.01, 20, "%.2f")
+                            -- Linear conversion: norm (0-1) -> Hz (0.01-10)
+                            local rate_hz = 0.01 + rate_norm * 9.99
+
+                            ctx:set_next_item_width(rate_width)
+                            -- TODO: Make slider logarithmic feel when ImGui supports it
+                            local changed, new_rate = ctx:slider_double("##rate_" .. guid, rate_hz, 0.01, 10, "%.2f Hz")
                             if changed then
-                                expanded_modulator:set_param_normalized(1, new_rate)
+                                -- Convert Hz back to normalized 0-1 (linear)
+                                local norm_val = (new_rate - 0.01) / 9.99
+                                expanded_modulator:set_param_normalized(1, norm_val)
                                 interacted = true
+                            end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Rate (Hz)")
                             end
                         end
                     else
@@ -236,7 +297,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         if ok_sync then
                             local sync_rates = {"8 bars", "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/4T", "1/4.", "1/8", "1/8T", "1/8.", "1/16", "1/16T", "1/16.", "1/32", "1/32T", "1/32.", "1/64"}
                             local current_idx = math.floor(sync_rate_idx * 17 + 0.5)
-                            ctx:set_next_item_width(control_width)
+                            ctx:set_next_item_width(rate_width)
                             if ctx:begin_combo("##sync_rate_" .. guid, sync_rates[current_idx + 1] or "1/4") then
                                 for i, rate_name in ipairs(sync_rates) do
                                     if ctx:selectable(rate_name, i - 1 == current_idx) then
@@ -246,42 +307,33 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                 end
                                 ctx:end_combo()
                             end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Sync Rate")
+                            end
                         end
                     end
 
-                    ctx:spacing()
+                    ctx:same_line()
 
-                    -- Phase (slider5)
+                    -- Phase slider
                     local ok_phase, phase = pcall(function() return expanded_modulator:get_param_normalized(4) end)
                     if ok_phase then
-                        ctx:set_next_item_width(control_width)
+                        ctx:set_next_item_width(phase_width)
                         local phase_deg = phase * 360
-                        local changed, new_phase_deg = ctx:slider_double("Phase##phase_" .. guid, phase_deg, 0, 360, "%.0f°")
+                        local changed, new_phase_deg = ctx:slider_double("##phase_" .. guid, phase_deg, 0, 360, "%.0f°")
                         if changed then
                             expanded_modulator:set_param_normalized(4, new_phase_deg / 360)
                             interacted = true
                         end
-                    end
-
-                    -- Depth (slider6)
-                    local ok_depth, depth = pcall(function() return expanded_modulator:get_param_normalized(5) end)
-                    if ok_depth then
-                        ctx:set_next_item_width(control_width)
-                        local depth_pct = depth * 100
-                        local changed, new_depth_pct = ctx:slider_double("Depth##depth_" .. guid, depth_pct, 0, 100, "%.0f%%")
-                        if changed then
-                            expanded_modulator:set_param_normalized(5, new_depth_pct / 100)
-                            interacted = true
+                        if ctx:is_item_hovered() then
+                            ctx:set_tooltip("Phase")
                         end
                     end
 
                     ctx:spacing()
 
-                    -- Trigger Mode section
-                    ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
-                    ctx:text("TRIGGER")
-                    ctx:pop_style_color()
-                    ctx:spacing()
+                    -- Trigger and Mode on same line (no labels)
+                    local trigger_width = 100
 
                     -- Trigger Mode dropdown
                     local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_TRIGGER_MODE) end)
@@ -289,7 +341,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     if ok_trig then
                         local trigger_modes = {"Free", "Transport", "MIDI", "Audio"}
                         trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
-                        ctx:set_next_item_width(control_width)
+                        ctx:set_next_item_width(trigger_width)
                         if ctx:begin_combo("##trigger_mode_" .. guid, trigger_modes[trig_idx + 1] or "Free") then
                             for i, mode_name in ipairs(trigger_modes) do
                                 if ctx:selectable(mode_name, i - 1 == trig_idx) then
@@ -299,15 +351,12 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             end
                             ctx:end_combo()
                         end
+                        if ctx:is_item_hovered() then
+                            ctx:set_tooltip("Trigger Mode")
+                        end
                     end
 
-                    ctx:spacing()
-
-                    -- LFO Mode section
-                    ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
-                    ctx:text("MODE")
-                    ctx:pop_style_color()
-                    ctx:spacing()
+                    ctx:same_line()
 
                     -- LFO Mode: Loop/One Shot (discrete parameter)
                     local lfo_mode = expanded_modulator:get_param(PARAM.PARAM_LFO_MODE)
@@ -410,12 +459,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     ctx:separator()
                     ctx:spacing()
 
-                    -- Parameter Links section
-                    ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
-                    ctx:text("PARAMETER LINKS")
-                    ctx:pop_style_color()
-                    ctx:spacing()
-
+                    -- Parameter Links section (no label, tooltip on controls)
                     -- Find existing links for this modulator on the parent device
                     local existing_links = {}
 
@@ -449,7 +493,8 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                     if ok_pname and param_name then
                                         table.insert(existing_links, {
                                             param_idx = param_idx,
-                                            param_name = param_name
+                                            param_name = param_name,
+                                            scale = link_info.scale or 1.0
                                         })
                                     end
                                 end
@@ -457,42 +502,16 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         end
                     end
 
-                    -- Show existing links
-                    if #existing_links > 0 then
-                        ctx:push_style_color(imgui.Col.Text(), 0x88FF88FF)
-                        ctx:text(string.format("Active Links: %d", #existing_links))
-                        ctx:pop_style_color()
-                        ctx:spacing()
-
-                        for i, link in ipairs(existing_links) do
-                            ctx:text("• " .. link.param_name)
-                            ctx:same_line()
-                            if ctx:button("X##remove_link_" .. i .. "_" .. guid, 20, 0) then
-                                -- Remove this link using ReaWrap's high-level API
-                                if fx:remove_param_link(link.param_idx) then
-                                    interacted = true
-                                end
-                            end
-                            if ctx:is_item_hovered() then
-                                ctx:set_tooltip("Remove link")
-                            end
-                        end
-
-                        ctx:spacing()
-                        ctx:separator()
-                        ctx:spacing()
-                    end
-
                     -- Modulator can only modulate its parent device (fx parameter)
                     -- No device selector needed - use the device that owns this container
                     local target_device = fx  -- The device being displayed
 
-                    -- Parameter selector for parent device
+                    -- Parameter selector dropdown at TOP
                     if target_device then
                         local ok_params, param_count = pcall(function() return target_device:get_num_params() end)
 
                         if ok_params and param_count and param_count > 0 then
-                            local current_param_name = "Select Parameter..."
+                            local current_param_name = "Link Parameter..."
                             ctx:set_next_item_width(control_width)
                             if ctx:begin_combo("##link_param_" .. guid, current_param_name) then
                                 for param_idx = 0, param_count - 1 do
@@ -523,11 +542,54 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                 end
                                 ctx:end_combo()
                             end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Link modulator to parameter")
+                            end
                         end
                     else
                         ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
                         ctx:text("No target device")
                         ctx:pop_style_color()
+                    end
+
+                    ctx:spacing()
+
+                    -- Show existing links with individual amount sliders
+                    if #existing_links > 0 then
+                        for i, link in ipairs(existing_links) do
+                            -- Parameter name
+                            ctx:text("• " .. link.param_name)
+
+                            -- Amount slider (narrower, on same line)
+                            ctx:same_line()
+                            local amount_width = 80
+                            ctx:set_next_item_width(amount_width)
+                            local amount_pct = link.scale * 100
+                            local changed, new_amount_pct = ctx:slider_double("##amount_" .. link.param_idx .. "_" .. guid, amount_pct, -200, 200, "%.0f%%")
+                            if changed then
+                                -- Update the scale using set_named_config_param
+                                local plink_prefix = string.format("param.%d.plink.", link.param_idx)
+                                local new_scale = new_amount_pct / 100
+                                if fx:set_named_config_param(plink_prefix .. "scale", tostring(new_scale)) then
+                                    interacted = true
+                                end
+                            end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Modulation amount")
+                            end
+
+                            -- Remove button
+                            ctx:same_line()
+                            if ctx:button("X##remove_link_" .. i .. "_" .. guid, 20, 0) then
+                                -- Remove this link using ReaWrap's high-level API
+                                if fx:remove_param_link(link.param_idx) then
+                                    interacted = true
+                                end
+                            end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Remove link")
+                            end
+                        end
                     end
                 end
             end

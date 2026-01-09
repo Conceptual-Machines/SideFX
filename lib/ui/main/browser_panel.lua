@@ -67,7 +67,7 @@ function M.draw(ctx, state, icon_font, icon_size, on_plugin_add, filter_plugins)
             local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
             local icon = plugin.is_instrument
                 and constants.icon_text(emojimgui, constants.Icons.musical_keyboard)
-                or constants.icon_text(emojimgui, constants.Icons.wrench)
+                or constants.icon_text(emojimgui, constants.Icons.control_knobs)
             ctx:text(icon)
             if icon_font then ctx:pop_font() end
 

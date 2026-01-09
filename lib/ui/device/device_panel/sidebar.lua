@@ -129,7 +129,8 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local scale_w = 20
 
     local _, remaining_h = ctx:get_content_region_avail()
-    local fader_h = remaining_h - 22
+    -- Leave room for phase controls below (80px for label + buttons + spacing)
+    local fader_h = remaining_h - 80
     fader_h = math.max(50, fader_h)
 
     local avail_w, _ = ctx:get_content_region_avail()

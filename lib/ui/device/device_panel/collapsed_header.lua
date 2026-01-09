@@ -68,7 +68,7 @@ function M.draw(ctx, fx, container, state_guid, enabled, device_collapsed, opts,
 
     -- === ROW 2: UI | Mix | Delta ===
     -- UI button (start new row)
-    if drawing.draw_ui_icon(ctx, "##ui_collapsed_" .. state_guid, 24, 20) then
+    if drawing.draw_ui_icon(ctx, "##ui_collapsed_" .. state_guid, 24, 20, opts.icon_font) then
         pcall(function() fx:show(3) end)
         interacted = true
     end

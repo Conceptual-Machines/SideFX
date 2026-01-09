@@ -157,7 +157,8 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         ctx:table_set_column_index(2)
         if device_id then
             ctx:push_style_color(r.ImGui_Col_Text(), 0x666666FF)
-            ctx:text("[" .. device_id .. "]")
+            local short_id = fx_naming.get_short_path(device_id)
+            ctx:text("[" .. short_id .. "]")
             ctx:pop_style_color()
         end
 
@@ -195,7 +196,7 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
                 ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x555555FF)
                 ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x666666FF)
             end
-            if ctx:button((delta_on and "∆" or "—") .. "##delta_" .. state_guid, 28, 20) then
+            if ctx:button((delta_on and "∆" or "—") .. "##delta_" .. state_guid, 24, 20) then
                 pcall(function() container:set_param_normalized(delta_idx, delta_on and 0 or 1) end)
                 interacted = true
             end
@@ -207,7 +208,8 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
 
         -- Column: UI button
         ctx:table_set_column_index(col_idx)
-        if drawing.draw_ui_icon(ctx, "##ui_header_" .. state_guid, 24, 20) then
+        local icon_font = opts.icon_font
+        if drawing.draw_ui_icon(ctx, "##ui_header_" .. state_guid, 24, 20, icon_font) then
             pcall(function() fx:show(3) end)
             interacted = true
         end

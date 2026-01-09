@@ -172,7 +172,7 @@ local function draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opt
         -- UI button
         r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
         local ui_avail_w = ctx:get_content_region_avail()
-        if ui_avail_w > 0 and drawing.draw_ui_icon(ctx, "##ui_" .. state_guid, ui_avail_w, 24) then
+        if ui_avail_w > 0 and drawing.draw_ui_icon(ctx, "##ui_" .. state_guid, ui_avail_w, 24, opts.icon_font) then
             fx:show(3)
             interacted = true
         end

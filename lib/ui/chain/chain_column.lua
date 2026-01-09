@@ -230,11 +230,17 @@ function M.draw(ctx, selected_chain, rack_h, opts)
 
     local selected_chain_guid = selected_chain:get_guid()
     -- Get chain name and identifier separately
-    local chain_name = fx_utils.get_chain_label_name(selected_chain)
+    local chain_name_full = fx_utils.get_chain_label_name(selected_chain)
+    local fx_naming = require('lib.fx.fx_naming')
+    local chain_name = fx_naming.get_short_path(chain_name_full)
+
     local chain_id = nil
     local ok_name, raw_name = pcall(function() return selected_chain:get_name() end)
     if ok_name and raw_name then
-        chain_id = raw_name:match("^(R%d+_C%d+)") or raw_name:match("R%d+_C%d+")
+        local chain_id_full = raw_name:match("^(R%d+_C%d+)") or raw_name:match("R%d+_C%d+")
+        if chain_id_full then
+            chain_id = fx_naming.get_short_path(chain_id_full)
+        end
     end
 
     -- Get devices from chain
