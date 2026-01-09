@@ -5,7 +5,7 @@
 -- @license MIT
 
 local assert = require("assertions")
-local naming = require("naming")
+local naming = require("lib.utils.naming")
 
 local M = {}
 

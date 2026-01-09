@@ -58,6 +58,7 @@ local test_modules = {
     "unit.test_rack",
     "unit.test_rack_recursive",
     "unit.test_state",
+    "unit.test_track_detection",
 }
 
 --------------------------------------------------------------------------------
@@ -87,22 +88,15 @@ for _, module_name in ipairs(test_modules) do
     output("Running: " .. module_name)
     output("----------------------------------------")
 
-    local ok, err = pcall(function()
-        -- Reset state between test modules
-        assert.reset()
+    -- Reset state between test modules
+    assert.reset()
 
-        -- Clear cached module to allow re-running
-        package.loaded[module_name] = nil
+    -- Clear cached module to allow re-running
+    package.loaded[module_name] = nil
 
-        local test_module = require(module_name)
-        if type(test_module) == "table" and test_module.run then
-            test_module.run()
-        end
-    end)
-
-    if not ok then
-        output("ERROR loading/running " .. module_name .. ": " .. tostring(err))
-        all_passed = false
+    local test_module = require(module_name)
+    if type(test_module) == "table" and test_module.run then
+        test_module.run()
     end
 
     local results = assert.get_results()
@@ -125,7 +119,9 @@ else
 end
 output("========================================")
 
--- Return exit code for CI
+-- Return exit code for CI (fail if any tests failed or any errors occurred)
+local exit_code = (all_passed and total_failed == 0) and 0 or 1
+output(string.format("Exiting with code: %d (all_passed=%s, total_failed=%d)", exit_code, tostring(all_passed), total_failed))
 if not reaper then
-    os.exit(all_passed and 0 or 1)
+    os.exit(exit_code)
 end
