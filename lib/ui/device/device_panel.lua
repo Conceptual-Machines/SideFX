@@ -105,8 +105,9 @@ local function restore_utility(container)
     -- Set flag to stop rendering immediately (prevents stale data errors)
     state.deletion_pending = true
     
-    -- Use the same JSFX path as device.lua
-    local utility_jsfx = "JS:SideFX/SideFX_Utility"
+    -- Use the JSFX path constant from device module
+    local device_module = require('lib.device.device')
+    local utility_jsfx = device_module.UTILITY_JSFX
     
     -- Step 1: Add utility to the TRACK first (not directly to container)
     local ok_add, util_fx = pcall(function()
