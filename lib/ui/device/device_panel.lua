@@ -762,11 +762,6 @@ function M.draw(ctx, fx, opts)
     -- Check if missing utility warning should be shown (from state)
     local container_guid = container and container:get_guid() or nil
     local show_missing_utility = container_guid and state_module.state.missing_utilities[container_guid] and not ignored_missing_utility[guid]
-    
-    if container_guid and state_module.state.missing_utilities[container_guid] then
-        r.ShowConsoleMsg(string.format("[Device Panel] Missing utility detected for %s (guid: %s, ignored: %s)\n",
-            fx:get_name(), container_guid, tostring(ignored_missing_utility[guid])))
-    end
 
     -- Extract FX display info
     local name, device_id = extract_fx_display_info(fx, container)
