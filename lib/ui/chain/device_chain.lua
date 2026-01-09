@@ -91,9 +91,19 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
             local utility = get_device_utility(fx)
             local missing = (utility == nil)
             
-            -- Log only when utility is missing
+            -- Log only when utility is missing and hasn't been logged yet
             if missing then
-                r.ShowConsoleMsg(string.format("[Device Chain] Missing utility in: %s\n", fx:get_name()))
+                local container_guid = fx:get_guid()
+                if not logged_missing_utility[container_guid] then
+                    r.ShowConsoleMsg(string.format("[Device Chain] Missing utility in: %s\n", fx:get_name()))
+                    logged_missing_utility[container_guid] = true
+                end
+            else
+                -- Clear log flag if utility is restored
+                local container_guid = fx:get_guid()
+                if logged_missing_utility[container_guid] then
+                    logged_missing_utility[container_guid] = nil
+                end
             end
             
             if main_fx then
