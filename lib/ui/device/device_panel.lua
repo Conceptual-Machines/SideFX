@@ -98,27 +98,47 @@ local function restore_utility(container)
         return false
     end
     
-    -- Set flag to stop rendering immediately (prevents stale data errors)
-    state.deletion_pending = true
-    
-    -- Add SideFX_Utility to the end of the container
-    local utility_name = "JS: SideFX_Utility"
-    
-    local ok, utility = pcall(function()
-        return container:add_fx_to_container(utility_name, -1)  -- -1 = end of container
-    end)
-    
-    if not ok or not utility then
+    if not state.track then
         return false
     end
     
-    -- Rename utility to match device naming
+    -- Set flag to stop rendering immediately (prevents stale data errors)
+    state.deletion_pending = true
+    
+    -- Use the same JSFX path as device.lua
+    local utility_jsfx = "JS:SideFX/SideFX_Utility"
+    
+    -- Step 1: Add utility to the TRACK first (not directly to container)
+    local ok_add, util_fx = pcall(function()
+        return state.track:add_fx_by_name(utility_jsfx, false, -1)
+    end)
+    
+    if not ok_add or not util_fx or util_fx.pointer < 0 then
+        return false
+    end
+    
+    -- Step 2: Move utility INTO the container at position 1 (after main FX)
+    local ok_move = pcall(function()
+        container:add_fx_to_container(util_fx, 1)
+    end)
+    
+    if not ok_move then
+        -- Clean up: delete the utility we just added
+        pcall(function() util_fx:delete() end)
+        return false
+    end
+    
+    -- Step 3: Rename utility to match device naming
     local ok_name, container_name = pcall(function() return container:get_name() end)
     if ok_name and container_name then
         local device_idx = container_name:match("^D(%d+):")
         if device_idx then
             local util_name = string.format("D%d_Util", tonumber(device_idx))
-            pcall(function() utility:set_named_config_param("renamed_name", util_name) end)
+            -- Re-find utility inside container after move
+            local util_inside = fx_utils.get_device_utility(container)
+            if util_inside then
+                pcall(function() util_inside:set_named_config_param("renamed_name", util_name) end)
+            end
         end
     end
     
