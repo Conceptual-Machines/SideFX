@@ -28,9 +28,8 @@ local presets_folder = nil
 
 --- Initialize the presets module.
 function M.init()
-    -- Save presets to REAPER resource path (user data), not script folder
-    -- This prevents presets from being deleted on script updates
-    presets_folder = r.GetResourcePath() .. "/SideFX_Presets/"
+    -- Save presets to [REAPER Resource Path]/presets/SideFX_Presets/
+    presets_folder = r.GetResourcePath() .. "/presets/SideFX_Presets/"
 end
 
 --- Ensure the presets folder structure exists.
@@ -136,7 +135,16 @@ local function extract_fxchain_content(track_chunk)
 
     -- Extract only FX chunks (RChunk type), skip attributes (RNode type)
     local fx_lines = {}
-    for _, child in ipairs(fxchain.children) do
+    r.ShowConsoleMsg("=== EXTRACT SAVE ===\n")
+    r.ShowConsoleMsg("FXCHAIN has " .. #fxchain.children .. " children\n")
+    
+    for i, child in ipairs(fxchain.children) do
+        local name = "unknown"
+        if child.tokens and #child.tokens > 0 then
+            name = child.tokens[1]:getString()
+        end
+        r.ShowConsoleMsg("  Child " .. i .. ": " .. name .. " (is RChunk: " .. tostring(child.children ~= nil) .. ")\n")
+        
         -- RChunk has 'children' property (even if empty), RNode doesn't
         -- FX are RChunks (CONTAINER, VST, JS, etc), attributes are RNodes (WNDRECT, SHOW, etc)
         if child.children then
@@ -144,10 +152,13 @@ local function extract_fxchain_content(track_chunk)
             local child_str = StringifyRPPNode(child)
             if child_str and child_str ~= "" then
                 table.insert(fx_lines, child_str)
+                r.ShowConsoleMsg("    -> Added to save (length: " .. #child_str .. ")\n")
             end
         end
     end
-
+    
+    r.ShowConsoleMsg("Extracted " .. #fx_lines .. " FX chunks for save\n")
+    
     return table.concat(fx_lines, "\n")
 end
 
@@ -366,29 +377,48 @@ local function replace_fxchain_content(track_chunk, new_content)
     end
     r.ShowConsoleMsg("Track chunk parsed OK\n")
 
-    -- Find FXCHAIN chunk
+    -- Find FXCHAIN chunk, create if doesn't exist
     local fxchain = track_root:findFirstChunkByName("FXCHAIN")
     if not fxchain then
-        r.ShowConsoleMsg("ERROR: No FXCHAIN found in track\n")
+        r.ShowConsoleMsg("No FXCHAIN found, creating one\n")
+        -- Create new FXCHAIN chunk
+        fxchain = AddRChunk(track_root, {"FXCHAIN"})
+        if not fxchain then
+            r.ShowConsoleMsg("ERROR: Failed to create FXCHAIN\n")
+            return nil
+        end
+    end
+    r.ShowConsoleMsg("FXCHAIN ready\n")
+
+    -- Parse the preset content
+    -- In SideFX, presets are ALWAYS containers (D, R, or C)
+    -- ReadRPPChunk only returns the first chunk, so we need to wrap content in a dummy root
+    local wrapped_content = "<ROOT\n" .. new_content .. "\n>"
+    local parsed = ReadRPPChunk(wrapped_content)
+    if not parsed or not parsed.children then
+        r.ShowConsoleMsg("ERROR: Failed to parse preset content\n")
         return nil
     end
-    r.ShowConsoleMsg("Found FXCHAIN\n")
-
-    -- Parse the new content
-    local new_fx_root = ReadRPPChunk(new_content)
-    if not new_fx_root then
-        r.ShowConsoleMsg("ERROR: Failed to parse new FX content\n")
-        return nil
+    
+    -- The parsed.children are all the containers (D1, D2, D3, etc)
+    r.ShowConsoleMsg("Parsed " .. #parsed.children .. " top-level items\n")
+    
+    -- Filter to only FX chunks (containers), skip any stray attributes
+    local fx_chunks = {}
+    for _, child in ipairs(parsed.children) do
+        if child.children then
+            table.insert(fx_chunks, child)
+            if child.tokens and #child.tokens > 0 then
+                r.ShowConsoleMsg("  - " .. child.tokens[1]:getString() .. "\n")
+            end
+        end
     end
-    if not new_fx_root.children then
-        r.ShowConsoleMsg("ERROR: New FX root has no children\n")
-        return nil
-    end
-    r.ShowConsoleMsg("New FX content parsed, " .. #new_fx_root.children .. " children\n")
-
-    -- Replace FXCHAIN children with new FX
-    fxchain.children = new_fx_root.children
-
+    
+    r.ShowConsoleMsg("Got " .. #fx_chunks .. " containers\n")
+    
+    -- Replace FXCHAIN children with new containers
+    fxchain.children = fx_chunks
+    
     -- Update parent references
     for _, child in ipairs(fxchain.children) do
         child.parent = fxchain
