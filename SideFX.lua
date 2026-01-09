@@ -527,7 +527,7 @@ local function main()
     scan_plugins()
     
     -- Initialize presets module
-    presets_mod.init(script_path)
+    presets_mod.init()
     presets_mod.ensure_folder()
     
     -- Load user configuration (global, not per-track)

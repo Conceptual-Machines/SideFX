@@ -26,10 +26,11 @@ local M = {}
 -- Presets folder path (must be set via init before use)
 local presets_folder = nil
 
---- Initialize the presets module with the script path.
--- @param script_path string Path to the SideFX script folder
-function M.init(script_path)
-    presets_folder = script_path .. "presets/"
+--- Initialize the presets module.
+function M.init()
+    -- Save presets to REAPER resource path (user data), not script folder
+    -- This prevents presets from being deleted on script updates
+    presets_folder = r.GetResourcePath() .. "/SideFX_Presets/"
 end
 
 --- Ensure the presets folder structure exists.
