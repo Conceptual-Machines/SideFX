@@ -771,7 +771,7 @@ function M.check_fx_chain_changes()
         state.fx_chain_change_notified = true
         
         local msg = string.format(
-            "FX chain has been modified outside SideFX.\n\n%s\n\nThis may break SideFX structure. Click 'Refresh SideFX' to sync with current state.",
+            "FX chain has been modified outside SideFX.\n\n%s\n\nThis breaks the SideFX structure. Click 'Refresh SideFX' to sync with current state.",
             change_message
         )
         r.ShowMessageBox(msg, "SideFX: FX Chain Modified", 0)  -- 0 = OK button only
