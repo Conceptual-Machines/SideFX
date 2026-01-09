@@ -466,7 +466,8 @@ function M.load_chain(preset_name)
         return false
     end
 
-    -- Refresh FX list to get new GUIDs
+    -- Invalidate and refresh FX list to get new GUIDs and rebuild state
+    state_mod.invalidate_fx_list()
     state_mod.refresh_fx_list()
 
     -- Load and apply metadata if available
