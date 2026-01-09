@@ -38,6 +38,13 @@ local rack_panel = nil
 --   - draw_rack_panel: function (ctx, rack, avail_height, is_nested) -> table
 function M.draw(ctx, fx_list, avail_width, avail_height, opts)
     local state = opts.state
+    
+    -- If a deletion just occurred, skip rendering this frame
+    -- The next frame will have fresh FX data
+    if state.deletion_pending then
+        return
+    end
+    
     local get_fx_display_name = opts.get_fx_display_name
     local refresh_fx_list = opts.refresh_fx_list
     local add_plugin_by_name = opts.add_plugin_by_name
@@ -78,13 +85,6 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
     -- Build display list - handles D-containers and legacy FX
     local display_fx = {}
     for i, fx in ipairs(fx_list) do
-        -- Validate FX is still valid before processing
-        local ok_check = pcall(function() return fx:get_guid() end)
-        if not ok_check then
-            -- FX is stale, skip it
-            goto continue
-        end
-        
         if is_device_container(fx) then
             -- D-container: extract main FX and utility from inside
             local main_fx = get_device_main_fx(fx)
@@ -121,8 +121,6 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         end
         -- Skip standalone utilities (they're shown in sidebar)
         -- Skip unknown containers
-        
-        ::continue::
     end
 
     if #display_fx == 0 then

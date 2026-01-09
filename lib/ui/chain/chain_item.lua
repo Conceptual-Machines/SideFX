@@ -132,14 +132,11 @@ end
 -- @param fx ReaWrap rack FX
 -- @param avail_height number Available height
 function M.draw_rack_item(ctx, fx, avail_height, callbacks)
-    -- Validate FX is still valid
-    local ok_guid, rack_guid = pcall(function() return fx:get_guid() end)
-    if not ok_guid or not rack_guid then return end
-    
     -- Draw rack using helper function (top-level rack, explicitly not nested)
     local rack_data = draw_rack_panel(ctx, fx, avail_height, false, callbacks)
 
     -- Draw selected chain column if expanded
+    local rack_guid = fx:get_guid()
     draw_selected_chain_column_if_expanded(ctx, rack_data, rack_guid)
 end
 
@@ -147,16 +144,12 @@ end
 -- @param ctx ImGui context
 -- @param fx ReaWrap container FX
 function M.draw_container_item(ctx, fx)
-    -- Validate FX is still valid
-    local ok_guid, guid = pcall(function() return fx:get_guid() end)
-    if not ok_guid or not guid then return end
-    
+    local guid = fx:get_guid()
     ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
     if ctx:begin_child("container_" .. guid, 180, 100, imgui.ChildFlags.Border()) then
-        local ok_name, name = pcall(function() return get_fx_display_name(fx) end)
-        ctx:text((ok_name and name or "Unknown"):sub(1, 15))
+        ctx:text(get_fx_display_name(fx):sub(1, 15))
         if ctx:small_button("Open") then
-            pcall(function() fx:show(3) end)
+            fx:show(3)
         end
         ctx:end_child()
     end
@@ -170,19 +163,9 @@ end
 -- @param avail_height number Available height
 -- @param callbacks table Callback functions
 function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
-    -- Validate FX is still valid
-    local ok_guid, guid = pcall(function() return fx:get_guid() end)
-    if not ok_guid or not guid then return end
-    
+    local guid = fx:get_guid()
     local utility = item.utility
     local container = item.container
-    
-    -- Get container name safely
-    local container_name = nil
-    if container then
-        local ok_name, name = pcall(function() return container:get_name() end)
-        if ok_name then container_name = name end
-    end
 
     if device_panel then
         -- Use full device panel
@@ -190,11 +173,15 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
             avail_height = avail_height - 10,
             utility = utility,  -- Paired SideFX_Utility for gain/pan
             container = container,  -- Pass container reference
-            container_name = container_name,
+            container_name = container and container:get_name() or nil,
             icon_font = icon_font,
             track = state.track,
             refresh_fx_list = refresh_fx_list,
             on_delete = function(fx_to_delete)
+                -- Set flag FIRST to stop all rendering immediately
+                local state_module = require('lib.core.state')
+                state_module.state.deletion_pending = true
+                
                 if container then
                     -- Delete the whole D-container
                     container:delete()
@@ -205,10 +192,8 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
                     end
                     fx_to_delete:delete()
                 end
-                -- Clear FX list cache to force immediate rebuild
-                local state_module = require('lib.core.state')
+                -- Clear FX list cache - will rebuild on next frame
                 state_module.state.fx_list = nil
-                refresh_fx_list()
             end,
             on_drop = function(dragged_guid, target_guid)
                 if callbacks.on_drop then

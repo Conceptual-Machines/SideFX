@@ -132,6 +132,12 @@ function M.create_callbacks(opts)
         end,
 
         on_draw = function(self, ctx)
+            -- Handle pending deletion: refresh FX list and clear flag
+            if state.deletion_pending then
+                state.deletion_pending = false
+                refresh_fx_list()
+            end
+            
             reaper_theme:apply(ctx)
 
             -- Load fonts on first frame

@@ -20,6 +20,9 @@ M.state = {
     -- FX data
     top_level_fx = {},
     last_fx_count = 0,  -- For detecting external FX changes
+    
+    -- Render control: set true when FX deleted, prevents rendering stale data
+    deletion_pending = false,
 
     -- Column navigation: list of expanded container GUIDs (breadcrumb trail)
     expanded_path = {},  -- e.g. {container1_guid, container2_guid, ...}
