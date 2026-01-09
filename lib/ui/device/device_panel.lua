@@ -94,44 +94,35 @@ local rename_buffer = {}    -- guid -> current edit text
 
 --- Restore missing utility FX to a device container
 local function restore_utility(container)
-    r.ShowConsoleMsg(string.format("[Restore Utility] Called with: %s (is_container: %s)\n",
-        container and container:get_name() or "nil",
-        container and tostring(container:is_container()) or "nil"))
-    
     if not container or not container:is_container() then
-        r.ShowConsoleMsg("[Restore Utility] Invalid container, aborting\n")
         return false
     end
     
+    -- Set flag to stop rendering immediately (prevents stale data errors)
+    state.deletion_pending = true
+    
     -- Add SideFX_Utility to the end of the container
     local utility_name = "JS: SideFX_Utility"
-    r.ShowConsoleMsg(string.format("[Restore Utility] Adding %s to container\n", utility_name))
     
     local ok, utility = pcall(function()
         return container:add_fx_to_container(utility_name, -1)  -- -1 = end of container
     end)
     
-    r.ShowConsoleMsg(string.format("[Restore Utility] Add result: ok=%s, utility=%s\n",
-        tostring(ok), utility and utility:get_name() or "nil"))
+    if not ok or not utility then
+        return false
+    end
     
-    if ok and utility then
-        -- Rename utility to match device naming
-        local container_name = container:get_name()
+    -- Rename utility to match device naming
+    local ok_name, container_name = pcall(function() return container:get_name() end)
+    if ok_name and container_name then
         local device_idx = container_name:match("^D(%d+):")
         if device_idx then
             local util_name = string.format("D%d_Util", tonumber(device_idx))
-            r.ShowConsoleMsg(string.format("[Restore Utility] Renaming to: %s\n", util_name))
-            utility:set_named_config_param("renamed_name", util_name)
+            pcall(function() utility:set_named_config_param("renamed_name", util_name) end)
         end
-        
-        -- Refresh FX list to update UI
-        r.ShowConsoleMsg("[Restore Utility] Refreshing FX list\n")
-        state_module.refresh_fx_list()
-        return true
     end
     
-    r.ShowConsoleMsg("[Restore Utility] Failed to add utility\n")
-    return false
+    return true
 end
 
 --------------------------------------------------------------------------------
