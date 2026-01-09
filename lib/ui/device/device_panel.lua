@@ -235,24 +235,92 @@ local function draw_sidebar_column(ctx, fx, container, state_guid, sidebar_actua
 end
 
 --- Filter FX parameters, excluding sidebar controls (wet, delta, bypass)
+-- Uses stored parameter selections from state if available, otherwise defaults to first 32.
+-- Respects user-configured maximum parameter limit.
 local function get_visible_params(fx)
     local r = reaper
     local visible_params = {}
+    
+    -- Get max params from config (default 64, max 128)
+    local state_module = require('lib.core.state')
+    local MAX_VISIBLE_PARAMS = state_module.get_max_visible_params()
+    
+    -- Get plugin name to look up stored selections
+    local state_module = require('lib.core.state')
+    local state = state_module.state
+    local fx_naming = require('lib.fx.fx_naming')
+    
+    -- Get the actual plugin name (stripped of SideFX prefixes)
+    local ok_name, fx_name = pcall(function() return fx:get_name() end)
+    if not ok_name or not fx_name then
+        return visible_params
+    end
+    
+    -- Strip SideFX prefixes to get clean plugin name
+    local naming = require('lib.utils.naming')
+    local clean_name = naming.strip_sidefx_prefixes(fx_name)
+    
+    -- Try to find stored parameter selections
+    -- Check both with and without format prefixes (VST:, AU:, etc.)
+    local selected_params = nil
+    if state.param_selections then
+        -- Try exact match first
+        if state.param_selections[fx_name] then
+            selected_params = state.param_selections[fx_name]
+        elseif state.param_selections[clean_name] then
+            selected_params = state.param_selections[clean_name]
+        else
+            -- Try matching with common prefixes
+            for key, params in pairs(state.param_selections) do
+                local key_clean = naming.strip_sidefx_prefixes(key)
+                if key_clean == clean_name then
+                    selected_params = params
+                    break
+                end
+            end
+        end
+    end
 
     local ok_count, param_count = pcall(function() return fx:get_num_params() end)
     if not ok_count then param_count = 0 end
 
-    for i = 0, param_count - 1 do
-        local ok_pn, pname = pcall(function() return fx:get_param_name(i) end)
-        local skip = false
-        if ok_pn and pname then
-            local lower = pname:lower()
-            if lower == "wet" or lower == "delta" or lower == "bypass" then
-                skip = true
+    if selected_params then
+        -- Use stored selections (enforce max limit)
+        for i, param_idx in ipairs(selected_params) do
+            -- Enforce maximum limit even for saved selections
+            if #visible_params >= MAX_VISIBLE_PARAMS then
+                break
+            end
+            
+            if param_idx >= 0 and param_idx < param_count then
+                -- Verify it's not a sidebar control
+                local ok_pn, pname = pcall(function() return fx:get_param_name(param_idx) end)
+                if ok_pn and pname then
+                    local lower = pname:lower()
+                    if lower ~= "wet" and lower ~= "delta" and lower ~= "bypass" then
+                        table.insert(visible_params, param_idx)
+                    end
+                end
             end
         end
-        if not skip then
-            table.insert(visible_params, i)
+    else
+        -- Default: first MAX_VISIBLE_PARAMS
+        for i = 0, param_count - 1 do
+            if #visible_params >= MAX_VISIBLE_PARAMS then
+                break
+            end
+
+            local ok_pn, pname = pcall(function() return fx:get_param_name(i) end)
+            local skip = false
+            if ok_pn and pname then
+                local lower = pname:lower()
+                if lower == "wet" or lower == "delta" or lower == "bypass" then
+                    skip = true
+                end
+            end
+            if not skip then
+                table.insert(visible_params, i)
+            end
         end
     end
 
@@ -630,9 +698,15 @@ function M.draw(ctx, fx, opts)
     -- Extract FX display info
     local name, device_id = extract_fx_display_info(fx, container)
 
-    -- Get enabled state from container
-    local ok3, enabled = pcall(function() return container:get_enabled() end)
-    if not ok3 then enabled = false end
+    -- Get enabled state from container (or FX if no container)
+    local enabled = false
+    if container then
+        local ok3, enabled_val = pcall(function() return container:get_enabled() end)
+        if ok3 then enabled = enabled_val end
+    else
+        local ok3, enabled_val = pcall(function() return fx:get_enabled() end)
+        if ok3 then enabled = enabled_val end
+    end
 
     -- Build list of visible params (exclude sidebar controls: wet, delta, bypass)
     local visible_params = get_visible_params(fx)

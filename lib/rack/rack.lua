@@ -127,6 +127,11 @@ local function create_rack_container(rack_idx, position)
         return nil
     end
 
+    -- Mark track as SideFX track
+    if state.track then
+        state_module.mark_track_as_sidefx(state.track)
+    end
+
     return rack
 end
 
@@ -289,6 +294,11 @@ function M.add_rack(parent_rack, position)
 
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Rack", -1)
+
+        -- Mark track as SideFX track
+        if state.track then
+            state_module.mark_track_as_sidefx(state.track)
+        end
 
         -- Re-find the rack to return using GUID (more reliable for nested racks)
         return state.track:find_fx_by_guid(rack_guid)
@@ -468,6 +478,11 @@ function M.add_empty_chain_to_rack(rack)
 
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Add Empty Chain", -1)
+
+    -- Mark track as SideFX track
+    if state.track then
+        state_module.mark_track_as_sidefx(state.track)
+    end
 
     -- Re-find the chain after it's been moved (reference is stale)
     -- Use the chain_inside if we found it, otherwise use GUID lookup
@@ -697,6 +712,11 @@ function M.add_chain_to_rack(rack, plugin)
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Add Chain to Rack", -1)
 
+    -- Mark track as SideFX track
+    if state.track then
+        state_module.mark_track_as_sidefx(state.track)
+    end
+
     -- Re-find the chain after it's been moved (reference is stale)
     -- Use the chain_inside if we found it, otherwise use GUID lookup
     if chain_inside then
@@ -922,6 +942,11 @@ function M.add_rack_to_chain(chain)
 
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Add Rack to Chain", -1)
+
+    -- Mark track as SideFX track
+    if state.track then
+        state_module.mark_track_as_sidefx(state.track)
+    end
 
     -- Re-find the rack after it's been moved (reference is stale)
     if rack_guid then

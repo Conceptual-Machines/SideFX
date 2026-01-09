@@ -65,6 +65,14 @@ M.state = {
     modulator_expanded = {},  -- {[mod_fx_idx] = true} -- which modulators show params
     modulator_advanced = {},  -- {[mod_fx_idx] = true} -- advanced section expanded
     modulator_section_collapsed = {},  -- {[device_guid] = true} -- device modulator section collapsed
+    
+    -- Parameter visibility selections (keyed by plugin full_name)
+    param_selections = {},  -- {[plugin_full_name] = {param_idx1, param_idx2, ...}}
+    
+    -- User configuration
+    config = {
+        max_visible_params = 64,  -- Maximum parameters to display (default 64, max 128)
+    },
 }
 
 -- Alias for convenience
@@ -470,6 +478,176 @@ function M.load_display_names()
             name = name:gsub("%%PIPE%%", "|"):gsub("%%EQ%%", "=")
             state.display_names[guid] = name
         end
+    end
+end
+
+--------------------------------------------------------------------------------
+-- Configuration Management
+--------------------------------------------------------------------------------
+
+--- Save user configuration to ExtState
+function M.save_config()
+    local config_str = string.format("max_visible_params:%d", state.config.max_visible_params)
+    r.SetProjExtState(0, "SideFX", "Config", config_str)
+end
+
+--- Load user configuration from ExtState
+function M.load_config()
+    local ok, config_str = r.GetProjExtState(0, "SideFX", "Config")
+    if ok > 0 and config_str and config_str ~= "" then
+        -- Parse config string (format: "max_visible_params:64")
+        for pair in config_str:gmatch("([^,]+)") do
+            local key, value = pair:match("^([^:]+):(.+)$")
+            if key == "max_visible_params" then
+                local max = tonumber(value)
+                if max and max >= 1 and max <= 128 then
+                    state.config.max_visible_params = max
+                end
+            end
+        end
+    end
+end
+
+--- Get maximum visible parameters (capped at 128)
+-- @return number Max params (1-128)
+function M.get_max_visible_params()
+    local max = state.config.max_visible_params or 64
+    -- Ensure it's within valid range
+    if max < 1 then max = 64
+    elseif max > 128 then max = 128
+    end
+    return max
+end
+
+--- Set maximum visible parameters
+-- @param max number Maximum params (1-128)
+function M.set_max_visible_params(max)
+    if max < 1 then max = 1
+    elseif max > 128 then max = 128
+    end
+    state.config.max_visible_params = max
+    M.save_config()
+end
+
+--------------------------------------------------------------------------------
+-- SideFX Track Detection
+--------------------------------------------------------------------------------
+
+--- Check if a track is a SideFX track (has SideFX containers/plugins).
+-- Uses ExtState cache for fast lookup, falls back to scanning FX chain.
+-- @param track Track|MediaTrack Track object or MediaTrack pointer
+-- @param cache_result boolean|nil If true, cache result in ExtState (default: true)
+-- @return boolean True if track is a SideFX track
+function M.is_sidefx_track(track, cache_result)
+    if not track then return false end
+    
+    -- Get track GUID (stable identifier)
+    local track_guid = nil
+    if type(track) == "userdata" then
+        -- Raw MediaTrack pointer - need to get GUID via ReaWrap
+        local Track = require('track')
+        local track_obj = Track:new(track)
+        local ok, guid = pcall(function() return track_obj:get_guid() end)
+        if ok and guid then track_guid = guid end
+    else
+        -- ReaWrap Track object
+        local ok, guid = pcall(function() return track:get_guid() end)
+        if ok and guid then track_guid = guid end
+    end
+    
+    if not track_guid then return false end
+    
+    -- Check ExtState cache first (fast lookup)
+    local cache_key = "SideFX_Track_" .. track_guid
+    local ok, cached = r.GetProjExtState(0, "SideFX", cache_key)
+    if ok > 0 and cached == "1" then
+        return true
+    elseif ok > 0 and cached == "0" then
+        return false
+    end
+    
+    -- Cache miss - scan FX chain for SideFX plugins
+    local is_sidefx = false
+    
+    -- Get Track object for iteration
+    local track_obj = track
+    if type(track) == "userdata" then
+        local Track = require('track')
+        track_obj = Track:new(track)
+    end
+    
+    -- Check for SideFX JSFX plugins (definitive markers)
+    local ok_scan = pcall(function()
+        for entry in track_obj:iter_all_fx_flat() do
+            local fx = entry.fx
+            local ok_name, name = pcall(function() return fx:get_name() end)
+            if ok_name and name then
+                -- Check for SideFX JSFX plugins
+                if name:find("SideFX_Mixer") or 
+                   name:find("SideFX_Utility") or 
+                   name:find("SideFX_Modulator") then
+                    is_sidefx = true
+                    break
+                end
+                -- Also check for container naming patterns (R{n}, C{n}, D{n})
+                if name:match("^R%d+") or name:match("^C%d+") or name:match("^D%d+") then
+                    is_sidefx = true
+                    break
+                end
+            end
+        end
+    end)
+    
+    -- Cache result if requested (default: true)
+    if cache_result ~= false then
+        r.SetProjExtState(0, "SideFX", cache_key, is_sidefx and "1" or "0")
+    end
+    
+    return is_sidefx
+end
+
+--- Mark a track as a SideFX track in ExtState.
+-- Call this when creating SideFX structures to update the cache.
+-- @param track Track|MediaTrack Track object or MediaTrack pointer
+function M.mark_track_as_sidefx(track)
+    if not track then return end
+    
+    local track_guid = nil
+    if type(track) == "userdata" then
+        local Track = require('track')
+        local track_obj = Track:new(track)
+        local ok, guid = pcall(function() return track_obj:get_guid() end)
+        if ok and guid then track_guid = guid end
+    else
+        local ok, guid = pcall(function() return track:get_guid() end)
+        if ok and guid then track_guid = guid end
+    end
+    
+    if track_guid then
+        local cache_key = "SideFX_Track_" .. track_guid
+        r.SetProjExtState(0, "SideFX", cache_key, "1")
+    end
+end
+
+--- Clear SideFX track cache for a track (e.g., when converting away from SideFX).
+-- @param track Track|MediaTrack Track object or MediaTrack pointer
+function M.clear_sidefx_track_cache(track)
+    if not track then return end
+    
+    local track_guid = nil
+    if type(track) == "userdata" then
+        local Track = require('track')
+        local track_obj = Track:new(track)
+        local ok, guid = pcall(function() return track_obj:get_guid() end)
+        if ok and guid then track_guid = guid end
+    else
+        local ok, guid = pcall(function() return track:get_guid() end)
+        if ok and guid then track_guid = guid end
+    end
+    
+    if track_guid then
+        local cache_key = "SideFX_Track_" .. track_guid
+        r.SetProjExtState(0, "SideFX", cache_key, "")
     end
 end
 

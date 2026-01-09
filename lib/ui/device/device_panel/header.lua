@@ -272,7 +272,12 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
         -- Column: ON/OFF toggle
         ctx:table_set_column_index(0)
         if drawing.draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, 24, 20, colors.bypass_on, colors.bypass_off) then
-            container:set_enabled(not enabled)
+            if container then
+                container:set_enabled(not enabled)
+            else
+                -- Fallback: use FX directly if no container
+                fx:set_enabled(not enabled)
+            end
             interacted = true
         end
         if r.ImGui_IsItemHovered(ctx.ctx) then

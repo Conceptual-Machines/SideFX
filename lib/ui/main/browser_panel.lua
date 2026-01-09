@@ -7,6 +7,7 @@
 local imgui = require('imgui')
 local helpers = require('helpers')
 local constants = require('lib.core.constants')
+local param_selector = require('lib.ui.device.param_selector')
 
 local M = {}
 
@@ -77,6 +78,15 @@ function M.draw(ctx, state, icon_font, icon_size, on_plugin_add, filter_plugins)
                 on_plugin_add(plugin)
             end
 
+            -- Right-click context menu (use plugin full_name for unique ID)
+            local menu_id = "PluginContextMenu_" .. (plugin.full_name:gsub("[^%w]", "_"))
+            if ctx:begin_popup_context_item(menu_id) then
+                if ctx:menu_item("Select Parameters...") then
+                    param_selector.open(plugin.name, plugin.full_name)
+                end
+                ctx:end_popup()
+            end
+
             -- Drag source for plugin (drag to add to chain)
             if ctx:begin_drag_drop_source() then
                 ctx:set_drag_drop_payload("PLUGIN_ADD", plugin.full_name)
@@ -85,12 +95,17 @@ function M.draw(ctx, state, icon_font, icon_size, on_plugin_add, filter_plugins)
             end
 
             if ctx:is_item_hovered() then
-                ctx:set_tooltip(plugin.full_name .. "\n(drag to chain or click to add)")
+                ctx:set_tooltip(plugin.full_name .. "\n(drag to chain or click to add)\n(right-click to select parameters)")
             end
 
             ctx:pop_id()
         end
         ctx:end_child()
+    end
+    
+    -- Draw parameter selector dialog if open
+    if param_selector.is_open() then
+        param_selector.draw(ctx, state)
     end
 end
 

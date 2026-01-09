@@ -101,16 +101,24 @@ function M.draw(ctx, fx, guid, visible_params, visible_count, num_columns, param
 
     if visible_count > 0 then
         -- Use nested table for parameter columns
-        if r.ImGui_BeginTable(ctx.ctx, "params_" .. guid, num_columns, r.ImGui_TableFlags_SizingStretchSame()) then
-            for col = 0, num_columns - 1 do
-                r.ImGui_TableSetupColumn(ctx.ctx, "col" .. col, r.ImGui_TableColumnFlags_WidthStretch())
-            end
+        -- Wrap in pcall to handle context corruption gracefully
+        local ok, err = pcall(function()
+            if r.ImGui_BeginTable(ctx.ctx, "params_" .. guid, num_columns, r.ImGui_TableFlags_SizingStretchSame()) then
+                for col = 0, num_columns - 1 do
+                    r.ImGui_TableSetupColumn(ctx.ctx, "col" .. col, r.ImGui_TableColumnFlags_WidthStretch())
+                end
 
-            if draw_params_grid(ctx, fx, visible_params, visible_count, num_columns, params_per_column) then
-                interacted = true
-            end
+                if draw_params_grid(ctx, fx, visible_params, visible_count, num_columns, params_per_column) then
+                    interacted = true
+                end
 
-            r.ImGui_EndTable(ctx.ctx)
+                r.ImGui_EndTable(ctx.ctx)
+            end
+        end)
+        
+        if not ok then
+            r.ShowConsoleMsg("Error rendering parameter table: " .. tostring(err) .. "\n")
+            ctx:text_disabled("Error displaying parameters")
         end
     else
         ctx:text_disabled("No parameters")
