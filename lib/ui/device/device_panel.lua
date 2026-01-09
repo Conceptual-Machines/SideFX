@@ -80,12 +80,48 @@ local panel_collapsed = {}
 -- Track device controls collapsed state per FX (by GUID) - collapses only device params, not modulators/gain
 local device_collapsed = {}
 
+-- Track ignored missing utility warnings per FX (by GUID)
+local ignored_missing_utility = {}
+
 -- NOTE: Modulator sidebar state is now managed by the state module
 -- (accessed via state.mod_sidebar_collapsed and state.expanded_mod_slot)
 
 -- Rename state: which FX is being renamed and the edit buffer
 local rename_active = {}    -- guid -> true if rename mode active
 local rename_buffer = {}    -- guid -> current edit text
+
+--------------------------------------------------------------------------------
+-- Utility Restoration
+--------------------------------------------------------------------------------
+
+--- Restore missing utility FX to a device container
+local function restore_utility(container)
+    if not container or not container:is_container() then
+        return false
+    end
+    
+    -- Add SideFX_Utility to the end of the container
+    local utility_name = "JS: SideFX_Utility"
+    local ok, utility = pcall(function()
+        return container:add_fx_to_container(utility_name, -1)  -- -1 = end of container
+    end)
+    
+    if ok and utility then
+        -- Rename utility to match device naming
+        local container_name = container:get_name()
+        local device_idx = container_name:match("^D(%d+):")
+        if device_idx then
+            local util_name = string.format("D%d_Util", tonumber(device_idx))
+            utility:set_named_config_param("renamed_name", util_name)
+        end
+        
+        -- Refresh FX list to update UI
+        state_module.refresh_fx_list()
+        return true
+    end
+    
+    return false
+end
 
 --------------------------------------------------------------------------------
 -- Custom Widgets
@@ -391,7 +427,22 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         -- Header Column 3: Control buttons (only when expanded)
         if not is_device_collapsed then
             r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
-            if header.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_device_collapsed, device_collapsed, opts, colors) then
+            
+            -- Prepare options for header buttons
+            local header_opts = {
+                on_delete = opts.on_delete,
+                missing_utility = show_missing_utility,
+                on_restore_utility = function(target_fx)
+                    restore_utility(target_fx)
+                    interacted = true
+                end,
+                on_ignore_missing_utility = function(fx_guid)
+                    ignored_missing_utility[fx_guid] = true
+                    interacted = true
+                end,
+            }
+            
+            if header.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_device_collapsed, device_collapsed, header_opts, colors) then
                 interacted = true
             end
         end
@@ -694,6 +745,9 @@ function M.draw(ctx, fx, opts)
     -- Use container GUID for drag/drop if we have a container
     local container = opts.container
     local drag_guid = container and container:get_guid() or guid
+    
+    -- Check if missing utility warning should be shown
+    local show_missing_utility = opts.missing_utility and not ignored_missing_utility[guid]
 
     -- Extract FX display info
     local name, device_id = extract_fx_display_info(fx, container)
