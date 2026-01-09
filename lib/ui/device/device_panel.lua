@@ -305,21 +305,21 @@ local function get_visible_params(fx)
         end
     else
         -- Default: first MAX_VISIBLE_PARAMS
-        for i = 0, param_count - 1 do
+    for i = 0, param_count - 1 do
             if #visible_params >= MAX_VISIBLE_PARAMS then
                 break
             end
 
-            local ok_pn, pname = pcall(function() return fx:get_param_name(i) end)
-            local skip = false
-            if ok_pn and pname then
-                local lower = pname:lower()
-                if lower == "wet" or lower == "delta" or lower == "bypass" then
-                    skip = true
-                end
+        local ok_pn, pname = pcall(function() return fx:get_param_name(i) end)
+        local skip = false
+        if ok_pn and pname then
+            local lower = pname:lower()
+            if lower == "wet" or lower == "delta" or lower == "bypass" then
+                skip = true
             end
-            if not skip then
-                table.insert(visible_params, i)
+        end
+        if not skip then
+            table.insert(visible_params, i)
             end
         end
     end

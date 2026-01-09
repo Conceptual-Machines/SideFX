@@ -105,7 +105,7 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
             end
         end
         if icon_font then ctx:pop_font() end
-        if ctx:is_item_hovered() then ctx:set_tooltip("Chain Presets") end
+        if ctx:is_item_hovered() then ctx:set_tooltip("Save/Load Preset") end
 
         ctx:same_line()
 

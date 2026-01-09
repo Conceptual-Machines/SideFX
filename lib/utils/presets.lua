@@ -49,9 +49,9 @@ local function collect_metadata()
         param_selections = {},
         modulators = {},
     }
-    
+
     if not state.track then return metadata end
-    
+
     -- Collect display names (keyed by FX GUID)
     for guid, name in pairs(state.display_names) do
         -- Get FX to find its position/name for matching on load
@@ -68,14 +68,14 @@ local function collect_metadata()
             end
         end
     end
-    
+
     -- Collect parameter selections (keyed by plugin name)
     if state.param_selections then
         for plugin_name, params in pairs(state.param_selections) do
             metadata.param_selections[plugin_name] = params
         end
     end
-    
+
     -- Collect modulator configurations
     local modulators = modulator_mod.find_modulators_on_track()
     for i, mod_info in ipairs(modulators) do
@@ -83,17 +83,17 @@ local function collect_metadata()
         local ok_guid, mod_guid = pcall(function() return mod_fx:get_guid() end)
         local ok_name, mod_name = pcall(function() return mod_fx:get_name() end)
         local ok_idx, mod_idx = pcall(function() return mod_fx.pointer end)
-        
+
         if ok_guid and ok_name and ok_idx and mod_guid and mod_name then
             -- Get links for this modulator
             local links = modulator_mod.get_modulator_links(mod_fx)
             local link_data = {}
-            
+
             for _, link in ipairs(links) do
                 local ok_target_guid, target_guid = pcall(function() return link.target_fx:get_guid() end)
                 local ok_target_name, target_name = pcall(function() return link.target_fx:get_name() end)
                 local ok_target_idx, target_idx = pcall(function() return link.target_fx.pointer end)
-                
+
                 if ok_target_guid and ok_target_name and ok_target_idx and target_guid and target_name then
                     table.insert(link_data, {
                         target_fx_guid = target_guid,
@@ -104,7 +104,7 @@ local function collect_metadata()
                     })
                 end
             end
-            
+
             table.insert(metadata.modulators, {
                 mod_guid = mod_guid,
                 mod_name = mod_name,
@@ -113,7 +113,7 @@ local function collect_metadata()
             })
         end
     end
-    
+
     return metadata
 end
 
@@ -126,13 +126,13 @@ local function extract_fxchain_content(track_chunk)
     if not track_root then
         return nil
     end
-    
+
     -- Find FXCHAIN chunk
     local fxchain = track_root:findFirstChunkByName("FXCHAIN")
     if not fxchain or not fxchain.children then
         return nil
     end
-    
+
     -- Extract only FX chunks (RChunk type), skip attributes (RNode type)
     local fx_lines = {}
     for _, child in ipairs(fxchain.children) do
@@ -146,7 +146,7 @@ local function extract_fxchain_content(track_chunk)
             end
         end
     end
-    
+
     return table.concat(fx_lines, "\n")
 end
 
@@ -161,80 +161,80 @@ function M.save_chain(preset_name)
     M.ensure_folder()
 
     local chain_path = presets_folder .. "chains/" .. preset_name .. ".RfxChain"
-    
+
     -- Manually serialize FX chain using GetChunk
     local file = io.open(chain_path, "w")
     if not file then
         r.ShowMessageBox("Failed to create preset file: " .. chain_path, "SideFX", 0)
         return false
     end
-    
+
     -- Get all top-level FX (indices 0 to fx_count-1 are top-level)
     -- Nested FX have encoded indices (0x2000000+) and are included in parent's chunk
     local ok_count, fx_count = pcall(function()
         return state.track:get_track_fx_count()
     end)
-    
+
     if not ok_count or not fx_count or fx_count == 0 then
         file:close()
         r.ShowMessageBox("No FX found on track to save.", "SideFX", 0)
         return false
     end
-    
+
     local fx_written = 0
     local track_ptr = state.track.pointer
-    
+
     -- Verify track pointer is valid
     if not track_ptr then
         file:close()
         r.ShowMessageBox("Invalid track pointer. Cannot save preset.", "SideFX", 0)
         return false
     end
-    
+
     -- Use GetTrackStateChunk to get the entire track state, then extract FXCHAIN section
     -- In Lua, GetTrackStateChunk might return the chunk as a string or modify buffer
     -- Try both approaches
-    
+
     local track_chunk = nil
-    
+
     -- Get track state chunk - in Lua, GetTrackStateChunk returns the chunk as second return value
     local ret, track_chunk = r.GetTrackStateChunk(track_ptr, "", false)
-    
+
     if not ret or not track_chunk or track_chunk == "" then
         file:close()
         r.ShowMessageBox("Failed to retrieve track state chunk.", "SideFX", 0)
         return false
     end
-    
+
     -- Extract FXCHAIN content
     local fxchain_data = extract_fxchain_content(track_chunk)
-    
+
     if not fxchain_data then
         file:close()
         r.ShowMessageBox("Failed to extract FX chain from track.", "SideFX", 0)
         return false
     end
-    
+
     -- Write to file
     file:write(fxchain_data)
     if not fxchain_data:match("\n$") then
         file:write("\n")
     end
     fx_written = 1
-    
+
     file:close()
-    
+
     if fx_written == 0 then
         -- No FX chunks were successfully retrieved
         r.ShowMessageBox("Failed to retrieve FX data from track. The track may have no FX or the FX may be in an invalid state.", "SideFX", 0)
         return false
     end
-    
+
     -- Collect and save SideFX metadata
     local metadata = collect_metadata()
     local json_str = json.encode(metadata)
     local metadata_path = presets_folder .. "chains/" .. preset_name .. ".sidefx.json"
-    
+
     -- Write JSON file
     local meta_file = io.open(metadata_path, "w")
     if meta_file then
@@ -252,7 +252,7 @@ end
 local function apply_metadata(metadata)
     local state = state_mod.state
     if not state.track or not metadata then return end
-    
+
     -- Apply parameter selections
     if metadata.param_selections then
         for plugin_name, params in pairs(metadata.param_selections) do
@@ -262,7 +262,7 @@ local function apply_metadata(metadata)
             state.param_selections[plugin_name] = params
         end
     end
-    
+
     -- Apply display names (match by FX name and index)
     if metadata.display_names then
         for old_guid, name_data in pairs(metadata.display_names) do
@@ -275,7 +275,7 @@ local function apply_metadata(metadata)
                     break
                 end
             end
-            
+
             if fx then
                 local ok, new_guid = pcall(function() return fx:get_guid() end)
                 if ok and new_guid then
@@ -284,7 +284,7 @@ local function apply_metadata(metadata)
             end
         end
     end
-    
+
     -- Apply modulator links (match by modulator name and target FX name + param)
     if metadata.modulators then
         for _, mod_data in ipairs(metadata.modulators) do
@@ -297,7 +297,7 @@ local function apply_metadata(metadata)
                     break
                 end
             end
-            
+
             if mod_fx and mod_data.links then
                 -- Restore links
                 for _, link_data in ipairs(mod_data.links) do
@@ -310,7 +310,7 @@ local function apply_metadata(metadata)
                             break
                         end
                     end
-                    
+
                     if target_fx then
                         -- Try to find parameter by name
                         local param_count = target_fx:get_num_params()
@@ -336,14 +336,14 @@ local function read_preset_file(path)
     if not file then
         return nil
     end
-    
+
     local content = file:read("*all")
     file:close()
-    
+
     if not content or content == "" then
         return nil
     end
-    
+
     return content
 end
 
@@ -356,7 +356,7 @@ local function replace_fxchain_content(track_chunk, new_content)
     r.ShowConsoleMsg("track_chunk length: " .. #track_chunk .. "\n")
     r.ShowConsoleMsg("new_content length: " .. #new_content .. "\n")
     r.ShowConsoleMsg("new_content (first 300 chars):\n" .. new_content:sub(1, 300) .. "\n")
-    
+
     -- Parse the track chunk
     local track_root = ReadRPPChunk(track_chunk)
     if not track_root then
@@ -364,7 +364,7 @@ local function replace_fxchain_content(track_chunk, new_content)
         return nil
     end
     r.ShowConsoleMsg("Track chunk parsed OK\n")
-    
+
     -- Find FXCHAIN chunk
     local fxchain = track_root:findFirstChunkByName("FXCHAIN")
     if not fxchain then
@@ -372,7 +372,7 @@ local function replace_fxchain_content(track_chunk, new_content)
         return nil
     end
     r.ShowConsoleMsg("Found FXCHAIN\n")
-    
+
     -- Parse the new content
     local new_fx_root = ReadRPPChunk(new_content)
     if not new_fx_root then
@@ -384,21 +384,21 @@ local function replace_fxchain_content(track_chunk, new_content)
         return nil
     end
     r.ShowConsoleMsg("New FX content parsed, " .. #new_fx_root.children .. " children\n")
-    
+
     -- Replace FXCHAIN children with new FX
     fxchain.children = new_fx_root.children
-    
+
     -- Update parent references
     for _, child in ipairs(fxchain.children) do
         child.parent = fxchain
     end
     r.ShowConsoleMsg("Children replaced\n")
-    
+
     -- Stringify back to track chunk
     local result = StringifyRPPNode(track_root)
     r.ShowConsoleMsg("Result length: " .. #result .. "\n")
     r.ShowConsoleMsg("Result (first 500 chars):\n" .. result:sub(1, 500) .. "\n")
-    
+
     return result
 end
 
@@ -420,16 +420,16 @@ function M.load_chain(preset_name)
 
     local chain_path = presets_folder .. "chains/" .. preset_name .. ".RfxChain"
     local metadata_path = presets_folder .. "chains/" .. preset_name .. ".sidefx.json"
-    
+
     -- Read preset file
     local fxchain_content = read_preset_file(chain_path)
     if not fxchain_content then
         r.ShowMessageBox("Failed to read preset file: " .. chain_path, "SideFX", 0)
         return false
     end
-    
+
     r.Undo_BeginBlock()
-    
+
     -- Get current track state
     local ret, track_chunk = r.GetTrackStateChunk(state.track.pointer, "", false)
     if not ret or not track_chunk then
@@ -437,32 +437,32 @@ function M.load_chain(preset_name)
         r.ShowMessageBox("Failed to get track state.", "SideFX", 0)
         return false
     end
-    
+
     -- Replace FXCHAIN in track chunk
     local new_track_chunk = replace_fxchain_content(track_chunk, fxchain_content)
-    
+
     if not new_track_chunk then
         r.Undo_EndBlock("Load FX Chain Preset (failed)", -1)
         r.ShowMessageBox("Failed to replace FX chain in track.", "SideFX", 0)
         return false
     end
-    
+
     -- Apply to track
     if not apply_track_chunk(state.track.pointer, new_track_chunk) then
         r.Undo_EndBlock("Load FX Chain Preset (failed)", -1)
         r.ShowMessageBox("Failed to set track state.", "SideFX", 0)
         return false
     end
-    
+
     -- Refresh FX list to get new GUIDs
     state_mod.refresh_fx_list()
-    
+
     -- Load and apply metadata if available
     local file = io.open(metadata_path, "r")
     if file then
         local json_str = file:read("*all")
         file:close()
-        
+
         if json_str and json_str ~= "" then
             local metadata = json.decode(json_str)
             if metadata then
@@ -470,7 +470,7 @@ function M.load_chain(preset_name)
             end
         end
     end
-    
+
     r.Undo_EndBlock("Load FX Chain Preset", -1)
     return true
 end

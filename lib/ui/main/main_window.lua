@@ -363,6 +363,14 @@ function M.create_callbacks(opts)
                 end
                 state.last_save_frame = ctx.frame_count
             end
+            
+            -- Draw modal dialogs (settings, presets, etc.)
+            if opts.settings_dialog then
+                opts.settings_dialog.draw(ctx)
+            end
+            if opts.preset_dialog then
+                opts.preset_dialog.draw(ctx)
+            end
         end,
     }
 

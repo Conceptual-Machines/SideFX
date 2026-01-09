@@ -72,6 +72,16 @@ M.state = {
     -- User configuration
     config = {
         max_visible_params = 64,  -- Maximum parameters to display (default 64, max 128)
+        -- Display settings
+        show_track_name = true,
+        show_breadcrumbs = true,
+        icon_font_size = 1,  -- 0=Small, 1=Medium, 2=Large
+        -- Behavior settings
+        auto_refresh = true,
+        remember_window_pos = true,
+        -- Gain staging settings
+        gain_target_db = -12.0,
+        gain_tolerance_db = 1.0,
     },
 }
 
@@ -487,7 +497,17 @@ end
 
 --- Save user configuration to ExtState
 function M.save_config()
-    local config_str = string.format("max_visible_params:%d", state.config.max_visible_params)
+    local parts = {}
+    table.insert(parts, string.format("max_visible_params:%d", state.config.max_visible_params))
+    table.insert(parts, string.format("show_track_name:%s", state.config.show_track_name and "true" or "false"))
+    table.insert(parts, string.format("show_breadcrumbs:%s", state.config.show_breadcrumbs and "true" or "false"))
+    table.insert(parts, string.format("icon_font_size:%d", state.config.icon_font_size or 1))
+    table.insert(parts, string.format("auto_refresh:%s", state.config.auto_refresh and "true" or "false"))
+    table.insert(parts, string.format("remember_window_pos:%s", state.config.remember_window_pos and "true" or "false"))
+    table.insert(parts, string.format("gain_target_db:%.2f", state.config.gain_target_db or -12.0))
+    table.insert(parts, string.format("gain_tolerance_db:%.2f", state.config.gain_tolerance_db or 1.0))
+    
+    local config_str = table.concat(parts, ",")
     r.SetProjExtState(0, "SideFX", "Config", config_str)
 end
 
@@ -495,13 +515,36 @@ end
 function M.load_config()
     local ok, config_str = r.GetProjExtState(0, "SideFX", "Config")
     if ok > 0 and config_str and config_str ~= "" then
-        -- Parse config string (format: "max_visible_params:64")
+        -- Parse config string (format: "key1:value1,key2:value2,...")
         for pair in config_str:gmatch("([^,]+)") do
             local key, value = pair:match("^([^:]+):(.+)$")
             if key == "max_visible_params" then
                 local max = tonumber(value)
                 if max and max >= 1 and max <= 128 then
                     state.config.max_visible_params = max
+                end
+            elseif key == "show_track_name" then
+                state.config.show_track_name = (value == "true")
+            elseif key == "show_breadcrumbs" then
+                state.config.show_breadcrumbs = (value == "true")
+            elseif key == "icon_font_size" then
+                local size = tonumber(value)
+                if size and size >= 0 and size <= 2 then
+                    state.config.icon_font_size = size
+                end
+            elseif key == "auto_refresh" then
+                state.config.auto_refresh = (value == "true")
+            elseif key == "remember_window_pos" then
+                state.config.remember_window_pos = (value == "true")
+            elseif key == "gain_target_db" then
+                local db = tonumber(value)
+                if db and db >= -24.0 and db <= 0.0 then
+                    state.config.gain_target_db = db
+                end
+            elseif key == "gain_tolerance_db" then
+                local tol = tonumber(value)
+                if tol and tol >= 0.5 and tol <= 3.0 then
+                    state.config.gain_tolerance_db = tol
                 end
             end
         end
