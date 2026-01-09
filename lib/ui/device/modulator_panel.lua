@@ -275,14 +275,16 @@ local function draw_modulator_params(ctx, mod, state, width)
     ctx:set_next_item_width(width - 20)
     if not is_sync then
         -- Free mode: Hz slider
-        local ok_rate, rate_hz = pcall(function() return fx:get_param_normalized(PARAM_MAP.rate_hz) end)
-        if ok_rate then
-            -- Convert normalized to Hz (0.01 - 20 Hz)
-            local hz_val = 0.01 + rate_hz * 19.99
+        -- get_param returns normalized 0-1, set_param expects normalized 0-1
+        local ok_rate, rate_norm, min_val, max_val = pcall(function() return fx:get_param(PARAM_MAP.rate_hz) end)
+        if ok_rate and rate_norm then
+            -- Convert normalized to Hz (0.01 - 20)
+            local hz_val = 0.01 + rate_norm * 19.99
             local changed, new_hz = ctx:slider_double("##rate_hz_" .. mod.fx_idx, hz_val, 0.01, 20, "%.2f Hz")
             if changed then
+                -- Convert Hz back to normalized
                 local norm_val = (new_hz - 0.01) / 19.99
-                pcall(function() fx:set_param_normalized(PARAM_MAP.rate_hz, norm_val) end)
+                pcall(function() fx:set_param(PARAM_MAP.rate_hz, norm_val) end)
             end
         end
     else

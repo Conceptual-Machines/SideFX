@@ -83,12 +83,12 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
     -- Right-side buttons (presets and config)
     local button_width = 30
     local spacing = 4
+    local padding = 8  -- typical window padding
     local total_button_width = button_width * 2 + spacing
     local window_width = ctx:get_window_size()
-    local style_x, _ = ctx:get_style_var(imgui.StyleVar.WindowPadding())
 
     -- Position buttons on the right
-    ctx:same_line(window_width - total_button_width - style_x)
+    ctx:same_line(window_width - total_button_width - padding)
 
     -- Preset button
     if icon_font then ctx:push_font(icon_font, icon_size) end

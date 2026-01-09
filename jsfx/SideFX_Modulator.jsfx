@@ -3,10 +3,10 @@ author:Nomad Monad
 version:2.0
 
 // Rate
-slider1:0<0,1,1{Free,Sync}>-Tempo Mode
-slider2:1<0.01,20,0.01>-Rate (Hz)
-slider3:5<0,17,1{8 bars,4 bars,2 bars,1 bar,1/2,1/4,1/4T,1/4.,1/8,1/8T,1/8.,1/16,1/16T,1/16.,1/32,1/32T,1/32.,1/64}>-Sync Rate
-slider4:0<0,1,0.001>-Output
+slider1:0<0,1,1{Free,Sync}>Tempo Mode
+slider2:1<0.01,20,0.01>Rate (Hz)
+slider3:5<0,17,1{8 bars,4 bars,2 bars,1 bar,1/2,1/4,1/4T,1/4.,1/8,1/8T,1/8.,1/16,1/16T,1/16.,1/32,1/32T,1/32.,1/64}>Sync Rate
+slider4:0<0,1,0.001>Output
 slider5:0<0,1,0.001>-Phase
 slider6:1<0,1,0.01>-Depth
 
