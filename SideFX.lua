@@ -467,20 +467,20 @@ end
 local function draw_selected_chain_column_if_expanded(ctx, rack_data, rack_guid)
     local selected_chain_guid = state.expanded_nested_chains[rack_guid]
     if rack_data.is_expanded and selected_chain_guid then
-        local selected_chain = nil
-        for _, chain in ipairs(rack_data.chains) do
+                local selected_chain = nil
+                for _, chain in ipairs(rack_data.chains) do
             local ok_guid, chain_guid = pcall(function() return chain:get_guid() end)
             if ok_guid and chain_guid and chain_guid == selected_chain_guid then
-                selected_chain = chain
-                break
-            end
-        end
+                        selected_chain = chain
+                        break
+                    end
+                end
 
-        if selected_chain then
-            ctx:same_line()
-            draw_chain_column(ctx, selected_chain, rack_data.rack_h)
-        end
-    end
+                if selected_chain then
+                    ctx:same_line()
+                    draw_chain_column(ctx, selected_chain, rack_data.rack_h)
+                end
+            end
 end
 
 local function draw_device_chain(ctx, fx_list, avail_width, avail_height, icon_font_ref)
@@ -518,6 +518,9 @@ local function main()
     state.track, state.track_name = get_selected_track()
     refresh_fx_list()
     scan_plugins()
+    
+    -- Load user configuration (global, not per-track)
+    state_module.load_config()
 
     -- Load expansion state and display names for current track
     if state.track then

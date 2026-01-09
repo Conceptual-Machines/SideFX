@@ -133,6 +133,7 @@ function M.create_callbacks(opts)
                 clear_multi_select()
                 refresh_fx_list()
 
+
                 -- Load expansion state for new track
                 if state.track then
                     state_module.load_expansion_state()
@@ -223,20 +224,86 @@ function M.create_callbacks(opts)
                     ctx:pop_style_var()
                     ctx:pop_style_color()
                 else
-                    -- Filter out invalid FX (from deleted tracks)
-                    local filtered_fx = {}
-                    for _, fx in ipairs(state.top_level_fx) do
-                        -- Validate FX is still accessible (track may have been deleted)
-                        local ok = pcall(function()
-                            return fx:get_name()
-                        end)
-                        if ok then
-                            table.insert(filtered_fx, fx)
-                        end
+                    -- Check if track has FX and if it's a SideFX track
+                    local has_fx = false
+                    local is_sidefx = false
+                    local ok_fx, fx_count = pcall(function()
+                        return state.track:get_track_fx_count()
+                    end)
+                    if ok_fx and fx_count and fx_count > 0 then
+                        has_fx = true
+                        is_sidefx = state_module.is_sidefx_track(state.track)
                     end
+                    
+                    if has_fx and not is_sidefx then
+                        -- Track has FX but is not a SideFX track - show warning message
+                        local avail_w, avail_h = ctx:get_content_region_avail()
+                        local msg_w = 400
+                        local msg_h = 80
+                        local msg_x = (avail_w - msg_w) / 2
+                        local msg_y = (avail_h - msg_h) / 2
 
-                    -- Draw the horizontal device chain (includes modulators)
-                    draw_device_chain(ctx, filtered_fx, chain_w, avail_h, icon_font_ref)
+                        -- Position using dummy spacing
+                        if msg_y > 0 then
+                            ctx:dummy(0, msg_y)
+                        end
+                        if msg_x > 0 then
+                            ctx:dummy(msg_x, 0)
+                            ctx:same_line()
+                        end
+
+                        -- Warning message with red border
+                        ctx:push_style_color(imgui.Col.ChildBg(), 0x2A1A1AFF)  -- Slightly red-tinted background
+                        ctx:push_style_var(imgui.StyleVar.WindowPadding(), 20, 15)
+                        if ctx:begin_child("not_sidefx_msg", msg_w, msg_h, 0) then
+                            -- Get window bounds for border drawing
+                            local window_min_x, window_min_y = r.ImGui_GetWindowPos(ctx.ctx)
+                            local window_max_x = window_min_x + r.ImGui_GetWindowWidth(ctx.ctx)
+                            local window_max_y = window_min_y + r.ImGui_GetWindowHeight(ctx.ctx)
+                            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                            local border_thickness = 2.0
+
+                            -- Draw red border rectangle around the child window
+                            r.ImGui_DrawList_AddRect(draw_list, window_min_x, window_min_y, window_max_x, window_max_y, 0xFF0000FF, 0, 0, border_thickness)
+
+                            -- Center the text using available space
+                            local track_name = state.track_name or "Unknown"
+                            local text = string.format("Track '%s' is not a SideFX track", track_name)
+                            local text_w, text_h = ctx:calc_text_size(text)
+                            local child_w, child_h = ctx:get_content_region_avail()
+                            local text_x = (child_w - text_w) / 2
+                            local text_y = (child_h - text_h) / 2
+                            if text_y > 0 then
+                                ctx:dummy(0, text_y)
+                            end
+                            if text_x > 0 then
+                                ctx:dummy(text_x, 0)
+                                ctx:same_line()
+                            end
+                            ctx:push_style_color(imgui.Col.Text(), 0xFFFFAAFF)  -- Yellow text for warning
+                            ctx:text(text)
+                            ctx:pop_style_color()
+                        end
+                        ctx:end_child()
+                        ctx:pop_style_var()
+                        ctx:pop_style_color()
+                    else
+                        -- Track has no FX or is a SideFX track - proceed normally
+                        -- Filter out invalid FX (from deleted tracks)
+                        local filtered_fx = {}
+                        for _, fx in ipairs(state.top_level_fx) do
+                            -- Validate FX is still accessible (track may have been deleted)
+                            local ok = pcall(function()
+                                return fx:get_name()
+                            end)
+                            if ok then
+                                table.insert(filtered_fx, fx)
+                            end
+                        end
+
+                        -- Draw the horizontal device chain (includes modulators)
+                        draw_device_chain(ctx, filtered_fx, chain_w, avail_h, icon_font_ref)
+                    end
                 end
 
                 ctx:end_child()

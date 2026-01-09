@@ -112,6 +112,11 @@ function M.add_plugin_to_track(plugin, position)
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Add Device", -1)
 
+    -- Mark track as SideFX track
+    if state.track then
+        state_module.mark_track_as_sidefx(state.track)
+    end
+
     return container
 end
 
