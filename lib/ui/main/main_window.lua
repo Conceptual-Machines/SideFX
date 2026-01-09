@@ -100,7 +100,8 @@ local function draw_fx_chain_warning_banner(ctx, state_module)
     ctx:push_style_color(imgui.Col.Text(), 0xFFFFAAFF)  -- Light yellow text
     ctx:push_style_var(imgui.StyleVar.WindowPadding(), 12, 8)
     
-    if ctx:begin_child("fx_chain_warning", avail_w, 0, 0) then
+    -- Use auto height for banner
+    if ctx:begin_child("fx_chain_warning", avail_w, -1, 0) then
         ctx:push_style_color(imgui.Col.Text(), 0xFFFF00FF)  -- Bright yellow for warning icon
         ctx:text("⚠️")
         ctx:pop_style_color()

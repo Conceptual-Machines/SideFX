@@ -688,9 +688,16 @@ function M.capture_fx_chain_snapshot()
     if ok and snapshot.count > 0 then
         state.fx_chain_snapshot = snapshot
         state.fx_chain_changed = false
+        -- Debug: log snapshot capture
+        if state.show_debug then
+            r.ShowConsoleMsg(string.format("SideFX: Captured FX chain snapshot (%d FX)\n", snapshot.count))
+        end
     else
         state.fx_chain_snapshot = nil
         state.fx_chain_changed = false
+        if state.show_debug then
+            r.ShowConsoleMsg("SideFX: No snapshot captured (no FX or error)\n")
+        end
     end
 end
 
@@ -740,6 +747,9 @@ function M.check_fx_chain_changes()
     -- Check for changes: count, order, or names
     if current.count ~= snapshot.count then
         state.fx_chain_changed = true
+        if state.show_debug then
+            r.ShowConsoleMsg(string.format("SideFX: FX count changed (%d -> %d)\n", snapshot.count, current.count))
+        end
         return true
     end
     
@@ -748,11 +758,17 @@ function M.check_fx_chain_changes()
         if current.guids[i] ~= snapshot.guids[i] then
             -- Order changed
             state.fx_chain_changed = true
+            if state.show_debug then
+                r.ShowConsoleMsg(string.format("SideFX: FX order changed at index %d\n", i))
+            end
             return true
         end
         if current.names[i] ~= snapshot.names[i] then
             -- Name changed (could be rename or replacement)
             state.fx_chain_changed = true
+            if state.show_debug then
+                r.ShowConsoleMsg(string.format("SideFX: FX name changed at index %d (%s -> %s)\n", i, snapshot.names[i], current.names[i]))
+            end
             return true
         end
     end
