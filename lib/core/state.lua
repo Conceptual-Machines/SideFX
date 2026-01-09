@@ -55,6 +55,7 @@ M.state = {
     -- FX Chain Protection: snapshot of FX chain when window opened
     fx_chain_snapshot = nil,  -- {count, guids = {}, names = {}, timestamp}
     fx_chain_changed = false,  -- True if external changes detected
+    fx_chain_change_notified = false,  -- True if we've already shown message box for this change
     last_chain_check_time = 0,  -- Last time we checked for changes (ms)
 
     -- Plugin browser state
@@ -688,16 +689,11 @@ function M.capture_fx_chain_snapshot()
     if ok and snapshot.count > 0 then
         state.fx_chain_snapshot = snapshot
         state.fx_chain_changed = false
-        -- Debug: log snapshot capture
-        if state.show_debug then
-            r.ShowConsoleMsg(string.format("SideFX: Captured FX chain snapshot (%d FX)\n", snapshot.count))
-        end
+        state.fx_chain_change_notified = false
     else
         state.fx_chain_snapshot = nil
         state.fx_chain_changed = false
-        if state.show_debug then
-            r.ShowConsoleMsg("SideFX: No snapshot captured (no FX or error)\n")
-        end
+        state.fx_chain_change_notified = false
     end
 end
 
@@ -745,56 +741,56 @@ function M.check_fx_chain_changes()
     local snapshot = state.fx_chain_snapshot
     
     -- Check for changes: count, order, or names
+    local change_detected = false
+    local change_message = ""
+    
     if current.count ~= snapshot.count then
+        change_detected = true
+        change_message = string.format("FX count changed (%d -> %d)", snapshot.count, current.count)
+    else
+        -- Check order and names
+        for i = 1, current.count do
+            if current.guids[i] ~= snapshot.guids[i] then
+                -- Order changed
+                change_detected = true
+                change_message = string.format("FX order changed at position %d", i)
+                break
+            end
+            if current.names[i] ~= snapshot.names[i] then
+                -- Name changed (could be rename or replacement)
+                change_detected = true
+                change_message = string.format("FX renamed: '%s' -> '%s'", snapshot.names[i], current.names[i])
+                break
+            end
+        end
+    end
+    
+    if change_detected and not state.fx_chain_change_notified then
+        -- Show message box on first detection
         state.fx_chain_changed = true
-        if state.show_debug then
-            r.ShowConsoleMsg(string.format("SideFX: FX count changed (%d -> %d)\n", snapshot.count, current.count))
-        end
-        return true
+        state.fx_chain_change_notified = true
+        
+        local msg = string.format(
+            "FX chain has been modified outside SideFX.\n\n%s\n\nThis may break SideFX structure. Click 'Refresh SideFX' to sync with current state.",
+            change_message
+        )
+        r.ShowMessageBox(msg, "SideFX: FX Chain Modified", 0)  -- 0 = OK button only
+    elseif not change_detected then
+        -- Reset notification flag when no changes detected
+        state.fx_chain_changed = false
+        state.fx_chain_change_notified = false
     end
     
-    -- Check order and names
-    for i = 1, current.count do
-        if current.guids[i] ~= snapshot.guids[i] then
-            -- Order changed
-            state.fx_chain_changed = true
-            if state.show_debug then
-                r.ShowConsoleMsg(string.format("SideFX: FX order changed at index %d\n", i))
-            end
-            return true
-        end
-        if current.names[i] ~= snapshot.names[i] then
-            -- Name changed (could be rename or replacement)
-            state.fx_chain_changed = true
-            if state.show_debug then
-                r.ShowConsoleMsg(string.format("SideFX: FX name changed at index %d (%s -> %s)\n", i, snapshot.names[i], current.names[i]))
-            end
-            return true
-        end
-    end
-    
-    -- No changes detected
-    state.fx_chain_changed = false
-    return false
-end
-
---- Revert FX chain to snapshot state.
--- This is a soft lock - we warn but don't actually prevent changes.
--- For now, we just refresh SideFX to match current state.
-function M.revert_fx_chain_changes()
-    -- For now, "revert" means refresh SideFX to match current REAPER state
-    -- A true revert would require storing the full track chunk, which is complex
-    -- So we just refresh and update the snapshot
-    M.refresh_fx_list()
-    M.capture_fx_chain_snapshot()
-    state.fx_chain_changed = false
+    return change_detected
 end
 
 --- Refresh SideFX to match current REAPER state.
+-- This is called after user acknowledges the warning.
 function M.refresh_sidefx_from_reaper()
     M.refresh_fx_list()
     M.capture_fx_chain_snapshot()
     state.fx_chain_changed = false
+    state.fx_chain_change_notified = false
 end
 
 --- Refresh FX list and update snapshot (for SideFX operations).
@@ -802,10 +798,6 @@ end
 function M.refresh_fx_list_and_update_snapshot()
     M.refresh_fx_list()
     M.capture_fx_chain_snapshot()
-endr.SetProjExtState(0, "SideFX", cache_key, is_sidefx and "1" or "0")
-    end
-    
-    return is_sidefx
 end
 
 --- Mark a track as a SideFX track in ExtState.

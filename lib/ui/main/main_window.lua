@@ -293,24 +293,6 @@ function M.create_callbacks(opts)
             -- Toolbar
             draw_toolbar(ctx, icon_font_ref)
             ctx:separator()
-            
-            -- FX Chain Protection Warning Banner
-            if state.fx_chain_changed then
-                draw_fx_chain_warning_banner(ctx, state_module)
-            end
-            
-            -- TEMPORARY DEBUG: Always show snapshot status (remove after testing)
-            if state.fx_chain_snapshot then
-                ctx:push_style_color(imgui.Col.Text(), 0x00FF00FF)  -- Green
-                ctx:text(string.format("[DEBUG] Snapshot: %d FX | Changed: %s", 
-                    state.fx_chain_snapshot.count, 
-                    state.fx_chain_changed and "YES" or "NO"))
-                ctx:pop_style_color()
-            else
-                ctx:push_style_color(imgui.Col.Text(), 0xFF0000FF)  -- Red
-                ctx:text("[DEBUG] No snapshot captured")
-                ctx:pop_style_color()
-            end
 
             -- Layout dimensions
             local browser_w = 260
