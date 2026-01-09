@@ -393,28 +393,47 @@ local function replace_fxchain_content(track_chunk, new_content)
     -- Parse the preset content
     -- In SideFX, presets are ALWAYS containers (D, R, or C)
     -- ReadRPPChunk only returns the first chunk, so we need to wrap content in a dummy root
-    local wrapped_content = "<ROOT\n" .. new_content .. "\n>"
-    local parsed = ReadRPPChunk(wrapped_content)
-    if not parsed or not parsed.children then
-        r.ShowConsoleMsg("ERROR: Failed to parse preset content\n")
-        return nil
+    -- Split by top-level container boundaries and parse each separately
+    -- Find all <CONTAINER positions
+    local container_starts = {}
+    local pos = 1
+    
+    -- Find first CONTAINER (at start of file)
+    if new_content:sub(1, 10) == "<CONTAINER" then
+        table.insert(container_starts, 1)
+        pos = 2
     end
     
-    -- The parsed.children are all the containers (D1, D2, D3, etc)
-    r.ShowConsoleMsg("Parsed " .. #parsed.children .. " top-level items\n")
+    -- Find subsequent CONTAINERs (preceded by >\n)
+    while true do
+        local found = new_content:find("\n<CONTAINER", pos, true)
+        if not found then break end
+        table.insert(container_starts, found + 1)  -- +1 to skip the newline
+        pos = found + 1
+    end
     
-    -- Filter to only FX chunks (containers), skip any stray attributes
+    r.ShowConsoleMsg("Found " .. #container_starts .. " containers in file\n")
+    
+    -- Parse each container separately
     local fx_chunks = {}
-    for _, child in ipairs(parsed.children) do
-        if child.children then
-            table.insert(fx_chunks, child)
-            if child.tokens and #child.tokens > 0 then
-                r.ShowConsoleMsg("  - " .. child.tokens[1]:getString() .. "\n")
+    for i, start_pos in ipairs(container_starts) do
+        local end_pos = container_starts[i + 1] and (container_starts[i + 1] - 2) or #new_content
+        local container_chunk = new_content:sub(start_pos, end_pos)
+        
+        r.ShowConsoleMsg("Parsing container " .. i .. " (length: " .. #container_chunk .. ")\n")
+        
+        local parsed_container = ReadRPPChunk(container_chunk)
+        if parsed_container then
+            table.insert(fx_chunks, parsed_container)
+            if parsed_container.tokens and #parsed_container.tokens > 0 then
+                r.ShowConsoleMsg("  -> " .. parsed_container.tokens[1]:getString() .. "\n")
             end
+        else
+            r.ShowConsoleMsg("  -> Failed to parse\n")
         end
     end
     
-    r.ShowConsoleMsg("Got " .. #fx_chunks .. " containers\n")
+    r.ShowConsoleMsg("Got " .. #fx_chunks .. " parsed containers\n")
     
     -- Replace FXCHAIN children with new containers
     fxchain.children = fx_chunks
