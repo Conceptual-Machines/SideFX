@@ -403,6 +403,8 @@ local presets_mod = require('lib.utils.presets')
 local function draw_toolbar(ctx, icon_font_ref)
     toolbar.draw(ctx, state, icon_font_ref.value, icon_size, get_fx_display_name, {
         on_refresh_sidefx = function()
+            -- Ensure callback is set before refreshing
+            state_module.on_refresh = renumber_device_chain
             state_module.refresh_sidefx_from_reaper()
         end,
         on_refresh = refresh_fx_list,

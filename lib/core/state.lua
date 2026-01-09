@@ -787,8 +787,11 @@ end
 --- Refresh SideFX to match current REAPER state.
 -- This is called after user acknowledges the warning.
 function M.refresh_sidefx_from_reaper()
+    -- Refresh FX list (this will call on_refresh callback if set)
     M.refresh_fx_list()
+    -- Update snapshot to current state
     M.capture_fx_chain_snapshot()
+    -- Clear change flags
     state.fx_chain_changed = false
     state.fx_chain_change_notified = false
 end
