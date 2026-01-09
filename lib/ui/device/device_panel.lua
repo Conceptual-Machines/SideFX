@@ -385,6 +385,10 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
     -- Check if device controls are collapsed
     local is_device_collapsed = device_collapsed[state_guid] or false
 
+    -- Compute missing utility flag for this container
+    local container_guid = container and container:get_guid() or nil
+    local show_missing_utility = container_guid and state_module.state.missing_utilities[container_guid] and not ignored_missing_utility[state_guid]
+
     -- Fixed width for gain/pan column (right side of nested table)
     local gain_pan_w = 100
 
@@ -758,10 +762,6 @@ function M.draw(ctx, fx, opts)
     -- Use container GUID for drag/drop if we have a container
     local container = opts.container
     local drag_guid = container and container:get_guid() or guid
-    
-    -- Check if missing utility warning should be shown (from state)
-    local container_guid = container and container:get_guid() or nil
-    local show_missing_utility = container_guid and state_module.state.missing_utilities[container_guid] and not ignored_missing_utility[guid]
 
     -- Extract FX display info
     local name, device_id = extract_fx_display_info(fx, container)
