@@ -188,6 +188,9 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
                     end
                     fx_to_delete:delete()
                 end
+                -- Clear FX list cache to force immediate rebuild
+                local state_module = require('lib.core.state')
+                state_module.state.fx_list = nil
                 refresh_fx_list()
             end,
             on_drop = function(dragged_guid, target_guid)
