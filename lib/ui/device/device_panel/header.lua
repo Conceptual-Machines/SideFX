@@ -261,15 +261,10 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
     local imgui = require('imgui')
     local interacted = false
 
-    -- Determine column count: on | x | [warning?] | collapse
-    local num_cols = opts.missing_utility and 4 or 3
-    
-    if ctx:begin_table("header_right_" .. state_guid, num_cols, 0) then
+    -- 3 columns: on | x | collapse
+    if ctx:begin_table("header_right_" .. state_guid, 3, 0) then
         ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 24)
         ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 20)
-        if opts.missing_utility then
-            ctx:table_setup_column("warning", imgui.TableColumnFlags.WidthFixed(), 24)
-        end
         ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 20)
 
         ctx:table_next_row()
@@ -306,46 +301,8 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
             ctx:set_tooltip("Delete device")
         end
 
-        -- Column: Missing Utility Warning (if applicable)
-        if opts.missing_utility then
-            ctx:table_set_column_index(2)
-            ctx:push_style_color(r.ImGui_Col_Button(), 0x4A3A1AFF)  -- Dark yellow/orange
-            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x6A5A3AFF)
-            ctx:push_style_color(r.ImGui_Col_Text(), 0xFFFF00FF)  -- Bright yellow text
-            if ctx:button("⚠️##warning_" .. state_guid, 20, 20) then
-                -- Show context menu with options
-                r.ShowConsoleMsg("[Header] Warning button clicked\n")
-                ctx:open_popup("missing_utility_menu_" .. state_guid)
-                interacted = true
-            end
-            ctx:pop_style_color(3)
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip("Utility FX missing\nClick for options")
-            end
-            
-            -- Context menu for restore/ignore
-            if ctx:begin_popup("missing_utility_menu_" .. state_guid) then
-                r.ShowConsoleMsg("[Header] Showing context menu\n")
-                if ctx:menu_item("Restore Utility") then
-                    r.ShowConsoleMsg("[Header] Restore Utility clicked\n")
-                    if opts.on_restore_utility then
-                        opts.on_restore_utility(container or fx)
-                    end
-                    interacted = true
-                end
-                if ctx:menu_item("Ignore (Hide Warning)") then
-                    r.ShowConsoleMsg("[Header] Ignore clicked\n")
-                    if opts.on_ignore_missing_utility then
-                        opts.on_ignore_missing_utility(state_guid)
-                    end
-                    interacted = true
-                end
-                ctx:end_popup()
-            end
-        end
-
         -- Column: Collapse/Expand Device
-        ctx:table_set_column_index(opts.missing_utility and 3 or 2)
+        ctx:table_set_column_index(2)
         ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
         ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
         ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)

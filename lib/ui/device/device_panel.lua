@@ -81,9 +81,6 @@ local panel_collapsed = {}
 -- Track device controls collapsed state per FX (by GUID) - collapses only device params, not modulators/gain
 local device_collapsed = {}
 
--- Track ignored missing utility warnings per FX (by GUID)
-local ignored_missing_utility = {}
-
 -- NOTE: Modulator sidebar state is now managed by the state module
 -- (accessed via state.mod_sidebar_collapsed and state.expanded_mod_slot)
 
@@ -281,7 +278,16 @@ local sidebar_column = require('lib.ui.device.device_panel.sidebar')
 
 --- Draw chain sidebar column wrapper
 local function draw_sidebar_column(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors)
-    return sidebar_column.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors)
+    -- Add on_restore_utility callback to opts if not present
+    local sidebar_opts = opts
+    if not opts.on_restore_utility then
+        sidebar_opts = {}
+        for k, v in pairs(opts) do sidebar_opts[k] = v end
+        sidebar_opts.on_restore_utility = function(target_container)
+            restore_utility(target_container)
+        end
+    end
+    return sidebar_column.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, sidebar_opts, colors)
 end
 
 --- Filter FX parameters, excluding sidebar controls (wet, delta, bypass)
@@ -380,10 +386,6 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
     -- Check if device controls are collapsed
     local is_device_collapsed = device_collapsed[state_guid] or false
 
-    -- Compute missing utility flag for this container
-    local container_guid = container and container:get_guid() or nil
-    local show_missing_utility = container_guid and state.missing_utilities[container_guid] and not ignored_missing_utility[state_guid]
-
     -- Fixed width for gain/pan column (right side of nested table)
     local gain_pan_w = 100
 
@@ -443,15 +445,6 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
             -- Prepare options for header buttons
             local header_opts = {
                 on_delete = opts.on_delete,
-                missing_utility = show_missing_utility,
-                on_restore_utility = function(target_fx)
-                    restore_utility(target_fx)
-                    interacted = true
-                end,
-                on_ignore_missing_utility = function(fx_guid)
-                    ignored_missing_utility[fx_guid] = true
-                    interacted = true
-                end,
             }
             
             if header.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_device_collapsed, device_collapsed, header_opts, colors) then

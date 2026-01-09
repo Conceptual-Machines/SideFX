@@ -373,6 +373,54 @@ function M.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_col
                     interacted = true
                 end
             end
+        else
+            -- Missing utility warning
+            ctx:spacing()
+            ctx:spacing()
+            
+            -- Warning icon and text
+            local warning_text = "⚠️"
+            local warning_text_w = r.ImGui_CalcTextSize(ctx.ctx, warning_text)
+            center_item(warning_text_w)
+            ctx:push_style_color(r.ImGui_Col_Text(), 0xFFAA00FF)  -- Orange/yellow
+            ctx:text(warning_text)
+            ctx:pop_style_color()
+            
+            ctx:spacing()
+            
+            local label = "Gain Utils"
+            local label_w = r.ImGui_CalcTextSize(ctx.ctx, label)
+            center_item(label_w)
+            ctx:push_style_color(r.ImGui_Col_Text(), 0xFFAA00FF)
+            ctx:text(label)
+            ctx:pop_style_color()
+            
+            local label2 = "Missing"
+            local label2_w = r.ImGui_CalcTextSize(ctx.ctx, label2)
+            center_item(label2_w)
+            ctx:push_style_color(r.ImGui_Col_Text(), 0xFFAA00FF)
+            ctx:text(label2)
+            ctx:pop_style_color()
+            
+            ctx:spacing()
+            ctx:spacing()
+            
+            -- Restore button
+            local btn_w = 70
+            center_item(btn_w)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x4A3A1AFF)  -- Dark yellow/orange
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x6A5A3AFF)
+            ctx:push_style_color(r.ImGui_Col_Text(), 0xFFFFAAFF)
+            if ctx:button("Restore", btn_w, 24) then
+                if opts.on_restore_utility and container then
+                    opts.on_restore_utility(container)
+                    interacted = true
+                end
+            end
+            ctx:pop_style_color(3)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Restore missing SideFX_Utility\nfor gain, pan, and phase controls")
+            end
         end
     end
 
