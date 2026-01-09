@@ -135,16 +135,7 @@ local function extract_fxchain_content(track_chunk)
 
     -- Extract only FX chunks (RChunk type), skip attributes (RNode type)
     local fx_lines = {}
-    r.ShowConsoleMsg("=== EXTRACT SAVE ===\n")
-    r.ShowConsoleMsg("FXCHAIN has " .. #fxchain.children .. " children\n")
-    
-    for i, child in ipairs(fxchain.children) do
-        local name = "unknown"
-        if child.tokens and #child.tokens > 0 then
-            name = child.tokens[1]:getString()
-        end
-        r.ShowConsoleMsg("  Child " .. i .. ": " .. name .. " (is RChunk: " .. tostring(child.children ~= nil) .. ")\n")
-        
+    for _, child in ipairs(fxchain.children) do
         -- RChunk has 'children' property (even if empty), RNode doesn't
         -- FX are RChunks (CONTAINER, VST, JS, etc), attributes are RNodes (WNDRECT, SHOW, etc)
         if child.children then
@@ -152,12 +143,9 @@ local function extract_fxchain_content(track_chunk)
             local child_str = StringifyRPPNode(child)
             if child_str and child_str ~= "" then
                 table.insert(fx_lines, child_str)
-                r.ShowConsoleMsg("    -> Added to save (length: " .. #child_str .. ")\n")
             end
         end
     end
-    
-    r.ShowConsoleMsg("Extracted " .. #fx_lines .. " FX chunks for save\n")
     
     return table.concat(fx_lines, "\n")
 end
@@ -364,31 +352,21 @@ end
 -- @param new_content string New FXCHAIN content (just the FX)
 -- @return string|nil new_track_chunk Modified track chunk or nil on error
 local function replace_fxchain_content(track_chunk, new_content)
-    r.ShowConsoleMsg("=== REPLACE FXCHAIN (RPP Parser) ===\n")
-    r.ShowConsoleMsg("track_chunk length: " .. #track_chunk .. "\n")
-    r.ShowConsoleMsg("new_content length: " .. #new_content .. "\n")
-    r.ShowConsoleMsg("new_content (first 300 chars):\n" .. new_content:sub(1, 300) .. "\n")
-
     -- Parse the track chunk
     local track_root = ReadRPPChunk(track_chunk)
     if not track_root then
-        r.ShowConsoleMsg("ERROR: Failed to parse track chunk\n")
         return nil
     end
-    r.ShowConsoleMsg("Track chunk parsed OK\n")
-
+    
     -- Find FXCHAIN chunk, create if doesn't exist
     local fxchain = track_root:findFirstChunkByName("FXCHAIN")
     if not fxchain then
-        r.ShowConsoleMsg("No FXCHAIN found, creating one\n")
         -- Create new FXCHAIN chunk
         fxchain = AddRChunk(track_root, {"FXCHAIN"})
         if not fxchain then
-            r.ShowConsoleMsg("ERROR: Failed to create FXCHAIN\n")
             return nil
         end
     end
-    r.ShowConsoleMsg("FXCHAIN ready\n")
 
     -- Parse the preset content
     -- In SideFX, presets are ALWAYS containers (D, R, or C)
@@ -412,28 +390,17 @@ local function replace_fxchain_content(track_chunk, new_content)
         pos = found + 1
     end
     
-    r.ShowConsoleMsg("Found " .. #container_starts .. " containers in file\n")
-    
     -- Parse each container separately
     local fx_chunks = {}
     for i, start_pos in ipairs(container_starts) do
         local end_pos = container_starts[i + 1] and (container_starts[i + 1] - 2) or #new_content
         local container_chunk = new_content:sub(start_pos, end_pos)
         
-        r.ShowConsoleMsg("Parsing container " .. i .. " (length: " .. #container_chunk .. ")\n")
-        
         local parsed_container = ReadRPPChunk(container_chunk)
         if parsed_container then
             table.insert(fx_chunks, parsed_container)
-            if parsed_container.tokens and #parsed_container.tokens > 0 then
-                r.ShowConsoleMsg("  -> " .. parsed_container.tokens[1]:getString() .. "\n")
-            end
-        else
-            r.ShowConsoleMsg("  -> Failed to parse\n")
         end
     end
-    
-    r.ShowConsoleMsg("Got " .. #fx_chunks .. " parsed containers\n")
     
     -- Replace FXCHAIN children with new containers
     fxchain.children = fx_chunks
@@ -442,14 +409,9 @@ local function replace_fxchain_content(track_chunk, new_content)
     for _, child in ipairs(fxchain.children) do
         child.parent = fxchain
     end
-    r.ShowConsoleMsg("Children replaced\n")
-
+    
     -- Stringify back to track chunk
-    local result = StringifyRPPNode(track_root)
-    r.ShowConsoleMsg("Result length: " .. #result .. "\n")
-    r.ShowConsoleMsg("Result (first 500 chars):\n" .. result:sub(1, 500) .. "\n")
-
-    return result
+    return StringifyRPPNode(track_root)
 end
 
 --- Apply track chunk to track.
