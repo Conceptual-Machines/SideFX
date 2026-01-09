@@ -4,6 +4,7 @@
     <reapack name="SideFX.lua" type="script" desc="SideFX - Smart FX Container Manager">
       <metadata>
         <link rel="homepage">https://github.com/Conceptual-Machines/SideFX</link>
+        <link rel="provides">ReaTeam Scripts > Development > RPP-Parser</link>
       </metadata>
       <version name="0.1.1" author="Nomad Monad" time="2026-01-06T00:00:00Z">
         <changelog><![CDATA[v0.1.1 (2026-01-06)
