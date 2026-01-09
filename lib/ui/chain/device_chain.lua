@@ -89,6 +89,14 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
             -- D-container: extract main FX and utility from inside
             local main_fx = get_device_main_fx(fx)
             local utility = get_device_utility(fx)
+            local missing = (utility == nil)
+            
+            r.ShowConsoleMsg(string.format("[Device Chain] Container: %s, Main FX: %s, Utility: %s, Missing: %s\n",
+                fx:get_name(), 
+                main_fx and main_fx:get_name() or "nil",
+                utility and utility:get_name() or "nil",
+                tostring(missing)))
+            
             if main_fx then
                 table.insert(display_fx, {
                     fx = main_fx,
@@ -96,7 +104,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
                     container = fx,  -- Reference to the container
                     original_idx = fx.pointer,
                     is_device = true,
-                    missing_utility = (utility == nil),  -- Flag if utility is missing
+                    missing_utility = missing,  -- Flag if utility is missing
                 })
             end
         elseif is_rack_container(fx) then

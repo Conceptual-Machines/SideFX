@@ -308,12 +308,14 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
 
         -- Column: Missing Utility Warning (if applicable)
         if opts.missing_utility then
+            r.ShowConsoleMsg(string.format("[Header] Drawing warning icon for %s\n", state_guid))
             ctx:table_set_column_index(2)
             ctx:push_style_color(r.ImGui_Col_Button(), 0x4A3A1AFF)  -- Dark yellow/orange
             ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x6A5A3AFF)
             ctx:push_style_color(r.ImGui_Col_Text(), 0xFFFF00FF)  -- Bright yellow text
             if ctx:button("⚠️##warning_" .. state_guid, 20, 20) then
                 -- Show context menu with options
+                r.ShowConsoleMsg("[Header] Warning button clicked\n")
                 ctx:open_popup("missing_utility_menu_" .. state_guid)
                 interacted = true
             end
@@ -324,13 +326,16 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
             
             -- Context menu for restore/ignore
             if ctx:begin_popup("missing_utility_menu_" .. state_guid) then
+                r.ShowConsoleMsg("[Header] Showing context menu\n")
                 if ctx:menu_item("Restore Utility") then
+                    r.ShowConsoleMsg("[Header] Restore Utility clicked\n")
                     if opts.on_restore_utility then
                         opts.on_restore_utility(container or fx)
                     end
                     interacted = true
                 end
                 if ctx:menu_item("Ignore (Hide Warning)") then
+                    r.ShowConsoleMsg("[Header] Ignore clicked\n")
                     if opts.on_ignore_missing_utility then
                         opts.on_ignore_missing_utility(state_guid)
                     end
