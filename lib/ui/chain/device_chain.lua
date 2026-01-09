@@ -91,11 +91,10 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
             local utility = get_device_utility(fx)
             local missing = (utility == nil)
             
-            r.ShowConsoleMsg(string.format("[Device Chain] Container: %s, Main FX: %s, Utility: %s, Missing: %s\n",
-                fx:get_name(), 
-                main_fx and main_fx:get_name() or "nil",
-                utility and utility:get_name() or "nil",
-                tostring(missing)))
+            -- Log only when utility is missing
+            if missing then
+                r.ShowConsoleMsg(string.format("[Device Chain] Missing utility in: %s\n", fx:get_name()))
+            end
             
             if main_fx then
                 table.insert(display_fx, {

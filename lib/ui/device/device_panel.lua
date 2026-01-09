@@ -761,14 +761,6 @@ function M.draw(ctx, fx, opts)
     
     -- Check if missing utility warning should be shown
     local show_missing_utility = opts.missing_utility and not ignored_missing_utility[guid]
-    
-    if opts.missing_utility then
-        r.ShowConsoleMsg(string.format("[Device Panel] FX: %s, missing_utility: %s, ignored: %s, show_warning: %s\n",
-            fx:get_name(),
-            tostring(opts.missing_utility),
-            tostring(ignored_missing_utility[guid]),
-            tostring(show_missing_utility)))
-    end
 
     -- Extract FX display info
     local name, device_id = extract_fx_display_info(fx, container)

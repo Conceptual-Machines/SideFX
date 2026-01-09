@@ -308,7 +308,6 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
 
         -- Column: Missing Utility Warning (if applicable)
         if opts.missing_utility then
-            r.ShowConsoleMsg(string.format("[Header] Drawing warning icon for %s\n", state_guid))
             ctx:table_set_column_index(2)
             ctx:push_style_color(r.ImGui_Col_Button(), 0x4A3A1AFF)  -- Dark yellow/orange
             ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x6A5A3AFF)
