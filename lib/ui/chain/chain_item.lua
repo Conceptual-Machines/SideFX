@@ -174,6 +174,7 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
             utility = utility,  -- Paired SideFX_Utility for gain/pan
             container = container,  -- Pass container reference
             container_name = container and container:get_name() or nil,
+            missing_utility = item.missing_utility,  -- Flag for warning icon
             icon_font = icon_font,
             track = state.track,
             refresh_fx_list = refresh_fx_list,
