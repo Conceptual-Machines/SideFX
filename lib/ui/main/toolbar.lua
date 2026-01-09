@@ -72,6 +72,26 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         ctx:text(state.track_name)
         ctx:pop_style_color()
 
+        -- FX Chain Warning Indicator
+        if state.fx_chain_changed then
+            ctx:same_line()
+            ctx:push_style_color(imgui.Col.Button(), 0x4A3A1AFF)  -- Dark yellow/orange
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x6A5A3AFF)  -- Lighter
+            ctx:push_style_color(imgui.Col.Text(), 0xFFFF00FF)  -- Bright yellow text
+            if icon_font then ctx:push_font(icon_font, icon_size) end
+            if ctx:button("⚠️") then
+                -- Refresh SideFX when clicked
+                if callbacks.on_refresh_sidefx then
+                    callbacks.on_refresh_sidefx()
+                end
+            end
+            if icon_font then ctx:pop_font() end
+            ctx:pop_style_color(3)
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("FX chain modified outside SideFX\nClick to refresh SideFX")
+            end
+        end
+
         -- Breadcrumb trail (for navigating into containers)
         if #state.expanded_path > 0 then
             ctx:same_line()
