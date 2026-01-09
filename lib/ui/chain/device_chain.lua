@@ -88,19 +88,35 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
 
     -- Build display list - handles D-containers and legacy FX
     local display_fx = {}
+    log_once("Building display list, fx_list count:", #fx_list)
+    
     for i, fx in ipairs(fx_list) do
         if is_device_container(fx) then
+            log_once("Processing D-container:", fx:get_name())
+            
             -- D-container: extract main FX and utility from inside
             local main_fx = get_device_main_fx(fx)
             local utility = get_device_utility(fx)
             local missing = (utility == nil)
             
-            -- Log only when utility is missing (log_once prevents spam)
+            log_once("Main:", main_fx and main_fx:get_name() or "nil",
+                     "Utility:", utility and utility:get_name() or "nil",
+                     "Missing:", tostring(missing))
+            
+            -- Log when utility is missing
             if missing then
                 log_once("Missing utility in:", fx:get_name())
             end
             
             if main_fx then
+                -- Update state with missing utility info
+                local container_guid = fx:get_guid()
+                if missing then
+                    state.missing_utilities[container_guid] = true
+                else
+                    state.missing_utilities[container_guid] = nil
+                end
+                
                 table.insert(display_fx, {
                     fx = main_fx,
                     utility = utility,
@@ -109,6 +125,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
                     is_device = true,
                     missing_utility = missing,  -- Flag if utility is missing
                 })
+                log_once("Added to display_fx with missing_utility=", tostring(missing), "container_guid=", container_guid)
             end
         elseif is_rack_container(fx) then
             -- R-container (rack) - handle differently
