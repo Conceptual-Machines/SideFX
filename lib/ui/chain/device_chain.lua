@@ -96,6 +96,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
                     container = fx,  -- Reference to the container
                     original_idx = fx.pointer,
                     is_device = true,
+                    missing_utility = (utility == nil),  -- Flag if utility is missing
                 })
             end
         elseif is_rack_container(fx) then
