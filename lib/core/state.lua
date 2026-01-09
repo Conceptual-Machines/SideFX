@@ -738,6 +738,15 @@ function M.check_fx_chain_changes()
                 current.count = current.count + 1
                 current.guids[current.count] = guid
                 current.names[current.count] = name
+                
+                -- If it's a container, capture child count
+                if fx:is_container() then
+                    local child_count = 0
+                    for _ in fx:iter_container_children() do
+                        child_count = child_count + 1
+                    end
+                    current.container_children[guid] = child_count
+                end
             end
         end
     end)
