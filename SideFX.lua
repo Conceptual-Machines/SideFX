@@ -238,12 +238,26 @@ renumber_device_chain = function()
                     -- This looks like a SideFX device that was renamed
                     device_idx = device_idx + 1
                     
-                    -- Get plugin name from main FX
+                    -- Get original plugin name by temporarily clearing renamed_name
+                    -- This gets the actual plugin identifier, not the renamed name
+                    local ok_renamed, renamed_name = pcall(function() 
+                        return main_fx:get_named_config_param("renamed_name") 
+                    end)
+                    
+                    -- Clear renamed_name temporarily to get original plugin name
+                    if ok_renamed and renamed_name and renamed_name ~= "" then
+                        main_fx:set_named_config_param("renamed_name", "")
+                    end
+                    
                     local ok_plugin, plugin_name = pcall(function() return main_fx:get_name() end)
+                    
+                    -- Restore renamed_name if we cleared it
+                    if ok_renamed and renamed_name and renamed_name ~= "" then
+                        main_fx:set_named_config_param("renamed_name", renamed_name)
+                    end
+                    
                     if ok_plugin and plugin_name then
-                        -- Remove any existing _FX suffix
-                        plugin_name = plugin_name:gsub("_FX: .+$", ""):gsub("^D%d+_FX: ", "")
-                        
+                        -- Get short name from original plugin identifier
                         local short_name = naming.get_short_plugin_name(plugin_name)
                         local new_container_name = naming.build_device_name(device_idx, short_name)
                         local new_fx_name = naming.build_device_fx_name(device_idx, short_name)
