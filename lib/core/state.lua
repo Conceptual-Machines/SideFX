@@ -727,6 +727,7 @@ function M.check_fx_chain_changes()
         count = 0,
         guids = {},
         names = {},
+        container_children = {},
     }
     
     local ok = pcall(function()
