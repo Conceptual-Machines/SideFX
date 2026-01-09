@@ -669,10 +669,11 @@ function M.capture_fx_chain_snapshot()
         count = 0,
         guids = {},
         names = {},
+        container_children = {},  -- {[container_guid] = child_count}
         timestamp = r.time_precise(),
     }
     
-    -- Safely capture all top-level FX
+    -- Safely capture all top-level FX and their child counts
     local ok = pcall(function()
         for fx in state.track:iter_track_fx_chain() do
             local parent = fx:get_parent_container()
@@ -682,6 +683,15 @@ function M.capture_fx_chain_snapshot()
                 snapshot.count = snapshot.count + 1
                 snapshot.guids[snapshot.count] = guid
                 snapshot.names[snapshot.count] = name
+                
+                -- If it's a container, capture child count
+                if fx:is_container() then
+                    local child_count = 0
+                    for _ in fx:iter_container_children() do
+                        child_count = child_count + 1
+                    end
+                    snapshot.container_children[guid] = child_count
+                end
             end
         end
     end)
@@ -748,21 +758,37 @@ function M.check_fx_chain_changes()
         change_detected = true
         change_message = string.format("FX count changed (%d -> %d)", snapshot.count, current.count)
     else
-        -- Check order and names
-        for i = 1, current.count do
-            if current.guids[i] ~= snapshot.guids[i] then
-                -- Order changed
-                change_detected = true
-                change_message = string.format("FX order changed at position %d", i)
-                break
-            end
-            if current.names[i] ~= snapshot.names[i] then
-                -- Name changed (could be rename or replacement)
-                change_detected = true
-                change_message = string.format("FX renamed: '%s' -> '%s'", snapshot.names[i], current.names[i])
-                break
-            end
+    -- Check order and names
+    for i = 1, current.count do
+        if current.guids[i] ~= snapshot.guids[i] then
+            -- Order changed
+            change_detected = true
+            change_message = string.format("FX order changed at position %d", i)
+            break
         end
+        if current.names[i] ~= snapshot.names[i] then
+            -- Name changed (could be rename or replacement)
+            change_detected = true
+            change_message = string.format("FX renamed: '%s' -> '%s'", snapshot.names[i], current.names[i])
+            break
+        end
+        
+        -- Check container child counts (detects deletions inside containers)
+        local guid = current.guids[i]
+        if snapshot.container_children[guid] and current.container_children[guid] then
+            if snapshot.container_children[guid] ~= current.container_children[guid] then
+                change_detected = true
+                change_message = string.format("Container '%s' child count changed (%d -> %d)", 
+                    current.names[i], snapshot.container_children[guid], current.container_children[guid])
+                break
+            end
+        elseif snapshot.container_children[guid] ~= current.container_children[guid] then
+            -- Container appeared or disappeared
+            change_detected = true
+            change_message = string.format("Container '%s' structure changed", current.names[i])
+            break
+        end
+    end
     end
     
     if change_detected and not state.fx_chain_change_notified then
