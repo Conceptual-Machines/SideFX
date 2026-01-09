@@ -206,8 +206,9 @@ renumber_device_chain = function()
         local parent = fx:get_parent_container()
         if not parent then  -- Top level only
             local name = fx:get_name()
+            local is_container = fx:is_container()
 
-            -- Check if it's a D-container
+            -- Check if it's a D-container (matches pattern)
             local old_idx, fx_name = name:match("^D(%d+): (.+)$")
             if old_idx and fx_name then
                 device_idx = device_idx + 1
@@ -227,6 +228,38 @@ renumber_device_chain = function()
                     if utility then
                         local util_name = string.format("D%d_Util", device_idx)
                         utility:set_named_config_param("renamed_name", util_name)
+                    end
+                end
+            elseif is_container then
+                -- Container that doesn't match D{n}: pattern - might have been renamed
+                -- Check if it has a main FX inside (SideFX device structure)
+                local main_fx = get_device_main_fx(fx)
+                if main_fx then
+                    -- This looks like a SideFX device that was renamed
+                    device_idx = device_idx + 1
+                    
+                    -- Get plugin name from main FX
+                    local ok_plugin, plugin_name = pcall(function() return main_fx:get_name() end)
+                    if ok_plugin and plugin_name then
+                        -- Remove any existing _FX suffix
+                        plugin_name = plugin_name:gsub("_FX: .+$", ""):gsub("^D%d+_FX: ", "")
+                        
+                        local short_name = naming.get_short_plugin_name(plugin_name)
+                        local new_container_name = naming.build_device_name(device_idx, short_name)
+                        local new_fx_name = naming.build_device_fx_name(device_idx, short_name)
+                        local new_util_name = naming.build_device_util_name(device_idx)
+                        
+                        -- Restore container name
+                        fx:set_named_config_param("renamed_name", new_container_name)
+                        
+                        -- Restore FX name inside
+                        main_fx:set_named_config_param("renamed_name", new_fx_name)
+                        
+                        -- Restore utility name inside
+                        local utility = get_device_utility(fx)
+                        if utility then
+                            utility:set_named_config_param("renamed_name", new_util_name)
+                        end
                     end
                 end
             end
