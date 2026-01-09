@@ -14,8 +14,8 @@ function M.draw(ctx, state_guid)
     state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
     local is_mod_sidebar_collapsed = state.mod_sidebar_collapsed[state_guid] or false
 
-    -- Collapse/expand button
-    local mod_arrow_icon = is_mod_sidebar_collapsed and "▼" or "▶"
+    -- Collapse/expand button (right arrow = collapsed, down arrow = expanded)
+    local mod_arrow_icon = is_mod_sidebar_collapsed and "▶" or "▼"
 
     ctx:push_style_color(r.ImGui_Col_Text(), 0xFFFFFFFF)  -- White arrow
     ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)

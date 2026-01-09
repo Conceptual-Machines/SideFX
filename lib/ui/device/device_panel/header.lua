@@ -306,7 +306,7 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
         ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
         ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
         ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
-        local collapse_icon = "◀"
+        local collapse_icon = "▼"  -- Down arrow for expanded (click to collapse)
         if ctx:button(collapse_icon .. "##collapse_device_" .. state_guid, 20, 20) then
             device_collapsed[state_guid] = true
             interacted = true
