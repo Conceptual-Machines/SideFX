@@ -13,6 +13,9 @@ local M = {}
 local device_panel = nil
 local rack_panel = nil
 
+-- Track which devices have already been logged as missing utility (by container GUID)
+local logged_missing_utility = {}
+
 --------------------------------------------------------------------------------
 -- Device Chain Drawing
 --------------------------------------------------------------------------------
