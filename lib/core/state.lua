@@ -33,6 +33,9 @@ M.state = {
     -- Expanded chains in nested racks: track which chain is expanded per nested rack
     -- Keyed by rack GUID to avoid conflicts between multiple nested racks
     expanded_nested_chains = {},  -- {[rack_guid] = chain_guid}
+    
+    -- Missing utilities: track devices with missing utility FX
+    missing_utilities = {},  -- {[container_guid] = true}
 
     -- Selected FX for detail panel
     selected_fx = nil,
