@@ -295,13 +295,20 @@ function M.create_callbacks(opts)
             ctx:separator()
             
             -- FX Chain Protection Warning Banner
-            -- Show banner if changes detected OR if we have a snapshot (for testing)
             if state.fx_chain_changed then
                 draw_fx_chain_warning_banner(ctx, state_module)
-            -- Temporary test: show banner if snapshot exists (remove after testing)
-            elseif state.fx_chain_snapshot and state.show_debug then
-                ctx:push_style_color(imgui.Col.Text(), 0x00FF00FF)  -- Green for debug
-                ctx:text(string.format("DEBUG: Snapshot exists (%d FX), waiting for changes...", state.fx_chain_snapshot.count))
+            end
+            
+            -- TEMPORARY DEBUG: Always show snapshot status (remove after testing)
+            if state.fx_chain_snapshot then
+                ctx:push_style_color(imgui.Col.Text(), 0x00FF00FF)  -- Green
+                ctx:text(string.format("[DEBUG] Snapshot: %d FX | Changed: %s", 
+                    state.fx_chain_snapshot.count, 
+                    state.fx_chain_changed and "YES" or "NO"))
+                ctx:pop_style_color()
+            else
+                ctx:push_style_color(imgui.Col.Text(), 0xFF0000FF)  -- Red
+                ctx:text("[DEBUG] No snapshot captured")
                 ctx:pop_style_color()
             end
 
