@@ -120,6 +120,10 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         if icon_font then ctx:pop_font() end
         if ctx:is_item_hovered() then ctx:set_tooltip("Settings") end
 
+        -- Add right padding
+        ctx:same_line()
+        ctx:dummy(8, 0)
+
         ctx:end_table()
     end
 end
