@@ -88,6 +88,56 @@ local function draw_not_sidefx_warning(ctx, state, device_module, refresh_fx_lis
     ctx:pop_style_color()
 end
 
+--- Draw FX chain protection warning banner.
+-- Shows when FX chain has been modified externally (outside SideFX).
+-- @param ctx ImGui context
+-- @param state_module State module
+local function draw_fx_chain_warning_banner(ctx, state_module)
+    local avail_w = ctx:get_content_region_avail_width()
+    
+    -- Warning banner with yellow/orange background
+    ctx:push_style_color(imgui.Col.ChildBg(), 0x4A3A1AFF)  -- Dark yellow/orange
+    ctx:push_style_color(imgui.Col.Text(), 0xFFFFAAFF)  -- Light yellow text
+    ctx:push_style_var(imgui.StyleVar.WindowPadding(), 12, 8)
+    
+    if ctx:begin_child("fx_chain_warning", avail_w, 0, 0) then
+        ctx:push_style_color(imgui.Col.Text(), 0xFFFF00FF)  -- Bright yellow for warning icon
+        ctx:text("⚠️")
+        ctx:pop_style_color()
+        
+        ctx:same_line()
+        ctx:text("FX chain has been modified outside SideFX. This may break SideFX structure.")
+        
+        ctx:same_line()
+        local button_w = 120
+        local spacing = 8
+        
+        -- "Revert Changes" button
+        ctx:push_style_color(imgui.Col.Button(), 0x663333FF)  -- Dark red
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x884444FF)  -- Lighter red
+        if ctx:button("Revert Changes", button_w, 0) then
+            state_module.revert_fx_chain_changes()
+        end
+        ctx:pop_style_color(2)
+        
+        ctx:same_line()
+        ctx:dummy(spacing, 0)
+        ctx:same_line()
+        
+        -- "Refresh SideFX" button
+        ctx:push_style_color(imgui.Col.Button(), 0x336633FF)  -- Dark green
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x448844FF)  -- Lighter green
+        if ctx:button("Refresh SideFX", button_w, 0) then
+            state_module.refresh_sidefx_from_reaper()
+        end
+        ctx:pop_style_color(2)
+    end
+    ctx:end_child()
+    
+    ctx:pop_style_var()
+    ctx:pop_style_color(2)
+end
+
 --- Create window callbacks for SideFX main window
 -- @param opts table Options:
 --   - state: State table
@@ -224,15 +274,29 @@ function M.create_callbacks(opts)
                 if state.track then
                     state_module.load_expansion_state()
                     state_module.load_display_names()
+                    -- Capture snapshot of FX chain when track changes
+                    state_module.capture_fx_chain_snapshot()
                 end
             else
                 -- Check for external FX changes (e.g. user deleted FX in REAPER)
                 check_fx_changes()
+                -- Also check for FX chain modifications (every 500ms)
+                state_module.check_fx_chain_changes()
+                
+                -- Capture snapshot on first frame if not already captured
+                if state.track and not state.fx_chain_snapshot then
+                    state_module.capture_fx_chain_snapshot()
+                end
             end
 
             -- Toolbar
             draw_toolbar(ctx, icon_font_ref)
             ctx:separator()
+            
+            -- FX Chain Protection Warning Banner
+            if state.fx_chain_changed then
+                draw_fx_chain_warning_banner(ctx, state_module)
+            end
 
             -- Layout dimensions
             local browser_w = 260

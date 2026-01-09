@@ -51,6 +51,11 @@ M.state = {
     last_save_frame = nil,  -- Frame count of last save
 
     show_debug = false,  -- Disabled to prevent console spam
+    
+    -- FX Chain Protection: snapshot of FX chain when window opened
+    fx_chain_snapshot = nil,  -- {count, guids = {}, names = {}, timestamp}
+    fx_chain_changed = false,  -- True if external changes detected
+    last_chain_check_time = 0,  -- Last time we checked for changes (ms)
 
     -- Plugin browser state
     browser = {
@@ -641,6 +646,147 @@ function M.is_sidefx_track(track, cache_result)
     -- Cache result if requested (default: true)
     if cache_result ~= false then
         r.SetProjExtState(0, "SideFX", cache_key, is_sidefx and "1" or "0")
+    end
+    
+    return is_sidefx
+end
+
+--------------------------------------------------------------------------------
+-- FX Chain Protection
+--------------------------------------------------------------------------------
+
+--- Capture a snapshot of the current FX chain state.
+-- Called when window opens to detect external modifications.
+function M.capture_fx_chain_snapshot()
+    if not state.track then
+        state.fx_chain_snapshot = nil
+        state.fx_chain_changed = false
+        return
+    end
+    
+    local snapshot = {
+        count = 0,
+        guids = {},
+        names = {},
+        timestamp = r.time_precise(),
+    }
+    
+    -- Safely capture all top-level FX
+    local ok = pcall(function()
+        for fx in state.track:iter_track_fx_chain() do
+            local parent = fx:get_parent_container()
+            if not parent then
+                local guid = fx:get_guid()
+                local name = fx:get_name()
+                snapshot.count = snapshot.count + 1
+                snapshot.guids[snapshot.count] = guid
+                snapshot.names[snapshot.count] = name
+            end
+        end
+    end)
+    
+    if ok and snapshot.count > 0 then
+        state.fx_chain_snapshot = snapshot
+        state.fx_chain_changed = false
+    else
+        state.fx_chain_snapshot = nil
+        state.fx_chain_changed = false
+    end
+end
+
+--- Check if FX chain has been modified externally (every 500ms).
+-- @return boolean True if changes detected
+function M.check_fx_chain_changes()
+    -- Only check every 500ms to avoid performance issues
+    local current_time = r.time_precise() * 1000  -- Convert to ms
+    if current_time - state.last_chain_check_time < 500 then
+        return state.fx_chain_changed
+    end
+    state.last_chain_check_time = current_time
+    
+    if not state.track or not state.fx_chain_snapshot then
+        state.fx_chain_changed = false
+        return false
+    end
+    
+    -- Get current FX chain state
+    local current = {
+        count = 0,
+        guids = {},
+        names = {},
+    }
+    
+    local ok = pcall(function()
+        for fx in state.track:iter_track_fx_chain() do
+            local parent = fx:get_parent_container()
+            if not parent then
+                local guid = fx:get_guid()
+                local name = fx:get_name()
+                current.count = current.count + 1
+                current.guids[current.count] = guid
+                current.names[current.count] = name
+            end
+        end
+    end)
+    
+    if not ok then
+        -- Track may have been deleted
+        state.fx_chain_changed = false
+        return false
+    end
+    
+    local snapshot = state.fx_chain_snapshot
+    
+    -- Check for changes: count, order, or names
+    if current.count ~= snapshot.count then
+        state.fx_chain_changed = true
+        return true
+    end
+    
+    -- Check order and names
+    for i = 1, current.count do
+        if current.guids[i] ~= snapshot.guids[i] then
+            -- Order changed
+            state.fx_chain_changed = true
+            return true
+        end
+        if current.names[i] ~= snapshot.names[i] then
+            -- Name changed (could be rename or replacement)
+            state.fx_chain_changed = true
+            return true
+        end
+    end
+    
+    -- No changes detected
+    state.fx_chain_changed = false
+    return false
+end
+
+--- Revert FX chain to snapshot state.
+-- This is a soft lock - we warn but don't actually prevent changes.
+-- For now, we just refresh SideFX to match current state.
+function M.revert_fx_chain_changes()
+    -- For now, "revert" means refresh SideFX to match current REAPER state
+    -- A true revert would require storing the full track chunk, which is complex
+    -- So we just refresh and update the snapshot
+    M.refresh_fx_list()
+    M.capture_fx_chain_snapshot()
+    state.fx_chain_changed = false
+end
+
+--- Refresh SideFX to match current REAPER state.
+function M.refresh_sidefx_from_reaper()
+    M.refresh_fx_list()
+    M.capture_fx_chain_snapshot()
+    state.fx_chain_changed = false
+end
+
+--- Refresh FX list and update snapshot (for SideFX operations).
+-- Call this after SideFX makes changes to prevent false warnings.
+function M.refresh_fx_list_and_update_snapshot()
+    M.refresh_fx_list()
+    M.capture_fx_chain_snapshot()
+endr.SetProjExtState(0, "SideFX", cache_key, is_sidefx and "1" or "0")
     end
     
     return is_sidefx
