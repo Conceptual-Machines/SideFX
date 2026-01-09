@@ -188,8 +188,32 @@ end
 
 ## UI Integration
 
-### Option 1: Chain Context Menu
-Add to chain header right-click menu:
+### ✅ SELECTED: Option A - Toolbar Button
+Add to main toolbar (global, works on entire visible chain):
+```
+[Refresh] [+ Rack] | Track Name > ... | [💾] [⚙️] [⚡]
+                                                   └─ Gain Stage button
+```
+
+**Rationale:**
+- Most visible and discoverable location
+- Works on entire track/chain (most common use case)
+- Consistent with other global actions (Refresh, Add Rack)
+- Easy to access during mixing workflow
+
+**Behavior:**
+1. Click "⚡" button in toolbar
+2. Opens "Auto Gain Stage" modal dialog
+3. Shows target level, tolerance, current utility levels
+4. User confirms → applies adjustments
+5. Creates undo point
+
+---
+
+### Future: Additional Entry Points
+
+#### Chain Context Menu (v1.1)
+Add to chain header right-click menu for per-chain staging:
 ```
 ┌─────────────────────────────┐
 │ Chain 1                     │
@@ -197,19 +221,12 @@ Add to chain header right-click menu:
 │ │ Rename Chain            │ │
 │ │ Delete Chain            │ │
 │ │ ─────────────────       │ │
-│ │ Auto Gain Stage...   ⚡ │ │ ← New option
+│ │ Auto Gain Stage...   ⚡ │ │ ← Per-chain option
 │ └─────────────────────────┘ │
 └─────────────────────────────┘
 ```
 
-### Option 2: Toolbar Button
-Add to main toolbar:
-```
-[Browser] [+Rack] [+Chain] [⚡ Gain Stage] [Settings]
-                            └─ New button
-```
-
-### Option 3: Device Panel Action
+#### Device Panel Action (v1.2)
 Add button to device panel when utility is present:
 ```
 ┌─────────────────────────┐
