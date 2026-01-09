@@ -209,6 +209,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         else
             -- Draw device (full UI or fallback)
             chain_item.draw_device_item(ctx, fx, item, avail_height, {
+                missing_utility = item.missing_utility,  -- Pass missing utility flag
                 on_drop = function(dragged_guid, target_guid)
                     -- Handle FX/container reordering
                     local dragged = state.track:find_fx_by_guid(dragged_guid)
