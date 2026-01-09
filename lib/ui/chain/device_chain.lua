@@ -6,6 +6,7 @@
 
 local imgui = require('imgui')
 local r = reaper
+local helpers = require('helpers')
 
 local M = {}
 
@@ -13,8 +14,8 @@ local M = {}
 local device_panel = nil
 local rack_panel = nil
 
--- Track which devices have already been logged as missing utility (by container GUID)
-local logged_missing_utility = {}
+-- Logger that only logs each message once (prevents spam)
+local log_once = helpers.log_once_func("DeviceChain")
 
 --------------------------------------------------------------------------------
 -- Device Chain Drawing
@@ -94,19 +95,9 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
             local utility = get_device_utility(fx)
             local missing = (utility == nil)
             
-            -- Log only when utility is missing and hasn't been logged yet
+            -- Log only when utility is missing (log_once prevents spam)
             if missing then
-                local container_guid = fx:get_guid()
-                if not logged_missing_utility[container_guid] then
-                    r.ShowConsoleMsg(string.format("[Device Chain] Missing utility in: %s\n", fx:get_name()))
-                    logged_missing_utility[container_guid] = true
-                end
-            else
-                -- Clear log flag if utility is restored
-                local container_guid = fx:get_guid()
-                if logged_missing_utility[container_guid] then
-                    logged_missing_utility[container_guid] = nil
-                end
+                log_once("Missing utility in:", fx:get_name())
             end
             
             if main_fx then
