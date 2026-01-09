@@ -170,6 +170,11 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
     -- Draw each FX as a device panel, horizontally
     local display_idx = 0
     for _, item in ipairs(display_fx) do
+        -- Check before processing each item - previous iteration may have deleted
+        if state.deletion_pending then
+            break
+        end
+        
         local fx = item.fx
         display_idx = display_idx + 1
         ctx:push_id("device_" .. display_idx)
@@ -226,6 +231,11 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         end
 
         ctx:pop_id()
+        
+        -- Break immediately if deletion occurred - remaining items have stale pointers
+        if state.deletion_pending then
+            break
+        end
     end
 
     -- Always show add button at end of chain (full height drop zone)
