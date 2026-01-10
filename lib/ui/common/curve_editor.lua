@@ -311,6 +311,7 @@ function M.draw(ctx, modulator, width, height, state, skip_capture_button, item_
     state.hover_node = hover_node
     
     -- Find nearest segment (for Shift mode - curve adjustment)
+    -- Note: We detect segment based on normalized mouse X within the curve area
     local hover_segment = -1
     if shift and mouse_in_area then
         local sorted_for_seg = sort_points_by_x(points)
@@ -324,6 +325,7 @@ function M.draw(ctx, modulator, width, height, state, skip_capture_button, item_
         end
     end
     state.hover_segment = hover_segment
+
     
     -- Mouse interaction
     -- Use item_hovered/item_clicked which respect ImGui's popup/focus system
@@ -333,7 +335,7 @@ function M.draw(ctx, modulator, width, height, state, skip_capture_button, item_
         if shift and hover_segment > 0 then
             -- Start dragging segment curve
             state.drag_segment = hover_segment
-            state.drag_start_y = norm_my
+            state.drag_start_mouse_y = mouse_y  -- Use screen coords for stable delta
             state.drag_start_curve = segment_curves[hover_segment] or 0
             interacted = true
         elseif hover_node > 0 then
@@ -372,9 +374,21 @@ function M.draw(ctx, modulator, width, height, state, skip_capture_button, item_
     
     -- Continue dragging segment curve (Shift+drag)
     if state.drag_segment > 0 and left_down then
-        -- Vertical drag controls curve: drag DOWN = inward (negative), drag UP = outward (positive)
-        local delta_y = norm_my - state.drag_start_y
-        local new_curve = state.drag_start_curve + delta_y * 2  -- Drag up = outward, drag down = inward
+        -- Vertical drag controls curve using screen-space delta (stable regardless of area changes)
+        -- Screen Y increases downward, so negate: drag UP = positive delta, drag DOWN = negative
+        local delta_screen = state.drag_start_mouse_y - mouse_y  -- Positive when dragging UP
+        local delta_normalized = delta_screen / area_h  -- Normalize by current area height
+
+        -- Determine segment direction to make visual bend consistent with drag direction
+        -- For ascending segments (y increases), we need to invert the curve value
+        -- so that "drag up = visual bulge up" regardless of segment slope
+        local sorted_pts = sort_points_by_x(points)
+        local seg_p1 = sorted_pts[state.drag_segment]
+        local seg_p2 = sorted_pts[state.drag_segment + 1]
+        local is_ascending = seg_p2.y > seg_p1.y
+        local direction_mult = is_ascending and -1 or 1
+
+        local new_curve = state.drag_start_curve + delta_normalized * 2 * direction_mult
         new_curve = math.max(-1, math.min(1, new_curve))
         M.write_segment_curve_to_fx(modulator, state.drag_segment, new_curve)
         interacted = true
@@ -433,21 +447,27 @@ function M.draw(ctx, modulator, width, height, state, skip_capture_button, item_
         local is_hover = (state.hover_segment == i)
         local is_drag = (state.drag_segment == i)
         local handle_color = (is_hover or is_drag) and COLORS.segment_handle_hover or COLORS.segment_handle
-        
+
+        -- Determine if segment is ascending to show visual-relative curve value
+        local seg_is_ascending = p2.y > p1.y
+        -- For display, invert value for ascending segments so it matches visual direction
+        -- (positive = bulging up visually, negative = bulging down visually)
+        local display_curve = seg_is_ascending and -seg_curve or seg_curve
+
         -- Show if: Shift held (curve mode), segment has curve, or segment is being dragged
         local show_handle = shift or is_drag or math.abs(seg_curve) > 0.01
         if show_handle then
             local hs = (is_hover or is_drag) and 6 or 4  -- Larger when active
-            r.ImGui_DrawList_AddQuadFilled(draw_list, 
+            r.ImGui_DrawList_AddQuadFilled(draw_list,
                 hx, hy - hs,
                 hx + hs, hy,
                 hx, hy + hs,
                 hx - hs, hy,
                 handle_color)
-            
-            -- Show curve value when hovering or dragging
+
+            -- Show visual-relative curve value when hovering or dragging
             if is_hover or is_drag then
-                local curve_text = string.format("%.2f", seg_curve)
+                local curve_text = string.format("%.2f", display_curve)
                 r.ImGui_DrawList_AddText(draw_list, hx + 10, hy - 6, COLORS.text, curve_text)
             end
         end
