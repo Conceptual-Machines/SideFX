@@ -243,6 +243,17 @@ function M.draw(ctx, modulator, width, height, state, skip_capture_button, item_
     local grid_idx = ok_grid and math.floor(grid_norm * 4 + 0.5) or 2  -- Default to 8
     local grid_divisions = {0, 4, 8, 16, 32}
     local grid_div = grid_divisions[grid_idx + 1] or 8
+
+    -- Read snap setting from FX
+    local ok_snap, snap_val = pcall(function() return modulator:get_param(PARAM.PARAM_SNAP) end)
+    local snap_enabled = ok_snap and snap_val >= 0.5
+
+    -- Snap helper function: snaps value to nearest grid line
+    local function snap_to_grid(val, divisions)
+        if divisions <= 0 then return val end
+        local step = 1.0 / divisions
+        return math.floor(val / step + 0.5) * step
+    end
     
     -- Vertical grid lines (if grid enabled)
     if grid_div > 0 then
@@ -348,6 +359,13 @@ function M.draw(ctx, modulator, width, height, state, skip_capture_button, item_
             -- Add new node (only when not in Shift mode)
             local new_x = math.max(0.001, math.min(0.999, norm_mx))
             local new_y = math.max(0, math.min(1, norm_my))
+            -- Apply snap if enabled
+            if snap_enabled then
+                new_x = snap_to_grid(new_x, grid_div)
+                new_y = snap_to_grid(new_y, 4)  -- Y always snaps to 4 divisions
+                -- Re-clamp after snap to avoid endpoints
+                new_x = math.max(0.001, math.min(0.999, new_x))
+            end
             -- Add to end and write
             local new_idx = num_points + 1
             M.write_num_points_to_fx(modulator, new_idx)
@@ -402,8 +420,20 @@ function M.draw(ctx, modulator, width, height, state, skip_capture_button, item_
         local new_y = math.max(0, math.min(1, norm_my))
 
         -- Lock endpoints to x=0 or x=1
-        if state.drag_start_x < 0.01 then new_x = 0 end
-        if state.drag_start_x > 0.99 then new_x = 1 end
+        local is_left_endpoint = state.drag_start_x < 0.01
+        local is_right_endpoint = state.drag_start_x > 0.99
+        if is_left_endpoint then new_x = 0 end
+        if is_right_endpoint then new_x = 1 end
+
+        -- Apply snap if enabled (but not for endpoints which are locked)
+        if snap_enabled and not is_left_endpoint and not is_right_endpoint then
+            new_x = snap_to_grid(new_x, grid_div)
+            -- Re-clamp after snap to avoid endpoints
+            new_x = math.max(0.001, math.min(0.999, new_x))
+        end
+        if snap_enabled then
+            new_y = snap_to_grid(new_y, 4)  -- Y always snaps to 4 divisions
+        end
 
         -- Ctrl = X-only (lock Y)
         if ctrl then new_y = state.drag_start_y end
