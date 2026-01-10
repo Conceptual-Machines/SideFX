@@ -564,10 +564,14 @@ end
 -- Helper: Draw existing parameter links
 local function draw_existing_links(ctx, guid, fx, existing_links, state)
     local interacted = false
-    
+
     if #existing_links > 0 then
         state.link_bipolar = state.link_bipolar or {}
-        
+
+        -- Visual separator before linked params
+        ctx:separator()
+        ctx:spacing()
+
         for i, link in ipairs(existing_links) do
             local link_key = guid .. "_" .. link.param_idx
             local is_bipolar = state.link_bipolar[link_key] or false
@@ -598,7 +602,7 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
                 ctx:pop_style_color()
             end
             if ctx:is_item_hovered() then
-                ctx:set_tooltip("Unipolar: baseline + scale")
+                ctx:set_tooltip("Unipolar")
             end
             
             ctx:same_line(0, 0)
@@ -617,7 +621,7 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
                 ctx:pop_style_color()
             end
             if ctx:is_item_hovered() then
-                ctx:set_tooltip("Bipolar: baseline ± depth")
+                ctx:set_tooltip("Bipolar")
             end
             
             ctx:same_line()
