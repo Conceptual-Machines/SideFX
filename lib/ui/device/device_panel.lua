@@ -487,6 +487,7 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         -- Content Column 2: Device params or collapsed view
         -- Build mod_links: map of param_idx -> link_info for all modulated params
         local mod_links = {}
+        local link_count = 0
         local ok_params, param_count = pcall(function() return fx:get_num_params() end)
         if ok_params and param_count then
             for param_idx = 0, param_count - 1 do
@@ -496,10 +497,14 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
                     local link_key = guid .. "_" .. param_idx
                     link_info.is_bipolar = state.link_bipolar and state.link_bipolar[link_key] or false
                     mod_links[param_idx] = link_info
+                    link_count = link_count + 1
                 end
             end
         end
         opts.mod_links = mod_links
+        
+        -- DEBUG: Always show link count
+        ctx:text_colored(0xFF00FFFF, string.format("DEBUG: %d links, bipolar=%s", link_count, state.link_bipolar and "yes" or "no"))
         
         if device_column.draw(ctx, is_device_collapsed, params_column, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts, name, fx_naming, draw_sidebar_column, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, colors) then
             interacted = true
