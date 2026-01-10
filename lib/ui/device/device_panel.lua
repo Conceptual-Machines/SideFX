@@ -39,7 +39,7 @@ M.config = {
     fader_height = 70,         -- Fader height
     knob_size = 48,            -- Knob diameter
     -- Modulator sidebar (left side of device)
-    mod_sidebar_width = 260,   -- Width for modulator 4×2 grid
+    mod_sidebar_width = 280,   -- Width for modulator controls
     mod_sidebar_collapsed_width = 24,  -- Collapsed width
     mod_slot_width = 60,
     mod_slot_height = 60,

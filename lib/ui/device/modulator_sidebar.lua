@@ -220,35 +220,41 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
                         ctx:table_next_row()
 
-                        -- Column 1: Free/Sync segmented buttons
+                        -- Column 1: Free/Sync icon buttons
                         ctx:table_set_column_index(0)
                         if tempo_mode then
                             local is_free = tempo_mode < 0.5
                             
-                            -- Free button
+                            -- Free button (♪)
                             if is_free then
                                 ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                             end
-                            if ctx:button("Free##tempo_" .. guid, 50, 0) then
+                            if ctx:button("♪##tempo_" .. guid, 50, 0) then
                                 expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 0)
                                 interacted = true
                             end
                             if is_free then
                                 ctx:pop_style_color()
                             end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Free")
+                            end
                             
                             ctx:same_line(0, 0)  -- No gap between buttons
                             
-                            -- Sync button
+                            -- Sync button (⏱)
                             if not is_free then
                                 ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                             end
-                            if ctx:button("Sync##tempo_" .. guid, 50, 0) then
+                            if ctx:button("⏱##tempo_" .. guid, 50, 0) then
                                 expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 1)
                                 interacted = true
                             end
                             if not is_free then
                                 ctx:pop_style_color()
+                            end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Sync")
                             end
                         end
 
