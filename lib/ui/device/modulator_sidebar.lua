@@ -347,7 +347,7 @@ local function draw_rate_controls(ctx, guid, expanded_modulator)
 end
 
 -- Helper: Draw trigger mode dropdown and advanced button
-local function draw_trigger_and_advanced_button(ctx, guid, expanded_modulator)
+local function draw_trigger_and_advanced_button(ctx, guid, expanded_modulator, opts)
     local interacted = false
     local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_TRIGGER_MODE) end)
     local trig_idx = nil
@@ -761,7 +761,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     ctx:spacing()
                     
                     -- Trigger and Advanced controls
-                    local trig_interacted, ok_trig, trig_idx, advanced_popup_id = draw_trigger_and_advanced_button(ctx, guid, expanded_modulator)
+                    local trig_interacted, ok_trig, trig_idx, advanced_popup_id = draw_trigger_and_advanced_button(ctx, guid, expanded_modulator, opts)
                     if trig_interacted then
                         interacted = true
                     end
