@@ -667,8 +667,12 @@ function M.draw_popup(ctx, modulator, state, popup_id, track)
 
                 r.ImGui_SameLine(ctx.ctx)
 
-                -- Save preset button
-                if r.ImGui_Button(ctx.ctx, "Save##preset_save", 50, 0) then
+                -- Save preset button with floppy icon
+                local constants = require('lib.core.constants')
+                local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
+                local save_icon = constants.icon_text(emojimgui, constants.Icons.floppy_disk)
+
+                if r.ImGui_Button(ctx.ctx, save_icon .. "##preset_save", 30, 0) then
                     -- Open REAPER's save preset dialog
                     r.TrackFX_SetPreset(track.pointer, modulator.pointer, "+")
                     -- Clear cache to reload presets
@@ -775,12 +779,15 @@ function M.draw_popup(ctx, modulator, state, popup_id, track)
             r.ImGui_Dummy(ctx.ctx, 10, 0)  -- Spacer
             r.ImGui_SameLine(ctx.ctx)
 
-            -- Grid dropdown
+            -- Grid dropdown (disabled in free mode)
             local grid_options = {"Off", "4", "8", "16", "32"}
             local ok_grid, grid_norm = pcall(function() return modulator:get_param_normalized(PARAM.PARAM_GRID) end)
             -- Discrete param with 5 values (0-4), normalized is 0-1
             local grid_idx = ok_grid and math.floor(grid_norm * 4 + 0.5) or 0
-            
+
+            if is_free_mode then
+                r.ImGui_BeginDisabled(ctx.ctx)
+            end
             r.ImGui_SetNextItemWidth(ctx.ctx, 60)
             if r.ImGui_BeginCombo(ctx.ctx, "Grid", grid_options[grid_idx + 1] or "Off") then
                 for i, opt in ipairs(grid_options) do
@@ -791,19 +798,38 @@ function M.draw_popup(ctx, modulator, state, popup_id, track)
                 end
                 r.ImGui_EndCombo(ctx.ctx)
             end
-            
+            if is_free_mode then
+                r.ImGui_EndDisabled(ctx.ctx)
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx, r.ImGui_HoveredFlags_AllowWhenDisabled()) then
+                if is_free_mode then
+                    r.ImGui_SetTooltip(ctx.ctx, "Grid disabled in Free mode")
+                end
+            end
+
             r.ImGui_SameLine(ctx.ctx)
 
-            -- Snap checkbox (disabled in free mode)
+            -- Snap toggle button with lock icon (disabled in free mode)
             local ok_snap, snap_val = pcall(function() return modulator:get_param(PARAM.PARAM_SNAP) end)
             local snap_on = ok_snap and snap_val >= 0.5
+            local constants = require('lib.core.constants')
+            local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
+            local lock_icon = snap_on and constants.icon_text(emojimgui, constants.Icons.lock_closed) or constants.icon_text(emojimgui, constants.Icons.lock_open)
+
             if is_free_mode then
                 r.ImGui_BeginDisabled(ctx.ctx)
             end
-            local snap_changed, snap_new = r.ImGui_Checkbox(ctx.ctx, "Snap", snap_on and not is_free_mode)
-            if snap_changed and not is_free_mode then
-                modulator:set_param(PARAM.PARAM_SNAP, snap_new and 1 or 0)
-                interacted = true
+            if snap_on and not is_free_mode then
+                r.ImGui_PushStyleColor(ctx.ctx, imgui.Col.Button(), 0x5588AAFF)
+            end
+            if r.ImGui_Button(ctx.ctx, lock_icon .. "##snap", 28, 0) then
+                if not is_free_mode then
+                    modulator:set_param(PARAM.PARAM_SNAP, snap_on and 0 or 1)
+                    interacted = true
+                end
+            end
+            if snap_on and not is_free_mode then
+                r.ImGui_PopStyleColor(ctx.ctx)
             end
             if is_free_mode then
                 r.ImGui_EndDisabled(ctx.ctx)
@@ -812,7 +838,7 @@ function M.draw_popup(ctx, modulator, state, popup_id, track)
                 if is_free_mode then
                     r.ImGui_SetTooltip(ctx.ctx, "Snap disabled in Free mode")
                 else
-                    r.ImGui_SetTooltip(ctx.ctx, "Snap to grid")
+                    r.ImGui_SetTooltip(ctx.ctx, snap_on and "Snap On" or "Snap Off")
                 end
             end
             

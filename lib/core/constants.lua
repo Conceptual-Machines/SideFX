@@ -28,6 +28,8 @@ M.Icons = {
     desktop = "1F5A5",          -- 🖥 (desktop computer)
     floppy_disk = "1F4BE",      -- 💾 (save/presets)
     gear = "2699",              -- ⚙️ (settings/config)
+    lock_closed = "1F512",      -- 🔒 (locked/snap on)
+    lock_open = "1F513",        -- 🔓 (unlocked/snap off)
 }
 
 --- Get icon text from EmojImGui

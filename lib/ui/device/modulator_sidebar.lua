@@ -172,62 +172,68 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
     local cached_names = state.cached_preset_names[mod_guid] or {}
     local current_preset_name = (num_presets > 0 and cached_names[preset_idx]) or "—"
 
-    -- Calculate widths: preset dropdown + save button + UI icon
-    local full_width = cfg.mod_sidebar_width - 16
-    local save_btn_width = 32
-    local ui_icon_width = 28
-    local combo_width = full_width - save_btn_width - ui_icon_width - 8  -- 8 for spacing
+    -- Use table for preset row: Preset (stretch) | Save (fixed) | UI (fixed)
+    local table_flags = r.ImGui_TableFlags_SizingFixedFit()
+    if ctx:begin_table("preset_row_" .. guid, 3, table_flags) then
+        r.ImGui_TableSetupColumn(ctx.ctx, "Preset", r.ImGui_TableColumnFlags_WidthStretch(), 1)
+        r.ImGui_TableSetupColumn(ctx.ctx, "Save", r.ImGui_TableColumnFlags_WidthFixed(), 28)
+        r.ImGui_TableSetupColumn(ctx.ctx, "UI", r.ImGui_TableColumnFlags_WidthFixed(), 26)
 
-    ctx:set_next_item_width(combo_width)
-    if ctx:begin_combo("##preset_" .. guid, current_preset_name) then
-        for i = 0, num_presets - 1 do
-            local preset_name = cached_names[i] or ("Preset " .. (i + 1))
-            if ctx:selectable(preset_name, i == preset_idx) then
-                r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
-                interacted = true
+        ctx:table_next_row()
+
+        -- Column 1: Preset dropdown
+        ctx:table_set_column_index(0)
+        ctx:set_next_item_width(-1)
+        if ctx:begin_combo("##preset_" .. guid, current_preset_name) then
+            for i = 0, num_presets - 1 do
+                local preset_name = cached_names[i] or ("Preset " .. (i + 1))
+                if ctx:selectable(preset_name, i == preset_idx) then
+                    r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
+                    interacted = true
+                end
             end
+            ctx:end_combo()
         end
-        ctx:end_combo()
-    end
-    if ctx:is_item_hovered() then
-        ctx:set_tooltip("Waveform Preset")
-    end
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip("Waveform Preset")
+        end
 
-    ctx:same_line()
+        -- Column 2: Save button with icon
+        ctx:table_set_column_index(1)
+        local constants = require('lib.core.constants')
+        local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
+        local save_icon = constants.icon_text(emojimgui, constants.Icons.floppy_disk)
 
-    -- Save button with icon
-    local constants = require('lib.core.constants')
-    local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
-    local save_icon = constants.icon_text(emojimgui, constants.Icons.floppy_disk)
+        if opts.icon_font then
+            ctx:push_font(opts.icon_font, 14)
+        end
+        if ctx:button(save_icon .. "##save_" .. guid, 26, 0) then
+            -- Open REAPER's save preset dialog
+            r.TrackFX_SetPreset(state.track.pointer, expanded_modulator.pointer, "+")
+            -- Clear cache to reload presets after save
+            state.cached_preset_names[mod_guid] = nil
+            interacted = true
+        end
+        if opts.icon_font then
+            ctx:pop_font()
+        end
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip("Save Preset")
+        end
 
-    if opts.icon_font then
-        ctx:push_font(opts.icon_font, 14)
-    end
-    if ctx:button(save_icon .. "##save_" .. guid, save_btn_width, 0) then
-        -- Open REAPER's save preset dialog
-        r.TrackFX_SetPreset(state.track.pointer, expanded_modulator.pointer, "+")
-        -- Clear cache to reload presets after save
-        state.cached_preset_names[mod_guid] = nil
-        interacted = true
-    end
-    if opts.icon_font then
-        ctx:pop_font()
-    end
-    if ctx:is_item_hovered() then
-        ctx:set_tooltip("Save Preset")
-    end
+        -- Column 3: UI icon
+        ctx:table_set_column_index(2)
+        if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20, opts.icon_font) then
+            state.curve_editor_popup = state.curve_editor_popup or {}
+            state.curve_editor_popup[editor_key] = state.curve_editor_popup[editor_key] or {}
+            state.curve_editor_popup[editor_key].open_requested = true
+            interacted = true
+        end
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip("Open Curve Editor")
+        end
 
-    ctx:same_line()
-
-    -- UI icon
-    if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20, opts.icon_font) then
-        state.curve_editor_popup = state.curve_editor_popup or {}
-        state.curve_editor_popup[editor_key] = state.curve_editor_popup[editor_key] or {}
-        state.curve_editor_popup[editor_key].open_requested = true
-        interacted = true
-    end
-    if ctx:is_item_hovered() then
-        ctx:set_tooltip("Open Curve Editor")
+        ctx:end_table()
     end
 
     return interacted
