@@ -646,7 +646,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             -- Depth slider (shows actual depth, not the plink scale)
                             ctx:set_next_item_width(80)
                             local depth_pct = actual_depth * 100
-                            local changed, new_depth_pct = ctx:slider_double("##depth_" .. link.param_idx .. "_" .. guid, depth_pct, -200, 200, "%.0f%%")
+                            local changed, new_depth_pct = ctx:slider_double("##depth_" .. link.param_idx .. "_" .. guid, depth_pct, -100, 100, "%.0f%%")
                             if changed then
                                 local new_depth = new_depth_pct / 100
                                 if is_bipolar then
