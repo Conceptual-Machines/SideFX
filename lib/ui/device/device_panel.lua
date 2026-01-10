@@ -509,8 +509,8 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
             for param_idx, link_info in pairs(mod_links) do
                 local link_key = guid .. "_" .. param_idx
                 local bi = state.link_bipolar and state.link_bipolar[link_key] or false
-                table.insert(debug_parts, string.format("p%d: off=%.2f sc=%.2f %s", 
-                    param_idx, link_info.offset or 0, link_info.scale or 0, bi and "BI" or "UNI"))
+                table.insert(debug_parts, string.format("p%d: base=%.2f off=%.2f sc=%.2f %s", 
+                    param_idx, link_info.baseline or 0, link_info.offset or 0, link_info.scale or 0, bi and "BI" or "UNI"))
             end
             ctx:text_colored(0xFF00FFFF, "DEBUG: " .. table.concat(debug_parts, " | "))
         end

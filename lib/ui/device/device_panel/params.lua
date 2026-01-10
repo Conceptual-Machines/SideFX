@@ -58,39 +58,22 @@ local function draw_param_cell(ctx, fx, param_idx, mod_links)
         -- Get slider position BEFORE drawing
         local slider_x, slider_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
         
-        -- Calculate base/center value for slider handle
-        -- Unipolar: base is at offset (left edge of range)
-        -- Bipolar: base is at offset + scale/2 (center of range)
+        -- Unipolar uses: baseline + (lfo * scale)
+        -- baseline = initial value, scale = depth
         local base_val = param_val  -- Default: actual current value
         if link then
-            local offset = link.offset or 0
-            local scale = link.scale or 1
-            if link.is_bipolar then
-                -- Bipolar: center is at offset + scale/2
-                base_val = offset + scale / 2
-            else
-                -- Unipolar: base is at offset
-                base_val = offset
-            end
+            local baseline = link.baseline or 0
+            base_val = baseline
         end
         
-        -- Draw the slider with the BASE value if modulated, otherwise current value
+        -- Draw the slider with the BASELINE value if modulated, otherwise current value
         local display_val = link and base_val or param_val
         local changed, new_val = ctx:slider_double("##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, "")
         if changed then
             if link then
-                -- If modulated, update the base position by adjusting offset
-                local plink_prefix = string.format("param.%d.plink.", param_idx)
-                local offset = link.offset or 0
-                local scale = link.scale or 1
-                if link.is_bipolar then
-                    -- Bipolar: new_offset = new_center - scale/2
-                    local new_offset = new_val - scale / 2
-                    fx:set_named_config_param(plink_prefix .. "offset", tostring(new_offset))
-                else
-                    -- Unipolar: offset = base
-                    fx:set_named_config_param(plink_prefix .. "offset", tostring(new_val))
-                end
+                -- If modulated, update baseline
+                local mod_prefix = string.format("param.%d.mod.", param_idx)
+                fx:set_named_config_param(mod_prefix .. "baseline", tostring(new_val))
             else
                 pcall(function() fx:set_param_normalized(param_idx, new_val) end)
             end
@@ -102,12 +85,17 @@ local function draw_param_cell(ctx, fx, param_idx, mod_links)
             local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
             local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
             
+            local baseline = link.baseline or 0
             local offset = link.offset or 0
-            local scale = link.scale or 1
+            local scale = link.scale or 0.5
             
-            -- Draw modulation range hint (blue bar at bottom) - draw FIRST so indicator is on top
-            local min_mod = math.max(0, math.min(offset, offset + scale))
-            local max_mod = math.min(1, math.max(offset, offset + scale))
+            -- Formula: target = baseline + offset + (lfo * scale)
+            -- Unipolar: offset=0, so range is baseline to baseline+scale
+            -- Bipolar: offset=-|depth|, scale=2*|depth|, so range is baseline-|depth| to baseline+|depth|
+            local range_start = baseline + offset
+            local range_end = baseline + offset + scale
+            local min_mod = math.max(0, math.min(range_start, range_end))
+            local max_mod = math.min(1, math.max(range_start, range_end))
             local range_x1 = slider_x + min_mod * slider_w
             local range_x2 = slider_x + max_mod * slider_w
             r.ImGui_DrawList_AddRectFilled(draw_list,
@@ -124,8 +112,8 @@ local function draw_param_cell(ctx, fx, param_idx, mod_links)
             
             -- DEBUG: Show values as tooltip on hover
             if r.ImGui_IsItemHovered(ctx.ctx) then
-                local tooltip = string.format("offset=%.3f scale=%.3f\ncurrent=%.3f base=%.3f\nbipolar=%s", 
-                    offset, scale, param_val, base_val, link.is_bipolar and "yes" or "no")
+                local tooltip = string.format("base=%.3f off=%.3f sc=%.3f\ncurrent=%.3f\nbipolar=%s", 
+                    baseline, offset, scale, param_val, link.is_bipolar and "yes" or "no")
                 ctx:set_tooltip(tooltip)
             end
         end
