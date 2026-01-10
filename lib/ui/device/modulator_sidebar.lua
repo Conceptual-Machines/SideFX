@@ -371,11 +371,21 @@ local function draw_trigger_and_advanced_button(ctx, guid, expanded_modulator)
     end
     
     ctx:same_line()
-    
-    -- Advanced button
+
+    -- Advanced button with gear icon
+    local constants = require('lib.core.constants')
+    local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
+    local gear_icon = constants.icon_text(emojimgui, constants.Icons.gear)
+
     local advanced_popup_id = "Advanced##adv_popup_" .. guid
-    if ctx:button("⚙##adv_btn_" .. guid, 24, 0) then
+    if opts.icon_font then
+        ctx:push_font(opts.icon_font, 14)
+    end
+    if ctx:button(gear_icon .. "##adv_btn_" .. guid, 24, 0) then
         r.ImGui_OpenPopup(ctx.ctx, advanced_popup_id)
+    end
+    if opts.icon_font then
+        ctx:pop_font()
     end
     if ctx:is_item_hovered() then
         ctx:set_tooltip("Advanced Settings")
