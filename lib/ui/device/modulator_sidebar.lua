@@ -718,7 +718,41 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
     local is_mod_sidebar_collapsed = state.mod_sidebar_collapsed[state_guid] or false
 
     if is_mod_sidebar_collapsed then
-        -- Collapsed: button is now in header, show nothing here
+        -- Collapsed: show 8 vertical buttons for mod slots
+        local modulators = get_device_modulators(container)
+        local btn_size = 20
+
+        for slot_idx = 0, 7 do
+            local mod = modulators[slot_idx + 1]
+            local has_mod = mod ~= nil
+
+            -- Green highlight if slot has a modulator
+            if has_mod then
+                ctx:push_style_color(imgui.Col.Button(), 0x3A5A3AFF)
+            end
+
+            local label = tostring(slot_idx + 1) .. "##mod_slot_" .. slot_idx .. "_" .. guid
+            if ctx:button(label, btn_size, btn_size) then
+                if has_mod then
+                    -- Select this mod and expand sidebar
+                    state.expanded_mod_slot[state_guid] = slot_idx
+                    state.mod_sidebar_collapsed[state_guid] = false
+                    interacted = true
+                end
+            end
+
+            if has_mod then
+                ctx:pop_style_color()
+            end
+
+            if ctx:is_item_hovered() then
+                if has_mod then
+                    ctx:set_tooltip("LFO " .. (slot_idx + 1))
+                else
+                    ctx:set_tooltip("Empty slot " .. (slot_idx + 1))
+                end
+            end
+        end
     else
         -- Expanded: show grid (header now handled by parent device_panel)
 
