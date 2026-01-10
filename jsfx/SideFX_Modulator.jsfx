@@ -481,22 +481,9 @@ phase = lfo_phase + slider5;
 phase >= 1 ? phase -= 1;
 
 raw_lfo = eval_spline(phase);
-offset = slider88;
-depth = slider6;
-bipolar = slider89;
 
-// Apply offset and bipolar mode
-bipolar ? (
-  // Bipolar: LFO oscillates around offset, from offset-depth to offset+depth
-  // raw_lfo 0-1 becomes -1 to +1
-  final_output = offset + (raw_lfo * 2 - 1) * depth * env_value;
-) : (
-  // Unipolar: LFO adds to offset, from offset to offset+depth
-  final_output = offset + raw_lfo * depth * env_value;
-);
-
-// Clamp to 0-1
-final_output = max(0, min(1, final_output));
-slider4 = final_output;
+// Output raw LFO value (0-1) - offset/depth/bipolar handled by plink settings
+// The env_value still applies for attack/release envelope
+slider4 = raw_lfo * env_value;
 slider87 = phase;  // Expose current playhead position for UI (read-only, no automate)
 slider_automate(slider4);

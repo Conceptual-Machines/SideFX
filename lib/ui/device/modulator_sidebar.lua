@@ -567,16 +567,16 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     -- Show existing links (visualization is now on the actual device param sliders)
                     ctx:spacing()
                     if #existing_links > 0 then
-                        -- Get modulator param indices for bipolar control
-                        local P = param_indices.get_modulator_params(state.track, expanded_modulator)
-                        local track_ptr = state.track.pointer
-                        local mod_ptr = expanded_modulator.pointer
-                        
-                        -- Read current bipolar state from JSFX
-                        local jsfx_bipolar = P.bipolar and r.TrackFX_GetParamNormalized(track_ptr, mod_ptr, P.bipolar) >= 0.5
+                        -- Track bipolar state per link (stored in state table, affects plink offset)
+                        state.link_bipolar = state.link_bipolar or {}
                         
                         for i, link in ipairs(existing_links) do
-                            local is_bipolar = jsfx_bipolar  -- Use JSFX bipolar state (global for this modulator)
+                            local link_key = guid .. "_" .. link.param_idx
+                            local is_bipolar = state.link_bipolar[link_key] or false
+                            local plink_prefix = string.format("param.%d.plink.", link.param_idx)
+                            
+                            -- Calculate actual depth from scale (bipolar uses 2x scale)
+                            local actual_depth = is_bipolar and (link.scale / 2) or link.scale
                             
                             -- Parameter name (highlighted)
                             ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)
@@ -587,14 +587,20 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             
                             ctx:same_line()
                             
-                            -- Uni/Bi buttons - these control the JSFX bipolar parameter
+                            -- Uni/Bi buttons - adjust plink offset/scale for bipolar
+                            -- Unipolar: offset=initial, scale=depth -> range: initial to initial+depth
+                            -- Bipolar: offset=initial-depth, scale=2*depth -> range: initial-depth to initial+depth
                             if not is_bipolar then
                                 ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                             end
                             if ctx:button("U##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
-                                if P.bipolar then
-                                    r.TrackFX_SetParamNormalized(track_ptr, mod_ptr, P.bipolar, 0)
-                                end
+                                -- Switch to unipolar: restore offset to initial, halve scale
+                                state.link_bipolar[link_key] = false
+                                local initial = link.offset + actual_depth  -- Recover initial from bipolar offset
+                                local new_offset = initial
+                                local new_scale = actual_depth
+                                fx:set_named_config_param(plink_prefix .. "offset", tostring(new_offset))
+                                fx:set_named_config_param(plink_prefix .. "scale", tostring(new_scale))
                                 interacted = true
                             end
                             if not is_bipolar then
@@ -610,9 +616,14 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                 ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                             end
                             if ctx:button("B##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
-                                if P.bipolar then
-                                    r.TrackFX_SetParamNormalized(track_ptr, mod_ptr, P.bipolar, 1)
-                                end
+                                -- Switch to bipolar: offset = initial - depth, scale = 2*depth
+                                state.link_bipolar[link_key] = true
+                                local initial = link.offset  -- In unipolar, offset IS initial
+                                local depth = link.scale
+                                local new_offset = initial - depth
+                                local new_scale = depth * 2
+                                fx:set_named_config_param(plink_prefix .. "offset", tostring(new_offset))
+                                fx:set_named_config_param(plink_prefix .. "scale", tostring(new_scale))
                                 interacted = true
                             end
                             if is_bipolar then
@@ -624,16 +635,24 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             
                             ctx:same_line()
                             
-                            -- Depth slider
+                            -- Depth slider (shows actual depth, not the plink scale)
                             ctx:set_next_item_width(80)
-                            local depth_pct = link.scale * 100
+                            local depth_pct = actual_depth * 100
                             local changed, new_depth_pct = ctx:slider_double("##depth_" .. link.param_idx .. "_" .. guid, depth_pct, -200, 200, "%.0f%%")
                             if changed then
-                                local plink_prefix = string.format("param.%d.plink.", link.param_idx)
-                                local new_scale = new_depth_pct / 100
-                                if fx:set_named_config_param(plink_prefix .. "scale", tostring(new_scale)) then
-                                    interacted = true
+                                local new_depth = new_depth_pct / 100
+                                if is_bipolar then
+                                    -- Bipolar: recalculate offset and scale
+                                    local initial = link.offset + actual_depth  -- Recover initial
+                                    local new_offset = initial - new_depth
+                                    local new_scale = new_depth * 2
+                                    fx:set_named_config_param(plink_prefix .. "offset", tostring(new_offset))
+                                    fx:set_named_config_param(plink_prefix .. "scale", tostring(new_scale))
+                                else
+                                    -- Unipolar: just update scale
+                                    fx:set_named_config_param(plink_prefix .. "scale", tostring(new_depth))
                                 end
+                                interacted = true
                             end
                             if ctx:is_item_hovered() then
                                 ctx:set_tooltip("Modulation depth")

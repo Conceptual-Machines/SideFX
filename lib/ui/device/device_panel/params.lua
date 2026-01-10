@@ -58,14 +58,39 @@ local function draw_param_cell(ctx, fx, param_idx, mod_links)
         -- Get slider position BEFORE drawing
         local slider_x, slider_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
         
-        -- Draw the slider with the BASE value (offset) if modulated, otherwise current value
-        local display_val = link and (link.offset or 0) or param_val
+        -- Calculate base/center value for slider handle
+        -- Unipolar: base is at offset (left edge of range)
+        -- Bipolar: base is at offset + scale/2 (center of range)
+        local base_val = param_val  -- Default: actual current value
+        if link then
+            local offset = link.offset or 0
+            local scale = link.scale or 1
+            if link.is_bipolar then
+                -- Bipolar: center is at offset + scale/2
+                base_val = offset + scale / 2
+            else
+                -- Unipolar: base is at offset
+                base_val = offset
+            end
+        end
+        
+        -- Draw the slider with the BASE value if modulated, otherwise current value
+        local display_val = link and base_val or param_val
         local changed, new_val = ctx:slider_double("##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, "")
         if changed then
             if link then
-                -- If modulated, update the offset (base value)
+                -- If modulated, update the base position by adjusting offset
                 local plink_prefix = string.format("param.%d.plink.", param_idx)
-                fx:set_named_config_param(plink_prefix .. "offset", tostring(new_val))
+                local offset = link.offset or 0
+                local scale = link.scale or 1
+                if link.is_bipolar then
+                    -- Bipolar: new_offset = new_center - scale/2
+                    local new_offset = new_val - scale / 2
+                    fx:set_named_config_param(plink_prefix .. "offset", tostring(new_offset))
+                else
+                    -- Unipolar: offset = base
+                    fx:set_named_config_param(plink_prefix .. "offset", tostring(new_val))
+                end
             else
                 pcall(function() fx:set_param_normalized(param_idx, new_val) end)
             end
@@ -84,7 +109,7 @@ local function draw_param_cell(ctx, fx, param_idx, mod_links)
                 indicator_x + 2, slider_y + slider_h,
                 0xFFFFFFFF)  -- White indicator
             
-            -- Draw modulation range hint
+            -- Draw modulation range hint (blue bar at bottom)
             local offset = link.offset or 0
             local scale = link.scale or 1
             local min_mod = math.max(0, math.min(offset, offset + scale))

@@ -492,6 +492,9 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
             for param_idx = 0, param_count - 1 do
                 local link_info = fx:get_param_link_info(param_idx)
                 if link_info then
+                    -- Add bipolar flag from state (if set)
+                    local link_key = guid .. "_" .. param_idx
+                    link_info.is_bipolar = state.link_bipolar and state.link_bipolar[link_key] or false
                     mod_links[param_idx] = link_info
                 end
             end
