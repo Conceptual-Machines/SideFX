@@ -174,10 +174,11 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
 
     -- Use table for preset row: Preset (stretch) | Save (fixed) | UI (fixed)
     local table_flags = r.ImGui_TableFlags_SizingFixedFit()
+    local icon_btn_size = 24
     if ctx:begin_table("preset_row_" .. guid, 3, table_flags) then
         r.ImGui_TableSetupColumn(ctx.ctx, "Preset", r.ImGui_TableColumnFlags_WidthStretch(), 1)
-        r.ImGui_TableSetupColumn(ctx.ctx, "Save", r.ImGui_TableColumnFlags_WidthFixed(), 28)
-        r.ImGui_TableSetupColumn(ctx.ctx, "UI", r.ImGui_TableColumnFlags_WidthFixed(), 26)
+        r.ImGui_TableSetupColumn(ctx.ctx, "Save", r.ImGui_TableColumnFlags_WidthFixed(), icon_btn_size)
+        r.ImGui_TableSetupColumn(ctx.ctx, "UI", r.ImGui_TableColumnFlags_WidthFixed(), icon_btn_size)
 
         ctx:table_next_row()
 
@@ -207,7 +208,7 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
         if opts.icon_font then
             ctx:push_font(opts.icon_font, 14)
         end
-        if ctx:button(save_icon .. "##save_" .. guid, 26, 0) then
+        if ctx:button(save_icon .. "##save_" .. guid, icon_btn_size, 0) then
             -- Open REAPER's save preset dialog
             r.TrackFX_SetPreset(state.track.pointer, expanded_modulator.pointer, "+")
             -- Clear cache to reload presets after save
@@ -223,7 +224,7 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
 
         -- Column 3: UI icon
         ctx:table_set_column_index(2)
-        if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20, opts.icon_font) then
+        if drawing.draw_ui_icon(ctx, "##ui_" .. guid, icon_btn_size, icon_btn_size, opts.icon_font) then
             state.curve_editor_popup = state.curve_editor_popup or {}
             state.curve_editor_popup[editor_key] = state.curve_editor_popup[editor_key] or {}
             state.curve_editor_popup[editor_key].open_requested = true
