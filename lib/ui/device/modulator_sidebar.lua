@@ -392,22 +392,6 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         end
                     end
 
-                    ctx:same_line()
-
-                    -- LFO Mode: Loop/One Shot (discrete parameter)
-                    local lfo_mode = expanded_modulator:get_param(PARAM.PARAM_LFO_MODE)
-                    if lfo_mode then
-                        if ctx:radio_button("Loop##lfo_" .. guid, lfo_mode < 0.5) then
-                            expanded_modulator:set_param(PARAM.PARAM_LFO_MODE, 0)
-                            interacted = true
-                        end
-                        ctx:same_line()
-                        if ctx:radio_button("One Shot##lfo_" .. guid, lfo_mode >= 0.5) then
-                            expanded_modulator:set_param(PARAM.PARAM_LFO_MODE, 1)
-                            interacted = true
-                        end
-                    end
-
                     ctx:spacing()
 
                     -- Advanced section (collapsible)

@@ -227,13 +227,26 @@ function M.draw(ctx, modulator, width, height, state)
     local global_curve = M.read_global_curve_from_fx(modulator)
     local lfo_phase, lfo_output = M.read_lfo_state_from_fx(modulator)
     
-    -- Grid
-    local grid_div = 8  -- Could read from FX params
-    for i = 0, grid_div do
-        local gx = area_x + (i / grid_div) * area_w
-        local color = (i == 0 or i == grid_div) and COLORS.grid_major or COLORS.grid
-        r.ImGui_DrawList_AddLine(draw_list, gx, area_y, gx, area_y + area_h, color)
+    -- Read grid setting from FX (0=Off, 1=4, 2=8, 3=16, 4=32)
+    local ok_grid, grid_norm = pcall(function() return modulator:get_param_normalized(PARAM.PARAM_GRID) end)
+    local grid_idx = ok_grid and math.floor(grid_norm * 4 + 0.5) or 2  -- Default to 8
+    local grid_divisions = {0, 4, 8, 16, 32}
+    local grid_div = grid_divisions[grid_idx + 1] or 8
+    
+    -- Vertical grid lines (if grid enabled)
+    if grid_div > 0 then
+        for i = 0, grid_div do
+            local gx = area_x + (i / grid_div) * area_w
+            local color = (i == 0 or i == grid_div) and COLORS.grid_major or COLORS.grid
+            r.ImGui_DrawList_AddLine(draw_list, gx, area_y, gx, area_y + area_h, color)
+        end
+    else
+        -- Just draw border lines when grid is off
+        r.ImGui_DrawList_AddLine(draw_list, area_x, area_y, area_x, area_y + area_h, COLORS.grid_major)
+        r.ImGui_DrawList_AddLine(draw_list, area_x + area_w, area_y, area_x + area_w, area_y + area_h, COLORS.grid_major)
     end
+    
+    -- Horizontal grid lines (always 4 divisions for amplitude)
     for i = 0, 4 do
         local gy = area_y + (i / 4) * area_h
         local color = (i == 0 or i == 4) and COLORS.grid_major or COLORS.grid
@@ -491,6 +504,12 @@ function M.draw_popup(ctx, modulator, state, popup_id)
             local control_bar_height = 35
             local editor_h = win_h - 55 - control_bar_height  -- Title bar + controls
             
+            -- Create an invisible button to capture the editor area (prevents window dragging)
+            local cursor_pos_x, cursor_pos_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+            r.ImGui_InvisibleButton(ctx.ctx, "editor_capture", avail_w, editor_h)
+            
+            -- Draw editor on top of the button (using same position)
+            r.ImGui_SetCursorScreenPos(ctx.ctx, cursor_pos_x, cursor_pos_y)
             local editor_interacted, new_state = M.draw(ctx, modulator, avail_w, editor_h, state)
             if editor_interacted then
                 interacted = true
@@ -532,18 +551,40 @@ function M.draw_popup(ctx, modulator, state, popup_id)
             r.ImGui_Dummy(ctx.ctx, 20, 0)  -- Spacer
             r.ImGui_SameLine(ctx.ctx)
             
-            -- Loop/OneShot radio buttons
+            -- Loop/OneShot icon buttons
             local ok_mode, lfo_mode = pcall(function() return modulator:get_param(PARAM.PARAM_LFO_MODE) end)
             local is_loop = ok_mode and lfo_mode < 0.5
             
-            if r.ImGui_RadioButton(ctx.ctx, "Loop", is_loop) then
+            -- Loop icon: ↻
+            if is_loop then
+                r.ImGui_PushStyleColor(ctx.ctx, imgui.Col.Button(), 0x5588AAFF)
+            end
+            if r.ImGui_Button(ctx.ctx, "↻##loop", 28, 0) then
                 modulator:set_param(PARAM.PARAM_LFO_MODE, 0)
                 interacted = true
             end
+            if is_loop then
+                r.ImGui_PopStyleColor(ctx.ctx)
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                r.ImGui_SetTooltip(ctx.ctx, "Loop")
+            end
+            
             r.ImGui_SameLine(ctx.ctx)
-            if r.ImGui_RadioButton(ctx.ctx, "One Shot", not is_loop) then
+            
+            -- One Shot icon: →
+            if not is_loop then
+                r.ImGui_PushStyleColor(ctx.ctx, imgui.Col.Button(), 0x5588AAFF)
+            end
+            if r.ImGui_Button(ctx.ctx, "→##oneshot", 28, 0) then
                 modulator:set_param(PARAM.PARAM_LFO_MODE, 1)
                 interacted = true
+            end
+            if not is_loop then
+                r.ImGui_PopStyleColor(ctx.ctx)
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                r.ImGui_SetTooltip(ctx.ctx, "One Shot")
             end
             
             r.ImGui_End(ctx.ctx)
