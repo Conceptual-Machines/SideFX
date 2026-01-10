@@ -362,15 +362,15 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     ctx:spacing()
 
                     -- Offset and Bipolar controls on same line
-                    local ok_offset, offset_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_OFFSET) end)
+                    local ok_offset, offset_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_OFFSET) end)
                     local ok_bipolar, bipolar_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_BIPOLAR) end)
                     
-                    if ok_offset then
+                    if ok_offset and offset_val then
                         ctx:set_next_item_width(124)  -- Leave room for Uni/Bi buttons
                         local offset_pct = offset_val * 100
                         local changed, new_offset_pct = ctx:slider_double("##offset_" .. guid, offset_pct, 0, 100, "Off %.0f%%")
                         if changed then
-                            expanded_modulator:set_param_normalized(PARAM.PARAM_OFFSET, new_offset_pct / 100)
+                            expanded_modulator:set_param(PARAM.PARAM_OFFSET, new_offset_pct / 100)
                             interacted = true
                         end
                         if ctx:is_item_hovered() then
@@ -417,13 +417,13 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     end
                     
                     -- Depth slider (always show)
-                    local ok_depth, depth_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_DEPTH) end)
-                    if ok_depth then
+                    local ok_depth, depth_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_DEPTH) end)
+                    if ok_depth and depth_val then
                         ctx:set_next_item_width(200)  -- Full width
                         local depth_pct = depth_val * 100
                         local changed, new_depth_pct = ctx:slider_double("##depth_" .. guid, depth_pct, 0, 100, "Depth %.0f%%")
                         if changed then
-                            expanded_modulator:set_param_normalized(PARAM.PARAM_DEPTH, new_depth_pct / 100)
+                            expanded_modulator:set_param(PARAM.PARAM_DEPTH, new_depth_pct / 100)
                             interacted = true
                         end
                         if ctx:is_item_hovered() then
@@ -633,7 +633,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     if #existing_links > 0 then
                         -- Get current modulator output for ghost visualization
                         local ok_output, mod_output = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_OUTPUT) end)
-                        local ok_off, off_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_OFFSET) end)
+                        local ok_off, off_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_OFFSET) end)
                         local ok_bi, bi_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_BIPOLAR) end)
                         
                         for i, link in ipairs(existing_links) do
@@ -650,9 +650,9 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
                             local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
                             
-                            -- Get target param's current value
+                            -- Get target param's current value (normalized for display)
                             local ok_target, target_val = pcall(function() return target_device:get_param_normalized(link.param_idx) end)
-                            target_val = target_val or 0
+                            if not ok_target or not target_val then target_val = 0 end
                             
                             -- Calculate modulated range
                             local offset = ok_off and off_val or 0
