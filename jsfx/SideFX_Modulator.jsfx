@@ -84,6 +84,10 @@ slider86:0<-1,1,0.01>-Seg15 Curve
 // Current playhead position (for UI display, read-only from UI perspective)
 slider87:0<0,1,0.001>-Playhead Position
 
+// Offset and Bipolar mode
+slider88:0<0,1,0.01>-Offset
+slider89:0<0,1,1{Unipolar,Bipolar}>-Bipolar Mode
+
 @init
 MAX_NODES = 16;
 
@@ -477,7 +481,22 @@ phase = lfo_phase + slider5;
 phase >= 1 ? phase -= 1;
 
 raw_lfo = eval_spline(phase);
-final_output = raw_lfo * slider6 * env_value;
+offset = slider88;
+depth = slider6;
+bipolar = slider89;
+
+// Apply offset and bipolar mode
+bipolar ? (
+  // Bipolar: LFO oscillates around offset, from offset-depth to offset+depth
+  // raw_lfo 0-1 becomes -1 to +1
+  final_output = offset + (raw_lfo * 2 - 1) * depth * env_value;
+) : (
+  // Unipolar: LFO adds to offset, from offset to offset+depth
+  final_output = offset + raw_lfo * depth * env_value;
+);
+
+// Clamp to 0-1
+final_output = max(0, min(1, final_output));
 slider4 = final_output;
 slider87 = phase;  // Expose current playhead position for UI (read-only, no automate)
 slider_automate(slider4);

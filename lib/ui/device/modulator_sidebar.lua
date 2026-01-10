@@ -361,6 +361,78 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
                     ctx:spacing()
 
+                    -- Offset and Bipolar controls on same line
+                    local ok_offset, offset_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_OFFSET) end)
+                    local ok_bipolar, bipolar_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_BIPOLAR) end)
+                    
+                    if ok_offset then
+                        ctx:set_next_item_width(124)  -- Leave room for Uni/Bi buttons
+                        local offset_pct = offset_val * 100
+                        local changed, new_offset_pct = ctx:slider_double("##offset_" .. guid, offset_pct, 0, 100, "Off %.0f%%")
+                        if changed then
+                            expanded_modulator:set_param_normalized(PARAM.PARAM_OFFSET, new_offset_pct / 100)
+                            interacted = true
+                        end
+                        if ctx:is_item_hovered() then
+                            ctx:set_tooltip("Offset / Center Point")
+                        end
+                    end
+                    
+                    ctx:same_line()
+                    
+                    if ok_bipolar then
+                        local is_unipolar = bipolar_val < 0.5
+                        
+                        -- Uni button
+                        if is_unipolar then
+                            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+                        end
+                        if ctx:button("Uni##bipolar_" .. guid, 36, 0) then
+                            expanded_modulator:set_param(PARAM.PARAM_BIPOLAR, 0)
+                            interacted = true
+                        end
+                        if is_unipolar then
+                            ctx:pop_style_color()
+                        end
+                        if ctx:is_item_hovered() then
+                            ctx:set_tooltip("Unipolar: LFO adds to offset (0 to depth)")
+                        end
+                        
+                        ctx:same_line(0, 0)
+                        
+                        -- Bi button
+                        if not is_unipolar then
+                            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+                        end
+                        if ctx:button("Bi##bipolar_" .. guid, 36, 0) then
+                            expanded_modulator:set_param(PARAM.PARAM_BIPOLAR, 1)
+                            interacted = true
+                        end
+                        if not is_unipolar then
+                            ctx:pop_style_color()
+                        end
+                        if ctx:is_item_hovered() then
+                            ctx:set_tooltip("Bipolar: LFO oscillates around offset (±depth)")
+                        end
+                    end
+                    
+                    -- Depth slider (always show)
+                    local ok_depth, depth_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_DEPTH) end)
+                    if ok_depth then
+                        ctx:set_next_item_width(200)  -- Full width
+                        local depth_pct = depth_val * 100
+                        local changed, new_depth_pct = ctx:slider_double("##depth_" .. guid, depth_pct, 0, 100, "Depth %.0f%%")
+                        if changed then
+                            expanded_modulator:set_param_normalized(PARAM.PARAM_DEPTH, new_depth_pct / 100)
+                            interacted = true
+                        end
+                        if ctx:is_item_hovered() then
+                            ctx:set_tooltip("Modulation Depth")
+                        end
+                    end
+
+                    ctx:spacing()
+
                     -- Trigger Mode dropdown
                     local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_TRIGGER_MODE) end)
                     local trig_idx = nil  -- Declare outside so it's accessible in Advanced section
@@ -556,21 +628,98 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         r.ImGui_EndPopup(ctx.ctx)
                     end
 
-                    -- Show existing links with individual amount sliders
+                    -- Show existing links with ghost visualization
                     ctx:spacing()
                     if #existing_links > 0 then
+                        -- Get current modulator output for ghost visualization
+                        local ok_output, mod_output = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_OUTPUT) end)
+                        local ok_off, off_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_OFFSET) end)
+                        local ok_bi, bi_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_BIPOLAR) end)
+                        
                         for i, link in ipairs(existing_links) do
-                            -- Parameter name
-                            ctx:text("• " .. link.param_name)
-
-                            -- Amount slider (narrower, on same line)
+                            -- Parameter name (shortened)
+                            local short_name = link.param_name:sub(1, 12)
+                            if #link.param_name > 12 then short_name = short_name .. ".." end
+                            ctx:text(short_name)
+                            
                             ctx:same_line()
-                            local amount_width = 80
-                            ctx:set_next_item_width(amount_width)
+                            
+                            -- Ghost visualization: draw a progress bar with overlay
+                            local bar_width = 100
+                            local bar_height = 16
+                            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                            local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+                            
+                            -- Get target param's current value
+                            local ok_target, target_val = pcall(function() return target_device:get_param_normalized(link.param_idx) end)
+                            target_val = target_val or 0
+                            
+                            -- Calculate modulated range
+                            local offset = ok_off and off_val or 0
+                            local is_bipolar = ok_bi and bi_val >= 0.5
+                            local depth = link.scale  -- The scale is our depth/amount
+                            
+                            local min_val, max_val
+                            if is_bipolar then
+                                min_val = math.max(0, offset - math.abs(depth))
+                                max_val = math.min(1, offset + math.abs(depth))
+                            else
+                                min_val = offset
+                                max_val = math.min(1, offset + depth)
+                                if depth < 0 then
+                                    min_val = math.max(0, offset + depth)
+                                    max_val = offset
+                                end
+                            end
+                            
+                            -- Draw background
+                            r.ImGui_DrawList_AddRectFilled(draw_list,
+                                cursor_x, cursor_y,
+                                cursor_x + bar_width, cursor_y + bar_height,
+                                0x333333FF)
+                            
+                            -- Draw modulation range (ghost)
+                            local range_x1 = cursor_x + min_val * bar_width
+                            local range_x2 = cursor_x + max_val * bar_width
+                            r.ImGui_DrawList_AddRectFilled(draw_list,
+                                range_x1, cursor_y + 2,
+                                range_x2, cursor_y + bar_height - 2,
+                                0x5588AA44)  -- Semi-transparent
+                            
+                            -- Draw center/offset line
+                            local offset_x = cursor_x + offset * bar_width
+                            r.ImGui_DrawList_AddLine(draw_list,
+                                offset_x, cursor_y,
+                                offset_x, cursor_y + bar_height,
+                                0xFFFFFF88, 1)
+                            
+                            -- Draw current modulated value (bright indicator)
+                            local current_x = cursor_x + target_val * bar_width
+                            r.ImGui_DrawList_AddLine(draw_list,
+                                current_x, cursor_y,
+                                current_x, cursor_y + bar_height,
+                                0x88CCFFFF, 2)
+                            
+                            -- Draw border
+                            r.ImGui_DrawList_AddRect(draw_list,
+                                cursor_x, cursor_y,
+                                cursor_x + bar_width, cursor_y + bar_height,
+                                0x666666FF)
+                            
+                            -- Invisible button to capture area
+                            ctx:invisible_button("##ghost_" .. link.param_idx .. "_" .. guid, bar_width, bar_height)
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip(string.format("%s\nOffset: %.0f%%  Current: %.0f%%", 
+                                    link.param_name, offset * 100, target_val * 100))
+                            end
+                            
+                            ctx:same_line()
+                            
+                            -- Amount slider (compact)
+                            ctx:set_next_item_width(50)
                             local amount_pct = link.scale * 100
-                            local changed, new_amount_pct = ctx:slider_double("##amount_" .. link.param_idx .. "_" .. guid, amount_pct, -200, 200, "%.0f%%")
+                            local changed, new_amount_pct = ctx:slider_double("##amt_" .. link.param_idx .. "_" .. guid, amount_pct, -200, 200, "%.0f%%")
                             if changed then
-                                -- Update the scale using set_named_config_param
                                 local plink_prefix = string.format("param.%d.plink.", link.param_idx)
                                 local new_scale = new_amount_pct / 100
                                 if fx:set_named_config_param(plink_prefix .. "scale", tostring(new_scale)) then
@@ -583,8 +732,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
                             -- Remove button
                             ctx:same_line()
-                            if ctx:button("X##remove_link_" .. i .. "_" .. guid, 20, 0) then
-                                -- Remove this link using ReaWrap's high-level API
+                            if ctx:button("X##rm_" .. i .. "_" .. guid, 18, 0) then
                                 if fx:remove_param_link(link.param_idx) then
                                     interacted = true
                                 end

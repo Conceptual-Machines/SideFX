@@ -42,6 +42,10 @@ M.PARAM_SEGMENT_CURVE_START = 49  -- slider72: Segment 0 curve
 -- Playhead position (slider87) - for UI display
 M.PARAM_PLAYHEAD_POSITION = 64    -- slider87: Current phase position (0-1)
 
+-- Offset and Bipolar mode (slider88-89)
+M.PARAM_OFFSET = 65               -- slider88: Offset (0-1)
+M.PARAM_BIPOLAR = 66              -- slider89: Bipolar mode (0=Unipolar, 1=Bipolar)
+
 -- Helper: Max segments (16 points = 15 segments)
 M.MAX_SEGMENTS = 15
 
