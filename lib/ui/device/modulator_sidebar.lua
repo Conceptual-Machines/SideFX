@@ -40,6 +40,110 @@ local function get_device_modulators(device_container)
     return modulators
 end
 
+-- Helper function to draw the modulator slot grid (4x2 grid)
+local function draw_modulator_grid(ctx, guid, modulators, expanded_slot_idx, slot_width, slot_height, state, state_guid, container, opts)
+    local interacted = false
+    
+    ctx:dummy(8, 1)  -- Left padding
+
+    -- Use basic table - let button sizes control column width
+    if ctx:begin_table("mod_grid_" .. guid, 4) then
+        -- Draw 2 rows
+        for row = 0, 1 do
+            ctx:table_next_row(0, slot_height)
+
+            for col = 0, 3 do
+                ctx:table_set_column_index(col)
+
+                local slot_idx = row * 4 + col
+                local modulator = modulators[slot_idx + 1]  -- Lua 1-based
+                local slot_id = "slot_" .. slot_idx .. "_" .. guid
+
+                if modulator then
+                    -- Slot has modulator - show short name (LFO1, LFO2, etc.)
+                    local display_name = "LFO" .. (slot_idx + 1)
+
+                    local is_expanded = (expanded_slot_idx == slot_idx)
+                    if is_expanded then
+                        ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+                    end
+
+                    if ctx:button(display_name .. "##" .. slot_id, slot_width, slot_height) then
+                        -- Toggle expansion
+                        if state.expanded_mod_slot[state_guid] == slot_idx then
+                            state.expanded_mod_slot[state_guid] = nil
+                        else
+                            state.expanded_mod_slot[state_guid] = slot_idx
+                        end
+                        interacted = true
+                    end
+
+                    -- Right-click context menu for modulator
+                    if ctx:begin_popup_context_item("mod_ctx_" .. slot_id) then
+                        if ctx:selectable("Delete Modulator") then
+                            -- Delete modulator
+                            local ok_del = pcall(function()
+                                modulator:delete()
+                            end)
+                            if ok_del then
+                                -- Clear expansion state for this slot
+                                state.expanded_mod_slot[state_guid] = nil
+                                -- Refresh FX list
+                                if opts.refresh_fx_list then
+                                    opts.refresh_fx_list()
+                                end
+                                interacted = true
+                            end
+                        end
+                        ctx:end_popup()
+                    end
+
+                    if is_expanded then
+                        ctx:pop_style_color()
+                    end
+                else
+                    -- Empty slot - show + button
+                    if ctx:button("+##" .. slot_id, slot_width, slot_height) then
+                        -- Show modulator type dropdown (simplified for now - just add Bezier LFO)
+                        local track = opts.track or state.track
+                        if track and container then
+                            local new_mod = modulator_module.add_modulator_to_device(container, MODULATOR_TYPES[1], track)
+                            if new_mod then
+                                -- Refresh container pointer after adding (important for UI to update)
+                                if container.refresh_pointer then
+                                    container:refresh_pointer()
+                                end
+
+                                if opts.refresh_fx_list then
+                                    opts.refresh_fx_list()
+                                end
+
+                                -- Auto-select the newly added modulator
+                                local new_mod_guid = new_mod:get_guid()
+                                local updated_modulators = get_device_modulators(container)
+                                for idx, mod in ipairs(updated_modulators) do
+                                    if mod:get_guid() == new_mod_guid then
+                                        state.expanded_mod_slot[state_guid] = idx - 1  -- 0-based slot index
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                        interacted = true
+                    end
+                    if ctx:is_item_hovered() then
+                        ctx:set_tooltip("Add Modulator")
+                    end
+                end
+            end
+        end
+
+        ctx:end_table()
+    end
+    
+    return interacted
+end
+
 -- Main draw function for modulator sidebar
 function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
     local state = state_module.state
@@ -68,101 +172,8 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
         local slot_height = cfg.mod_slot_height
 
         -- 4×2 grid of modulator slots
-        ctx:dummy(8, 1)  -- Left padding
-
-        -- Use basic table - let button sizes control column width
-        if ctx:begin_table("mod_grid_" .. guid, 4) then
-            -- Draw 2 rows
-            for row = 0, 1 do
-                ctx:table_next_row(0, slot_height)
-
-                for col = 0, 3 do
-                    ctx:table_set_column_index(col)
-
-                    local slot_idx = row * 4 + col
-                    local modulator = modulators[slot_idx + 1]  -- Lua 1-based
-                    local slot_id = "slot_" .. slot_idx .. "_" .. guid
-
-                    if modulator then
-                        -- Slot has modulator - show short name (LFO1, LFO2, etc.)
-                        local display_name = "LFO" .. (slot_idx + 1)
-
-                        local is_expanded = (expanded_slot_idx == slot_idx)
-                        if is_expanded then
-                            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-                        end
-
-                        if ctx:button(display_name .. "##" .. slot_id, slot_width, slot_height) then
-                            -- Toggle expansion
-                            if state.expanded_mod_slot[state_guid] == slot_idx then
-                                state.expanded_mod_slot[state_guid] = nil
-                            else
-                                state.expanded_mod_slot[state_guid] = slot_idx
-                            end
-                            interacted = true
-                        end
-
-                        -- Right-click context menu for modulator
-                        if ctx:begin_popup_context_item("mod_ctx_" .. slot_id) then
-                            if ctx:selectable("Delete Modulator") then
-                                -- Delete modulator
-                                local ok_del = pcall(function()
-                                    modulator:delete()
-                                end)
-                                if ok_del then
-                                    -- Clear expansion state for this slot
-                                    state.expanded_mod_slot[state_guid] = nil
-                                    -- Refresh FX list
-                                    if opts.refresh_fx_list then
-                                        opts.refresh_fx_list()
-                                    end
-                                    interacted = true
-                                end
-                            end
-                            ctx:end_popup()
-                        end
-
-                        if is_expanded then
-                            ctx:pop_style_color()
-                        end
-                    else
-                        -- Empty slot - show + button
-                        if ctx:button("+##" .. slot_id, slot_width, slot_height) then
-                            -- Show modulator type dropdown (simplified for now - just add Bezier LFO)
-                            local track = opts.track or state.track
-                            if track and container then
-                                local new_mod = modulator_module.add_modulator_to_device(container, MODULATOR_TYPES[1], track)
-                                if new_mod then
-                                    -- Refresh container pointer after adding (important for UI to update)
-                                    if container.refresh_pointer then
-                                        container:refresh_pointer()
-                                    end
-
-                                    if opts.refresh_fx_list then
-                                        opts.refresh_fx_list()
-                                    end
-
-                                    -- Auto-select the newly added modulator
-                                    local new_mod_guid = new_mod:get_guid()
-                                    local updated_modulators = get_device_modulators(container)
-                                    for idx, mod in ipairs(updated_modulators) do
-                                        if mod:get_guid() == new_mod_guid then
-                                            state.expanded_mod_slot[state_guid] = idx - 1  -- 0-based slot index
-                                            break
-                                        end
-                                    end
-                                end
-                            end
-                            interacted = true
-                        end
-                        if ctx:is_item_hovered() then
-                            ctx:set_tooltip("Add Modulator")
-                        end
-                    end
-                end
-            end
-
-            ctx:end_table()
+        if draw_modulator_grid(ctx, guid, modulators, expanded_slot_idx, slot_width, slot_height, state, state_guid, container, opts) then
+            interacted = true
         end
 
         -- Show expanded modulator parameters
