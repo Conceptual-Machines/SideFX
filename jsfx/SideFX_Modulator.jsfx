@@ -1,6 +1,7 @@
 desc:SideFX Modulator
 author:Nomad Monad
 version:2.0
+options:no_meter
 
 // Rate
 slider1:0<0,1,1{Free,Sync}>-Tempo Mode
@@ -23,8 +24,8 @@ slider28:0<0,1,1{Loop,One Shot}>-LFO Mode
 slider29:0<-1,1,0.01>-Curve Shape
 
 // Editor
-slider26:2<0,4,1{Off,4,8,16,32}>Grid
-slider27:1<0,1,1{Off,On}>Snap
+slider26:2<0,4,1{Off,4,8,16,32}>-Grid
+slider27:1<0,1,1{Off,On}>-Snap
 
 // Number of points (2-16)
 slider30:4<2,16,1>-Num Points
