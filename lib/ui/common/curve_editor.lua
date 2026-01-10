@@ -706,8 +706,75 @@ function M.draw_popup(ctx, modulator, state, popup_id, track)
             state = new_state
             
             r.ImGui_Spacing(ctx.ctx)
-            
-            -- Control bar at bottom: Grid, Snap, Loop/OneShot
+            r.ImGui_Separator(ctx.ctx)
+            r.ImGui_Spacing(ctx.ctx)
+
+            -- Control bar at bottom: Mode, Rate, Grid, Snap, Loop/OneShot
+
+            -- Mode: Free/Sync buttons
+            if is_free_mode then
+                r.ImGui_PushStyleColor(ctx.ctx, imgui.Col.Button(), 0x5588AAFF)
+            end
+            if r.ImGui_Button(ctx.ctx, "Free##mode", 40, 0) then
+                modulator:set_param(PARAM.PARAM_TEMPO_MODE, 0)
+                interacted = true
+            end
+            if is_free_mode then
+                r.ImGui_PopStyleColor(ctx.ctx)
+            end
+
+            r.ImGui_SameLine(ctx.ctx, 0, 0)
+
+            if not is_free_mode then
+                r.ImGui_PushStyleColor(ctx.ctx, imgui.Col.Button(), 0x5588AAFF)
+            end
+            if r.ImGui_Button(ctx.ctx, "Sync##mode", 40, 0) then
+                modulator:set_param(PARAM.PARAM_TEMPO_MODE, 1)
+                interacted = true
+            end
+            if not is_free_mode then
+                r.ImGui_PopStyleColor(ctx.ctx)
+            end
+
+            r.ImGui_SameLine(ctx.ctx)
+
+            -- Rate: Slider (Hz) or Dropdown (sync divisions)
+            if is_free_mode then
+                -- Free mode: Hz slider
+                local ok_rate_norm, rate_norm = pcall(function() return modulator:get_param_normalized(PARAM.PARAM_RATE_HZ) end)
+                if ok_rate_norm then
+                    local rate_hz = 0.01 + rate_norm * 9.99
+                    r.ImGui_SetNextItemWidth(ctx.ctx, 100)
+                    local changed, new_rate = r.ImGui_SliderDouble(ctx.ctx, "##rate_hz", rate_hz, 0.01, 10, "%.2f Hz")
+                    if changed then
+                        local norm_val = (new_rate - 0.01) / 9.99
+                        modulator:set_param_normalized(PARAM.PARAM_RATE_HZ, norm_val)
+                        interacted = true
+                    end
+                end
+            else
+                -- Sync mode: Rate dropdown
+                local ok_sync, sync_rate_idx = pcall(function() return modulator:get_param_normalized(PARAM.PARAM_SYNC_RATE) end)
+                if ok_sync then
+                    local sync_rates = {"8 bars", "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/4T", "1/4.", "1/8", "1/8T", "1/8.", "1/16", "1/16T", "1/16.", "1/32", "1/32T", "1/32.", "1/64"}
+                    local current_idx = math.floor(sync_rate_idx * 17 + 0.5)
+                    r.ImGui_SetNextItemWidth(ctx.ctx, 80)
+                    if r.ImGui_BeginCombo(ctx.ctx, "##sync_rate", sync_rates[current_idx + 1] or "1/4") then
+                        for i, rate_name in ipairs(sync_rates) do
+                            if r.ImGui_Selectable(ctx.ctx, rate_name, i - 1 == current_idx) then
+                                modulator:set_param_normalized(PARAM.PARAM_SYNC_RATE, (i - 1) / 17)
+                                interacted = true
+                            end
+                        end
+                        r.ImGui_EndCombo(ctx.ctx)
+                    end
+                end
+            end
+
+            r.ImGui_SameLine(ctx.ctx)
+            r.ImGui_Dummy(ctx.ctx, 10, 0)  -- Spacer
+            r.ImGui_SameLine(ctx.ctx)
+
             -- Grid dropdown
             local grid_options = {"Off", "4", "8", "16", "32"}
             local ok_grid, grid_norm = pcall(function() return modulator:get_param_normalized(PARAM.PARAM_GRID) end)

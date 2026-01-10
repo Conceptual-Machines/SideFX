@@ -257,14 +257,14 @@ local function draw_curve_editor_section(ctx, expanded_modulator, editor_key, st
     return interacted
 end
 
--- Helper: Draw Free/Sync, Rate, and Phase controls
+-- Helper: Draw Free/Sync and Rate controls
 local function draw_rate_controls(ctx, guid, expanded_modulator)
     local interacted = false
     local tempo_mode = expanded_modulator:get_param(PARAM.PARAM_TEMPO_MODE)
-    
+
     if tempo_mode then
         local is_free = tempo_mode < 0.5
-        
+
         -- Free button
         if is_free then
             ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
@@ -276,9 +276,9 @@ local function draw_rate_controls(ctx, guid, expanded_modulator)
         if is_free then
             ctx:pop_style_color()
         end
-        
+
         ctx:same_line(0, 0)
-        
+
         -- Sync button
         if not is_free then
             ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
@@ -290,16 +290,16 @@ local function draw_rate_controls(ctx, guid, expanded_modulator)
         if not is_free then
             ctx:pop_style_color()
         end
-        
+
         ctx:same_line()
-        
-        -- Rate slider/dropdown
+
+        -- Rate slider/dropdown - fill remaining width
         if tempo_mode < 0.5 then
             -- Free mode - show Hz slider
             local ok_rate, rate_norm = pcall(function() return expanded_modulator:get_param_normalized(1) end)
             if ok_rate then
                 local rate_hz = 0.01 + rate_norm * 9.99
-                ctx:set_next_item_width(80)
+                ctx:set_next_item_width(-1)
                 local changed, new_rate = ctx:slider_double("##rate_" .. guid, rate_hz, 0.01, 10, "%.1f Hz")
                 if changed then
                     local norm_val = (new_rate - 0.01) / 9.99
@@ -316,7 +316,7 @@ local function draw_rate_controls(ctx, guid, expanded_modulator)
             if ok_sync then
                 local sync_rates = {"8 bars", "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/4T", "1/4.", "1/8", "1/8T", "1/8.", "1/16", "1/16T", "1/16.", "1/32", "1/32T", "1/32.", "1/64"}
                 local current_idx = math.floor(sync_rate_idx * 17 + 0.5)
-                ctx:set_next_item_width(80)
+                ctx:set_next_item_width(-1)
                 if ctx:begin_combo("##sync_rate_" .. guid, sync_rates[current_idx + 1] or "1/4") then
                     for i, rate_name in ipairs(sync_rates) do
                         if ctx:selectable(rate_name, i - 1 == current_idx) then
@@ -331,25 +331,8 @@ local function draw_rate_controls(ctx, guid, expanded_modulator)
                 end
             end
         end
-        
-        ctx:same_line()
-        
-        -- Phase slider
-        local ok_phase, phase = pcall(function() return expanded_modulator:get_param_normalized(4) end)
-        if ok_phase then
-            ctx:set_next_item_width(70)
-            local phase_deg = phase * 360
-            local changed, new_phase_deg = ctx:slider_double("##phase_" .. guid, phase_deg, 0, 360, "%.0f°")
-            if changed then
-                expanded_modulator:set_param_normalized(4, new_phase_deg / 360)
-                interacted = true
-            end
-            if ctx:is_item_hovered() then
-                ctx:set_tooltip("Phase")
-            end
-        end
     end
-    
+
     return interacted
 end
 
