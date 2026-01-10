@@ -316,13 +316,14 @@ function M.draw(ctx, modulator, width, height, state)
     
     -- Mouse interaction
     -- Disable when any popup/combo is open (prevents clicking through menus)
-    local any_popup_open = r.ImGui_IsPopupOpen(ctx.ctx, "", 1)  -- 1 = AnyPopup flag
+    local any_popup_open = r.ImGui_IsPopupOpen(ctx.ctx, "", r.ImGui_PopupFlags_AnyPopup())
+    local block_interaction = any_popup_open
     
     local left_down = r.ImGui_IsMouseDown(ctx.ctx, 0)
     local left_clicked = r.ImGui_IsMouseClicked(ctx.ctx, 0)
     local right_clicked = r.ImGui_IsMouseClicked(ctx.ctx, 1)
     
-    if mouse_in_area and not any_popup_open then
+    if mouse_in_area and not block_interaction then
         if left_clicked then
             if shift and hover_segment > 0 then
                 -- Start dragging segment curve
@@ -365,20 +366,20 @@ function M.draw(ctx, modulator, width, height, state)
         end
     end
     
-    -- Continue dragging segment curve (Shift+drag) - only when no popup open
-    if state.drag_segment > 0 and left_down and not any_popup_open then
+    -- Continue dragging segment curve (Shift+drag) - only when no popup/combo open
+    if state.drag_segment > 0 and left_down and not block_interaction then
         -- Vertical drag controls curve: drag DOWN = inward (negative), drag UP = outward (positive)
         local delta_y = norm_my - state.drag_start_y
         local new_curve = state.drag_start_curve + delta_y * 2  -- Drag up = outward, drag down = inward
         new_curve = math.max(-1, math.min(1, new_curve))
         M.write_segment_curve_to_fx(modulator, state.drag_segment, new_curve)
         interacted = true
-    elseif not left_down or any_popup_open then
+    elseif not left_down or block_interaction then
         state.drag_segment = -1
     end
     
-    -- Continue dragging node - only when no popup open
-    if state.drag_node > 0 and left_down and not any_popup_open then
+    -- Continue dragging node - only when no popup/combo open
+    if state.drag_node > 0 and left_down and not block_interaction then
         local new_x = math.max(0.001, math.min(0.999, norm_mx))
         local new_y = math.max(0, math.min(1, norm_my))
         
@@ -391,7 +392,7 @@ function M.draw(ctx, modulator, width, height, state)
         
         M.write_point_to_fx(modulator, state.drag_node, new_x, new_y)
         interacted = true
-    elseif not left_down or any_popup_open then
+    elseif not left_down or block_interaction then
         state.drag_node = -1
     end
     
