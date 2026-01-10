@@ -455,16 +455,24 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                             -- Capture current param value BEFORE linking
                                             local initial_value = target_device:get_param_normalized(param_idx) or 0
                                             
+                                            -- Create link with default 50% depth (more reasonable than 100%)
+                                            local default_depth = 0.5
                                             local success = target_device:create_param_link(
                                                 expanded_modulator,
                                                 PARAM.PARAM_OUTPUT,
                                                 param_idx,
-                                                1.0
+                                                default_depth
                                             )
                                             if success then
                                                 -- Store initial value as plink offset
                                                 local plink_prefix = string.format("param.%d.plink.", param_idx)
                                                 target_device:set_named_config_param(plink_prefix .. "offset", tostring(initial_value))
+                                                
+                                                -- Initialize bipolar state to false (unipolar)
+                                                state.link_bipolar = state.link_bipolar or {}
+                                                local link_key = guid .. "_" .. param_idx
+                                                state.link_bipolar[link_key] = false
+                                                
                                                 interacted = true
                                             end
                                         end

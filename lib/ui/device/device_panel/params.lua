@@ -102,6 +102,19 @@ local function draw_param_cell(ctx, fx, param_idx, mod_links)
             local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
             local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
             
+            local offset = link.offset or 0
+            local scale = link.scale or 1
+            
+            -- Draw modulation range hint (blue bar at bottom) - draw FIRST so indicator is on top
+            local min_mod = math.max(0, math.min(offset, offset + scale))
+            local max_mod = math.min(1, math.max(offset, offset + scale))
+            local range_x1 = slider_x + min_mod * slider_w
+            local range_x2 = slider_x + max_mod * slider_w
+            r.ImGui_DrawList_AddRectFilled(draw_list,
+                range_x1, slider_y + slider_h - 3,
+                range_x2, slider_y + slider_h,
+                0x88CCFFAA)  -- Blue range indicator at bottom
+            
             -- Draw moving indicator at current modulated value
             local indicator_x = slider_x + param_val * slider_w
             r.ImGui_DrawList_AddRectFilled(draw_list,
@@ -109,17 +122,12 @@ local function draw_param_cell(ctx, fx, param_idx, mod_links)
                 indicator_x + 2, slider_y + slider_h,
                 0xFFFFFFFF)  -- White indicator
             
-            -- Draw modulation range hint (blue bar at bottom)
-            local offset = link.offset or 0
-            local scale = link.scale or 1
-            local min_mod = math.max(0, math.min(offset, offset + scale))
-            local max_mod = math.min(1, math.max(offset, offset + scale))
-            local range_x1 = slider_x + min_mod * slider_w
-            local range_x2 = slider_x + max_mod * slider_w
-            r.ImGui_DrawList_AddRectFilled(draw_list,
-                range_x1, slider_y + slider_h - 2,
-                range_x2, slider_y + slider_h,
-                0x88CCFFAA)  -- Blue range indicator at bottom
+            -- DEBUG: Show values as tooltip on hover
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                local tooltip = string.format("offset=%.3f scale=%.3f\ncurrent=%.3f base=%.3f\nbipolar=%s", 
+                    offset, scale, param_val, base_val, link.is_bipolar and "yes" or "no")
+                ctx:set_tooltip(tooltip)
+            end
         end
 
         ctx:pop_style_var(1)
