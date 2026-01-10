@@ -144,75 +144,95 @@ local function draw_modulator_grid(ctx, guid, modulators, expanded_slot_idx, slo
     return interacted
 end
 
--- Helper: Draw preset dropdown and UI icon
+-- Helper: Draw preset dropdown, save button, and UI icon
 local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor_key, cfg, state, opts)
     local interacted = false
     local preset_idx, num_presets = r.TrackFX_GetPresetIndex(
         state.track.pointer,
         expanded_modulator.pointer
     )
-    
-    if num_presets and num_presets > 0 then
-        local mod_guid = expanded_modulator:get_guid()
-        if not state.cached_preset_names[mod_guid] then
-            state.cached_preset_names[mod_guid] = {}
-            local original_idx = preset_idx
-            for i = 0, num_presets - 1 do
-                r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
-                local name = expanded_modulator:get_preset() or ("Preset " .. (i + 1))
-                state.cached_preset_names[mod_guid][i] = name
-            end
-            if original_idx >= 0 then
-                r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, original_idx)
-            end
+
+    local mod_guid = expanded_modulator:get_guid()
+    num_presets = num_presets or 0
+
+    -- Cache preset names if presets exist and not already cached
+    if num_presets > 0 and not state.cached_preset_names[mod_guid] then
+        state.cached_preset_names[mod_guid] = {}
+        local original_idx = preset_idx
+        for i = 0, num_presets - 1 do
+            r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
+            local name = expanded_modulator:get_preset() or ("Preset " .. (i + 1))
+            state.cached_preset_names[mod_guid][i] = name
         end
-        
-        local cached_names = state.cached_preset_names[mod_guid]
-        local current_preset_name = cached_names[preset_idx] or "—"
-        
-        local full_width = cfg.mod_sidebar_width - 16
-        ctx:set_next_item_width(full_width - 32)
-        if ctx:begin_combo("##preset_" .. guid, current_preset_name) then
-            for i = 0, num_presets - 1 do
-                local preset_name = cached_names[i] or ("Preset " .. (i + 1))
-                if ctx:selectable(preset_name, i == preset_idx) then
-                    r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
-                    interacted = true
-                end
-            end
-            ctx:end_combo()
-        end
-        if ctx:is_item_hovered() then
-            ctx:set_tooltip("Waveform Preset")
-        end
-        
-        ctx:same_line()
-        
-        -- UI icon
-        if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20, opts.icon_font) then
-            state.curve_editor_popup = state.curve_editor_popup or {}
-            state.curve_editor_popup[editor_key] = state.curve_editor_popup[editor_key] or {}
-            state.curve_editor_popup[editor_key].open_requested = true
-            interacted = true
-        end
-        if ctx:is_item_hovered() then
-            ctx:set_tooltip("Open Curve Editor")
+        if original_idx >= 0 then
+            r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, original_idx)
         end
     end
-    
+
+    local cached_names = state.cached_preset_names[mod_guid] or {}
+    local current_preset_name = (num_presets > 0 and cached_names[preset_idx]) or "—"
+
+    -- Calculate widths: preset dropdown + save button + UI icon
+    local full_width = cfg.mod_sidebar_width - 16
+    local save_btn_width = 32
+    local ui_icon_width = 28
+    local combo_width = full_width - save_btn_width - ui_icon_width - 8  -- 8 for spacing
+
+    ctx:set_next_item_width(combo_width)
+    if ctx:begin_combo("##preset_" .. guid, current_preset_name) then
+        for i = 0, num_presets - 1 do
+            local preset_name = cached_names[i] or ("Preset " .. (i + 1))
+            if ctx:selectable(preset_name, i == preset_idx) then
+                r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
+                interacted = true
+            end
+        end
+        ctx:end_combo()
+    end
+    if ctx:is_item_hovered() then
+        ctx:set_tooltip("Waveform Preset")
+    end
+
+    ctx:same_line()
+
+    -- Save button
+    if ctx:button("💾##save_" .. guid, save_btn_width, 0) then
+        -- Open REAPER's save preset dialog
+        r.TrackFX_SetPreset(state.track.pointer, expanded_modulator.pointer, "+")
+        -- Clear cache to reload presets after save
+        state.cached_preset_names[mod_guid] = nil
+        interacted = true
+    end
+    if ctx:is_item_hovered() then
+        ctx:set_tooltip("Save Preset")
+    end
+
+    ctx:same_line()
+
+    -- UI icon
+    if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20, opts.icon_font) then
+        state.curve_editor_popup = state.curve_editor_popup or {}
+        state.curve_editor_popup[editor_key] = state.curve_editor_popup[editor_key] or {}
+        state.curve_editor_popup[editor_key].open_requested = true
+        interacted = true
+    end
+    if ctx:is_item_hovered() then
+        ctx:set_tooltip("Open Curve Editor")
+    end
+
     return interacted
 end
 
 -- Helper: Draw curve editor section (inline and popup)
-local function draw_curve_editor_section(ctx, expanded_modulator, editor_key, state)
+local function draw_curve_editor_section(ctx, expanded_modulator, editor_key, state, track)
     local interacted = false
-    
+
     state.curve_editor_state = state.curve_editor_state or {}
     state.curve_editor_state[editor_key] = state.curve_editor_state[editor_key] or {}
-    
+
     local editor_width = ctx:get_content_region_avail_width()
     local editor_height = 120
-    
+
     local editor_interacted, new_state = curve_editor.draw(
         ctx, expanded_modulator, editor_width, editor_height,
         state.curve_editor_state[editor_key]
@@ -221,19 +241,19 @@ local function draw_curve_editor_section(ctx, expanded_modulator, editor_key, st
     if editor_interacted then
         interacted = true
     end
-    
+
     -- Popup curve editor window
     state.curve_editor_popup = state.curve_editor_popup or {}
     state.curve_editor_popup[editor_key] = state.curve_editor_popup[editor_key] or {}
     local popup_id = "Curve Editor##" .. editor_key
     local popup_interacted, popup_state = curve_editor.draw_popup(
-        ctx, expanded_modulator, state.curve_editor_popup[editor_key], popup_id
+        ctx, expanded_modulator, state.curve_editor_popup[editor_key], popup_id, track
     )
     state.curve_editor_popup[editor_key] = popup_state
     if popup_interacted then
         interacted = true
     end
-    
+
     return interacted
 end
 
@@ -710,9 +730,9 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     end
                     
                     ctx:spacing()
-                    
+
                     -- Curve Editor section
-                    if draw_curve_editor_section(ctx, expanded_modulator, editor_key, state) then
+                    if draw_curve_editor_section(ctx, expanded_modulator, editor_key, state, state.track) then
                         interacted = true
                     end
                     

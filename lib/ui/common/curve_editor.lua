@@ -238,15 +238,24 @@ function M.draw(ctx, modulator, width, height, state, skip_capture_button, item_
     local global_curve = M.read_global_curve_from_fx(modulator)
     local lfo_phase, lfo_output = M.read_lfo_state_from_fx(modulator)
     
+    -- Read tempo mode (0=Free, 1=Sync)
+    local ok_tempo, tempo_mode = pcall(function() return modulator:get_param(PARAM.PARAM_TEMPO_MODE) end)
+    local is_free_mode = not ok_tempo or tempo_mode < 0.5
+
+    -- Read rate for time calculation in free mode
+    local ok_rate, rate_hz = pcall(function() return modulator:get_param(PARAM.PARAM_RATE_HZ) end)
+    rate_hz = ok_rate and rate_hz or 1
+    local cycle_time_ms = (rate_hz > 0) and (1000 / rate_hz) or 1000
+
     -- Read grid setting from FX (0=Off, 1=4, 2=8, 3=16, 4=32)
     local ok_grid, grid_norm = pcall(function() return modulator:get_param_normalized(PARAM.PARAM_GRID) end)
     local grid_idx = ok_grid and math.floor(grid_norm * 4 + 0.5) or 2  -- Default to 8
     local grid_divisions = {0, 4, 8, 16, 32}
     local grid_div = grid_divisions[grid_idx + 1] or 8
 
-    -- Read snap setting from FX
+    -- Read snap setting from FX (disabled in free mode)
     local ok_snap, snap_val = pcall(function() return modulator:get_param(PARAM.PARAM_SNAP) end)
-    local snap_enabled = ok_snap and snap_val >= 0.5
+    local snap_enabled = ok_snap and snap_val >= 0.5 and not is_free_mode
 
     -- Snap helper function: snaps value to nearest grid line
     local function snap_to_grid(val, divisions)
@@ -254,25 +263,79 @@ function M.draw(ctx, modulator, width, height, state, skip_capture_button, item_
         local step = 1.0 / divisions
         return math.floor(val / step + 0.5) * step
     end
-    
+
+    -- Helper: format time for grid labels
+    local function format_time(ms)
+        if ms >= 1000 then
+            return string.format("%.1fs", ms / 1000)
+        else
+            return string.format("%.0fms", ms)
+        end
+    end
+
+    -- Helper: format beat fraction for grid labels
+    local function format_beat_fraction(position, divisions)
+        if position == 0 then return "0" end
+        if position == 1 then return "1" end
+        -- Find simplest fraction
+        local num = position * divisions
+        local den = divisions
+        -- Simplify fraction
+        local function gcd(a, b) return b == 0 and a or gcd(b, a % b) end
+        local g = gcd(math.floor(num + 0.5), den)
+        num = math.floor(num + 0.5) / g
+        den = den / g
+        if den == 1 then return tostring(math.floor(num)) end
+        return string.format("%d/%d", num, den)
+    end
+
     -- Vertical grid lines (if grid enabled)
     if grid_div > 0 then
         for i = 0, grid_div do
             local gx = area_x + (i / grid_div) * area_w
             local color = (i == 0 or i == grid_div) and COLORS.grid_major or COLORS.grid
             r.ImGui_DrawList_AddLine(draw_list, gx, area_y, gx, area_y + area_h, color)
+
+            -- Draw grid labels inside the editor area at bottom (only in popup/large editors)
+            local is_large_editor = height > 150
+            local show_label = is_large_editor and ((grid_div <= 8) or (i % (grid_div / 4) == 0))
+            if show_label then
+                local label
+                if is_free_mode then
+                    label = format_time((i / grid_div) * cycle_time_ms)
+                else
+                    label = format_beat_fraction(i / grid_div, grid_div)
+                end
+                -- Position text inside the area, offset from grid line
+                local text_x = gx + 2
+                -- For last label, align right of grid line
+                if i == grid_div then
+                    text_x = gx - 20
+                end
+                local text_y = area_y + area_h - 22  -- Inside area, higher up from bottom
+                r.ImGui_DrawList_AddText(draw_list, text_x, text_y, COLORS.text, label)
+            end
         end
     else
         -- Just draw border lines when grid is off
         r.ImGui_DrawList_AddLine(draw_list, area_x, area_y, area_x, area_y + area_h, COLORS.grid_major)
         r.ImGui_DrawList_AddLine(draw_list, area_x + area_w, area_y, area_x + area_w, area_y + area_h, COLORS.grid_major)
     end
-    
+
     -- Horizontal grid lines (always 4 divisions for amplitude)
     for i = 0, 4 do
         local gy = area_y + (i / 4) * area_h
         local color = (i == 0 or i == 4) and COLORS.grid_major or COLORS.grid
         r.ImGui_DrawList_AddLine(draw_list, area_x, gy, area_x + area_w, gy, color)
+    end
+
+    -- Draw snap indicator (lock icon) at top right
+    if not is_free_mode then
+        local snap_icon = snap_enabled and "🔒" or "🔓"
+        local icon_x = area_x + area_w - 16
+        local icon_y = area_y + 2
+        local icon_color = snap_enabled and 0x88FF88FF or 0x888888FF
+        r.ImGui_DrawList_AddText(draw_list, icon_x, icon_y, icon_color, snap_icon)
     end
     
     -- Draw curve
@@ -523,44 +586,106 @@ end
 --------------------------------------------------------------------------------
 -- Draw curve editor in a popup window
 --------------------------------------------------------------------------------
-function M.draw_popup(ctx, modulator, state, popup_id)
+function M.draw_popup(ctx, modulator, state, popup_id, track)
     state = state or {}
     state.is_open = state.is_open or false
-    
+    state.cached_preset_names = state.cached_preset_names or {}
+
     -- Check if popup should be opened
     if state.open_requested then
         r.ImGui_OpenPopup(ctx.ctx, popup_id)
         state.open_requested = false
         state.is_open = true
     end
-    
+
     local interacted = false
-    
+
     -- Larger size for popup
     local popup_width = 600
     local popup_height = 400
-    
+
     -- Set window size before opening
     r.ImGui_SetNextWindowSize(ctx.ctx, popup_width, popup_height, imgui.Cond.FirstUseEver())
-    
+
     -- Draw popup as a regular window (resizable, no collapse)
     local window_flags = imgui.WindowFlags.NoCollapse()
     if state.is_open then
         local visible, open = r.ImGui_Begin(ctx.ctx, popup_id, true, window_flags)
-        
+
         -- Check if X button was clicked
         if not open then
             state.is_open = false
         end
-        
+
         if visible then
             -- Get actual window size (may have been resized)
             local win_w, win_h = r.ImGui_GetWindowSize(ctx.ctx)
             local avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
-            
-            -- Draw editor first (takes most of the space)
+
+            -- Read tempo mode for snap disable
+            local ok_tempo, tempo_mode = pcall(function() return modulator:get_param(PARAM.PARAM_TEMPO_MODE) end)
+            local is_free_mode = not ok_tempo or tempo_mode < 0.5
+
+            -- Top bar: Preset dropdown + Save button
+            if track then
+                local preset_idx, num_presets = r.TrackFX_GetPresetIndex(track.pointer, modulator.pointer)
+                num_presets = num_presets or 0
+
+                -- Cache preset names
+                local mod_guid = modulator:get_guid()
+                if not state.cached_preset_names[mod_guid] and num_presets > 0 then
+                    state.cached_preset_names[mod_guid] = {}
+                    local original_idx = preset_idx
+                    for i = 0, num_presets - 1 do
+                        r.TrackFX_SetPresetByIndex(track.pointer, modulator.pointer, i)
+                        local ok, name = pcall(function() return modulator:get_preset() end)
+                        state.cached_preset_names[mod_guid][i] = (ok and name) or ("Preset " .. (i + 1))
+                    end
+                    if original_idx >= 0 then
+                        r.TrackFX_SetPresetByIndex(track.pointer, modulator.pointer, original_idx)
+                    end
+                end
+
+                local cached_names = state.cached_preset_names[mod_guid] or {}
+                local current_preset_name = cached_names[preset_idx] or (num_presets > 0 and "—" or "No Presets")
+
+                -- Preset dropdown
+                r.ImGui_SetNextItemWidth(ctx.ctx, 200)
+                if r.ImGui_BeginCombo(ctx.ctx, "##preset", current_preset_name) then
+                    for i = 0, num_presets - 1 do
+                        local preset_name = cached_names[i] or ("Preset " .. (i + 1))
+                        if r.ImGui_Selectable(ctx.ctx, preset_name, i == preset_idx) then
+                            r.TrackFX_SetPresetByIndex(track.pointer, modulator.pointer, i)
+                            interacted = true
+                        end
+                    end
+                    r.ImGui_EndCombo(ctx.ctx)
+                end
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    r.ImGui_SetTooltip(ctx.ctx, "Waveform Preset")
+                end
+
+                r.ImGui_SameLine(ctx.ctx)
+
+                -- Save preset button
+                if r.ImGui_Button(ctx.ctx, "Save##preset_save", 50, 0) then
+                    -- Open REAPER's save preset dialog
+                    r.TrackFX_SetPreset(track.pointer, modulator.pointer, "+")
+                    -- Clear cache to reload presets
+                    state.cached_preset_names[mod_guid] = nil
+                    interacted = true
+                end
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    r.ImGui_SetTooltip(ctx.ctx, "Save Preset")
+                end
+
+                r.ImGui_Spacing(ctx.ctx)
+            end
+
+            -- Draw editor (takes most of the space)
             local control_bar_height = 35
-            local editor_h = win_h - 55 - control_bar_height  -- Title bar + controls
+            local top_bar_height = track and 30 or 0
+            local editor_h = win_h - 55 - control_bar_height - top_bar_height  -- Title bar + controls
 
             -- Create an invisible button to capture the editor area (prevents window dragging)
             local cursor_pos_x, cursor_pos_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
@@ -601,14 +726,27 @@ function M.draw_popup(ctx, modulator, state, popup_id)
             end
             
             r.ImGui_SameLine(ctx.ctx)
-            
-            -- Snap checkbox
+
+            -- Snap checkbox (disabled in free mode)
             local ok_snap, snap_val = pcall(function() return modulator:get_param(PARAM.PARAM_SNAP) end)
             local snap_on = ok_snap and snap_val >= 0.5
-            local snap_changed, snap_new = r.ImGui_Checkbox(ctx.ctx, "Snap", snap_on)
-            if snap_changed then
+            if is_free_mode then
+                r.ImGui_BeginDisabled(ctx.ctx)
+            end
+            local snap_changed, snap_new = r.ImGui_Checkbox(ctx.ctx, "Snap", snap_on and not is_free_mode)
+            if snap_changed and not is_free_mode then
                 modulator:set_param(PARAM.PARAM_SNAP, snap_new and 1 or 0)
                 interacted = true
+            end
+            if is_free_mode then
+                r.ImGui_EndDisabled(ctx.ctx)
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx, r.ImGui_HoveredFlags_AllowWhenDisabled()) then
+                if is_free_mode then
+                    r.ImGui_SetTooltip(ctx.ctx, "Snap disabled in Free mode")
+                else
+                    r.ImGui_SetTooltip(ctx.ctx, "Snap to grid")
+                end
             end
             
             r.ImGui_SameLine(ctx.ctx)
