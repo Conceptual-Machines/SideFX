@@ -89,11 +89,18 @@ local function draw_param_cell(ctx, fx, param_idx, mod_links)
             local offset = link.offset or 0
             local scale = link.scale or 0.5
             
-            -- Formula: target = baseline + offset + (lfo * scale)
-            -- Unipolar: offset=0, so range is baseline to baseline+scale
-            -- Bipolar: offset=-|depth|, scale=2*|depth|, so range is baseline-|depth| to baseline+|depth|
-            local range_start = baseline + offset
-            local range_end = baseline + offset + scale
+            -- Calculate visualization range based on mode
+            local range_start, range_end
+            if link.is_bipolar then
+                -- Bipolar: centered around baseline, ±|scale|/2
+                local half_range = math.abs(scale) / 2
+                range_start = baseline - half_range
+                range_end = baseline + half_range
+            else
+                -- Unipolar: from baseline, direction based on scale sign
+                range_start = baseline
+                range_end = baseline + scale
+            end
             local min_mod = math.max(0, math.min(range_start, range_end))
             local max_mod = math.min(1, math.max(range_start, range_end))
             local range_x1 = slider_x + min_mod * slider_w
