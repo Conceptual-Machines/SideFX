@@ -7,7 +7,6 @@ local r = reaper
 local imgui = require('imgui')
 local state_module = require('lib.core.state')
 local PARAM = require('lib.modulator.modulator_constants')
-local param_indices = require('lib.modulator.param_indices')
 local drawing = require('lib.ui.common.drawing')
 local modulator_module = require('lib.modulator.modulator')
 local curve_editor = require('lib.ui.common.curve_editor')
@@ -362,85 +361,6 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
                     ctx:spacing()
 
-                    -- Offset and Bipolar controls on same line
-                    local track_ptr = state.track.pointer
-                    local mod_ptr = expanded_modulator.pointer
-                    
-                    -- Get parameter indices (cached, handles REAPER's implicit params)
-                    local P = param_indices.get_modulator_params(state.track, expanded_modulator)
-                    
-                    local offset_val = P.offset and r.TrackFX_GetParamNormalized(track_ptr, mod_ptr, P.offset)
-                    local bipolar_val = P.bipolar and r.TrackFX_GetParamNormalized(track_ptr, mod_ptr, P.bipolar)
-                    local bipolar_val = r.TrackFX_GetParamNormalized(track_ptr, mod_ptr, PARAM.PARAM_BIPOLAR)
-                    
-                    if offset_val and P.offset then
-                        ctx:set_next_item_width(124)  -- Leave room for Uni/Bi buttons
-                        local offset_pct = offset_val * 100
-                        local changed, new_offset_pct = ctx:slider_double("##offset_" .. guid, offset_pct, 0, 100, "Off %.0f%%")
-                        if changed then
-                            r.TrackFX_SetParamNormalized(track_ptr, mod_ptr, P.offset, new_offset_pct / 100)
-                            interacted = true
-                        end
-                        if ctx:is_item_hovered() then
-                            ctx:set_tooltip("Offset / Center Point")
-                        end
-                    end
-                    
-                    ctx:same_line()
-                    
-                    if bipolar_val and P.bipolar then
-                        local is_unipolar = bipolar_val < 0.5
-                        
-                        -- Uni button
-                        if is_unipolar then
-                            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-                        end
-                        if ctx:button("Uni##bipolar_" .. guid, 36, 0) then
-                            r.TrackFX_SetParamNormalized(track_ptr, mod_ptr, P.bipolar, 0)
-                            interacted = true
-                        end
-                        if is_unipolar then
-                            ctx:pop_style_color()
-                        end
-                        if ctx:is_item_hovered() then
-                            ctx:set_tooltip("Unipolar: LFO adds to offset (0 to depth)")
-                        end
-                        
-                        ctx:same_line(0, 0)
-                        
-                        -- Bi button
-                        if not is_unipolar then
-                            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-                        end
-                        if ctx:button("Bi##bipolar_" .. guid, 36, 0) then
-                            r.TrackFX_SetParamNormalized(track_ptr, mod_ptr, P.bipolar, 1)
-                            interacted = true
-                        end
-                        if not is_unipolar then
-                            ctx:pop_style_color()
-                        end
-                        if ctx:is_item_hovered() then
-                            ctx:set_tooltip("Bipolar: LFO oscillates around offset (±depth)")
-                        end
-                    end
-                    
-                    -- Depth slider (always show)
-                    local depth_val = P.depth and r.TrackFX_GetParamNormalized(track_ptr, mod_ptr, P.depth)
-                    if depth_val and P.depth then
-                        ctx:set_next_item_width(200)  -- Full width
-                        local depth_pct = depth_val * 100
-                        local changed, new_depth_pct = ctx:slider_double("##depth_" .. guid, depth_pct, 0, 100, "Depth %.0f%%")
-                        if changed then
-                            r.TrackFX_SetParamNormalized(track_ptr, mod_ptr, P.depth, new_depth_pct / 100)
-                            interacted = true
-                        end
-                        if ctx:is_item_hovered() then
-                            ctx:set_tooltip("Modulation Depth")
-                        end
-                    end
-
-                    ctx:spacing()
-
                     -- Trigger Mode dropdown
                     local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_TRIGGER_MODE) end)
                     local trig_idx = nil  -- Declare outside so it's accessible in Advanced section
@@ -501,7 +421,8 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                         table.insert(existing_links, {
                                             param_idx = param_idx,
                                             param_name = param_name,
-                                            scale = link_info.scale or 1.0
+                                            scale = link_info.scale or 1.0,
+                                            offset = link_info.offset or 0  -- Stored initial value
                                         })
                                     end
                                 end
@@ -530,6 +451,9 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                             end
                                         end
                                         if ctx:selectable(param_name .. (is_linked and " ✓" or ""), false) then
+                                            -- Capture current param value BEFORE linking
+                                            local initial_value = target_device:get_param_normalized(param_idx) or 0
+                                            
                                             local success = target_device:create_param_link(
                                                 expanded_modulator,
                                                 PARAM.PARAM_OUTPUT,
@@ -537,6 +461,9 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                                 1.0
                                             )
                                             if success then
+                                                -- Store initial value as plink offset
+                                                local plink_prefix = string.format("param.%d.plink.", param_idx)
+                                                target_device:set_named_config_param(plink_prefix .. "offset", tostring(initial_value))
                                                 interacted = true
                                             end
                                         end
@@ -639,10 +566,6 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     -- Show existing links with ghost visualization
                     ctx:spacing()
                     if #existing_links > 0 then
-                        -- Get current modulator output for ghost visualization (use P indices)
-                        local off_val = P.offset and r.TrackFX_GetParamNormalized(track_ptr, mod_ptr, P.offset)
-                        local bi_val = P.bipolar and r.TrackFX_GetParamNormalized(track_ptr, mod_ptr, P.bipolar)
-                        
                         for i, link in ipairs(existing_links) do
                             -- Parameter name (shortened)
                             local short_name = link.param_name:sub(1, 12)
@@ -661,22 +584,18 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             local ok_target, target_val = pcall(function() return target_device:get_param_normalized(link.param_idx) end)
                             if not ok_target or not target_val then target_val = 0 end
                             
-                            -- Calculate modulated range
-                            local offset = off_val or 0
-                            local is_bipolar = bi_val and bi_val >= 0.5
+                            -- Use stored initial value as offset
+                            local offset = link.offset or 0
                             local depth = link.scale  -- The scale is our depth/amount
                             
+                            -- Calculate modulated range (unipolar from offset)
                             local min_val, max_val
-                            if is_bipolar then
-                                min_val = math.max(0, offset - math.abs(depth))
-                                max_val = math.min(1, offset + math.abs(depth))
-                            else
+                            if depth >= 0 then
                                 min_val = offset
                                 max_val = math.min(1, offset + depth)
-                                if depth < 0 then
-                                    min_val = math.max(0, offset + depth)
-                                    max_val = offset
-                                end
+                            else
+                                min_val = math.max(0, offset + depth)
+                                max_val = offset
                             end
                             
                             -- Draw background
@@ -740,12 +659,17 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             -- Remove button
                             ctx:same_line()
                             if ctx:button("X##rm_" .. i .. "_" .. guid, 18, 0) then
+                                -- Store the initial offset before removing
+                                local restore_value = link.offset or 0
+                                
                                 if fx:remove_param_link(link.param_idx) then
+                                    -- Restore parameter to its initial value
+                                    fx:set_param_normalized(link.param_idx, restore_value)
                                     interacted = true
                                 end
                             end
                             if ctx:is_item_hovered() then
-                                ctx:set_tooltip("Remove link")
+                                ctx:set_tooltip("Remove link and restore to initial value")
                             end
                         end
                     end
