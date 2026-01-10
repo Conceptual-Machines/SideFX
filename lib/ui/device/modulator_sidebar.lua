@@ -195,13 +195,23 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
 
     ctx:same_line()
 
-    -- Save button
-    if ctx:button("💾##save_" .. guid, save_btn_width, 0) then
+    -- Save button with icon
+    local constants = require('lib.core.constants')
+    local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
+    local save_icon = constants.icon_text(emojimgui, constants.Icons.floppy_disk)
+
+    if opts.icon_font then
+        ctx:push_font(opts.icon_font, 14)
+    end
+    if ctx:button(save_icon .. "##save_" .. guid, save_btn_width, 0) then
         -- Open REAPER's save preset dialog
         r.TrackFX_SetPreset(state.track.pointer, expanded_modulator.pointer, "+")
         -- Clear cache to reload presets after save
         state.cached_preset_names[mod_guid] = nil
         interacted = true
+    end
+    if opts.icon_font then
+        ctx:pop_font()
     end
     if ctx:is_item_hovered() then
         ctx:set_tooltip("Save Preset")
