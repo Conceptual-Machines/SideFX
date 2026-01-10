@@ -144,6 +144,523 @@ local function draw_modulator_grid(ctx, guid, modulators, expanded_slot_idx, slo
     return interacted
 end
 
+-- Helper: Draw preset dropdown and UI icon
+local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor_key, cfg, state, opts)
+    local interacted = false
+    local preset_idx, num_presets = r.TrackFX_GetPresetIndex(
+        state.track.pointer,
+        expanded_modulator.pointer
+    )
+    
+    if num_presets and num_presets > 0 then
+        local mod_guid = expanded_modulator:get_guid()
+        if not state.cached_preset_names[mod_guid] then
+            state.cached_preset_names[mod_guid] = {}
+            local original_idx = preset_idx
+            for i = 0, num_presets - 1 do
+                r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
+                local name = expanded_modulator:get_preset() or ("Preset " .. (i + 1))
+                state.cached_preset_names[mod_guid][i] = name
+            end
+            if original_idx >= 0 then
+                r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, original_idx)
+            end
+        end
+        
+        local cached_names = state.cached_preset_names[mod_guid]
+        local current_preset_name = cached_names[preset_idx] or "—"
+        
+        local full_width = cfg.mod_sidebar_width - 16
+        ctx:set_next_item_width(full_width - 32)
+        if ctx:begin_combo("##preset_" .. guid, current_preset_name) then
+            for i = 0, num_presets - 1 do
+                local preset_name = cached_names[i] or ("Preset " .. (i + 1))
+                if ctx:selectable(preset_name, i == preset_idx) then
+                    r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
+                    interacted = true
+                end
+            end
+            ctx:end_combo()
+        end
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip("Waveform Preset")
+        end
+        
+        ctx:same_line()
+        
+        -- UI icon
+        if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20, opts.icon_font) then
+            state.curve_editor_popup = state.curve_editor_popup or {}
+            state.curve_editor_popup[editor_key] = state.curve_editor_popup[editor_key] or {}
+            state.curve_editor_popup[editor_key].open_requested = true
+            interacted = true
+        end
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip("Open Curve Editor")
+        end
+    end
+    
+    return interacted
+end
+
+-- Helper: Draw curve editor section (inline and popup)
+local function draw_curve_editor_section(ctx, expanded_modulator, editor_key, state)
+    local interacted = false
+    
+    state.curve_editor_state = state.curve_editor_state or {}
+    state.curve_editor_state[editor_key] = state.curve_editor_state[editor_key] or {}
+    
+    local editor_width = ctx:get_content_region_avail_width()
+    local editor_height = 120
+    
+    local editor_interacted, new_state = curve_editor.draw(
+        ctx, expanded_modulator, editor_width, editor_height,
+        state.curve_editor_state[editor_key]
+    )
+    state.curve_editor_state[editor_key] = new_state
+    if editor_interacted then
+        interacted = true
+    end
+    
+    -- Popup curve editor window
+    state.curve_editor_popup = state.curve_editor_popup or {}
+    state.curve_editor_popup[editor_key] = state.curve_editor_popup[editor_key] or {}
+    local popup_id = "Curve Editor##" .. editor_key
+    local popup_interacted, popup_state = curve_editor.draw_popup(
+        ctx, expanded_modulator, state.curve_editor_popup[editor_key], popup_id
+    )
+    state.curve_editor_popup[editor_key] = popup_state
+    if popup_interacted then
+        interacted = true
+    end
+    
+    return interacted
+end
+
+-- Helper: Draw Free/Sync, Rate, and Phase controls
+local function draw_rate_controls(ctx, guid, expanded_modulator)
+    local interacted = false
+    local tempo_mode = expanded_modulator:get_param(PARAM.PARAM_TEMPO_MODE)
+    
+    if tempo_mode then
+        local is_free = tempo_mode < 0.5
+        
+        -- Free button
+        if is_free then
+            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+        end
+        if ctx:button("Free##tempo_" .. guid, 52, 0) then
+            expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 0)
+            interacted = true
+        end
+        if is_free then
+            ctx:pop_style_color()
+        end
+        
+        ctx:same_line(0, 0)
+        
+        -- Sync button
+        if not is_free then
+            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+        end
+        if ctx:button("Sync##tempo_" .. guid, 52, 0) then
+            expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 1)
+            interacted = true
+        end
+        if not is_free then
+            ctx:pop_style_color()
+        end
+        
+        ctx:same_line()
+        
+        -- Rate slider/dropdown
+        if tempo_mode < 0.5 then
+            -- Free mode - show Hz slider
+            local ok_rate, rate_norm = pcall(function() return expanded_modulator:get_param_normalized(1) end)
+            if ok_rate then
+                local rate_hz = 0.01 + rate_norm * 9.99
+                ctx:set_next_item_width(80)
+                local changed, new_rate = ctx:slider_double("##rate_" .. guid, rate_hz, 0.01, 10, "%.1f Hz")
+                if changed then
+                    local norm_val = (new_rate - 0.01) / 9.99
+                    expanded_modulator:set_param_normalized(1, norm_val)
+                    interacted = true
+                end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip("Rate (Hz)")
+                end
+            end
+        else
+            -- Sync mode - show sync rate dropdown
+            local ok_sync, sync_rate_idx = pcall(function() return expanded_modulator:get_param_normalized(2) end)
+            if ok_sync then
+                local sync_rates = {"8 bars", "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/4T", "1/4.", "1/8", "1/8T", "1/8.", "1/16", "1/16T", "1/16.", "1/32", "1/32T", "1/32.", "1/64"}
+                local current_idx = math.floor(sync_rate_idx * 17 + 0.5)
+                ctx:set_next_item_width(80)
+                if ctx:begin_combo("##sync_rate_" .. guid, sync_rates[current_idx + 1] or "1/4") then
+                    for i, rate_name in ipairs(sync_rates) do
+                        if ctx:selectable(rate_name, i - 1 == current_idx) then
+                            expanded_modulator:set_param_normalized(2, (i - 1) / 17)
+                            interacted = true
+                        end
+                    end
+                    ctx:end_combo()
+                end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip("Sync Rate")
+                end
+            end
+        end
+        
+        ctx:same_line()
+        
+        -- Phase slider
+        local ok_phase, phase = pcall(function() return expanded_modulator:get_param_normalized(4) end)
+        if ok_phase then
+            ctx:set_next_item_width(70)
+            local phase_deg = phase * 360
+            local changed, new_phase_deg = ctx:slider_double("##phase_" .. guid, phase_deg, 0, 360, "%.0f°")
+            if changed then
+                expanded_modulator:set_param_normalized(4, new_phase_deg / 360)
+                interacted = true
+            end
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("Phase")
+            end
+        end
+    end
+    
+    return interacted
+end
+
+-- Helper: Draw trigger mode dropdown and advanced button
+local function draw_trigger_and_advanced_button(ctx, guid, expanded_modulator)
+    local interacted = false
+    local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_TRIGGER_MODE) end)
+    local trig_idx = nil
+    
+    if ok_trig then
+        local trigger_modes = {"Free", "Transport", "MIDI", "Audio"}
+        trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
+        ctx:set_next_item_width(80)
+        if ctx:begin_combo("##trigger_mode_" .. guid, trigger_modes[trig_idx + 1] or "Free") then
+            for i, mode_name in ipairs(trigger_modes) do
+                if ctx:selectable(mode_name, i - 1 == trig_idx) then
+                    expanded_modulator:set_param_normalized(PARAM.PARAM_TRIGGER_MODE, (i - 1) / 3)
+                    interacted = true
+                end
+            end
+            ctx:end_combo()
+        end
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip("Trigger Mode")
+        end
+    end
+    
+    ctx:same_line()
+    
+    -- Advanced button
+    local advanced_popup_id = "Advanced##adv_popup_" .. guid
+    if ctx:button("⚙##adv_btn_" .. guid, 24, 0) then
+        r.ImGui_OpenPopup(ctx.ctx, advanced_popup_id)
+    end
+    if ctx:is_item_hovered() then
+        ctx:set_tooltip("Advanced Settings")
+    end
+    
+    return interacted, ok_trig, trig_idx, advanced_popup_id
+end
+
+-- Helper: Get existing parameter links for a modulator
+local function get_existing_param_links(fx, expanded_modulator, PARAM)
+    local existing_links = {}
+    local expected_mod_idx = nil
+    local my_parent = fx:get_parent_container()
+    
+    if my_parent then
+        local children = my_parent:get_container_children()
+        local mod_guid = expanded_modulator:get_guid()
+        for i, child in ipairs(children) do
+            if child:get_guid() == mod_guid then
+                expected_mod_idx = i - 1
+                break
+            end
+        end
+    end
+    
+    if expected_mod_idx ~= nil then
+        local ok_params, param_count = pcall(function() return fx:get_num_params() end)
+        if ok_params and param_count then
+            for param_idx = 0, param_count - 1 do
+                local link_info = fx:get_param_link_info(param_idx)
+                if link_info and link_info.effect == expected_mod_idx and link_info.param == PARAM.PARAM_OUTPUT then
+                    local ok_pname, param_name = pcall(function() return fx:get_param_name(param_idx) end)
+                    if ok_pname and param_name then
+                        table.insert(existing_links, {
+                            param_idx = param_idx,
+                            param_name = param_name,
+                            scale = link_info.scale or 1.0,
+                            offset = link_info.offset or 0
+                        })
+                    end
+                end
+            end
+        end
+    end
+    
+    return existing_links
+end
+
+-- Helper: Draw link parameter dropdown
+local function draw_link_param_dropdown(ctx, guid, fx, expanded_modulator, existing_links, state, PARAM)
+    local interacted = false
+    
+    ctx:same_line()
+    
+    local target_device = fx
+    if target_device then
+        local ok_params, param_count = pcall(function() return target_device:get_num_params() end)
+        if ok_params and param_count and param_count > 0 then
+            local current_param_name = "Link..."
+            ctx:set_next_item_width(158)
+            if ctx:begin_combo("##link_param_" .. guid, current_param_name) then
+                for param_idx = 0, param_count - 1 do
+                    local ok_pname, param_name = pcall(function() return target_device:get_param_name(param_idx) end)
+                    if ok_pname and param_name then
+                        local is_linked = false
+                        for _, link in ipairs(existing_links) do
+                            if link.param_idx == param_idx then
+                                is_linked = true
+                                break
+                            end
+                        end
+                        if ctx:selectable(param_name .. (is_linked and " ✓" or ""), false) then
+                            local initial_value = target_device:get_param_normalized(param_idx) or 0
+                            local default_depth = 0.5
+                            local success = target_device:create_param_link(
+                                expanded_modulator,
+                                PARAM.PARAM_OUTPUT,
+                                param_idx,
+                                default_depth
+                            )
+                            if success then
+                                local plink_prefix = string.format("param.%d.plink.", param_idx)
+                                local mod_prefix = string.format("param.%d.mod.", param_idx)
+                                target_device:set_named_config_param(mod_prefix .. "baseline", tostring(initial_value))
+                                target_device:set_named_config_param(plink_prefix .. "offset", "0")
+                                
+                                local link_key = guid .. "_" .. param_idx
+                                state.link_baselines = state.link_baselines or {}
+                                state.link_baselines[link_key] = initial_value
+                                state.link_bipolar = state.link_bipolar or {}
+                                state.link_bipolar[link_key] = false
+                                
+                                interacted = true
+                            end
+                        end
+                    end
+                end
+                ctx:end_combo()
+            end
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("Link to parameter")
+            end
+        end
+    end
+    
+    return interacted
+end
+
+-- Helper: Draw advanced settings popup
+local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, advanced_popup_id, ok_trig, PARAM)
+    local interacted = false
+    
+    r.ImGui_SetNextWindowSize(ctx.ctx, 250, 0, imgui.Cond.FirstUseEver())
+    if r.ImGui_BeginPopup(ctx.ctx, advanced_popup_id) then
+        ctx:text("Advanced Settings")
+        ctx:separator()
+        
+        if ok_trig and trig_idx == 2 then
+            -- MIDI trigger mode
+            ctx:text("MIDI Source")
+            local midi_src = expanded_modulator:get_param(PARAM.PARAM_MIDI_SOURCE)
+            if midi_src then
+                if ctx:radio_button("This Track##midi_src_" .. guid, midi_src < 0.5) then
+                    expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 0)
+                    interacted = true
+                end
+                ctx:same_line()
+                if ctx:radio_button("MIDI Bus##midi_src_" .. guid, midi_src >= 0.5) then
+                    expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 1)
+                    interacted = true
+                end
+            end
+
+            local ok_note, midi_note = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_MIDI_NOTE) end)
+            if ok_note then
+                ctx:set_next_item_width(150)
+                local note_val = math.floor(midi_note * 127 + 0.5)
+                local changed, new_note_val = ctx:slider_int("MIDI Note##note_" .. guid, note_val, 0, 127, note_val == 0 and "Any" or tostring(note_val))
+                if changed then
+                    expanded_modulator:set_param_normalized(PARAM.PARAM_MIDI_NOTE, new_note_val / 127)
+                    interacted = true
+                end
+            end
+        elseif ok_trig and trig_idx == 3 then
+            -- Audio trigger mode
+            local ok_thresh, audio_thresh = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD) end)
+            if ok_thresh then
+                ctx:set_next_item_width(150)
+                local changed, new_thresh = ctx:slider_double("Threshold##thresh_" .. guid, audio_thresh, 0, 1, "%.2f")
+                if changed then
+                    expanded_modulator:set_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD, new_thresh)
+                    interacted = true
+                end
+            end
+        end
+
+        -- Attack/Release (show when trigger mode is not Free)
+        if ok_trig and trig_idx and trig_idx > 0 then
+            ctx:spacing()
+            ctx:text("Envelope")
+            
+            local ok_atk, attack_ms = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_ATTACK) end)
+            if ok_atk then
+                local atk_val = attack_ms * 1999 + 1
+                ctx:set_next_item_width(150)
+                local changed, new_atk_val = ctx:slider_double("Attack##atk_" .. guid, atk_val, 1, 2000, "%.0f ms")
+                if changed then
+                    expanded_modulator:set_param_normalized(PARAM.PARAM_ATTACK, (new_atk_val - 1) / 1999)
+                    interacted = true
+                end
+            end
+
+            local ok_rel, release_ms = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_RELEASE) end)
+            if ok_rel then
+                local rel_val = release_ms * 4999 + 1
+                ctx:set_next_item_width(150)
+                local changed, new_rel_val = ctx:slider_double("Release##rel_" .. guid, rel_val, 1, 5000, "%.0f ms")
+                if changed then
+                    expanded_modulator:set_param_normalized(PARAM.PARAM_RELEASE, (new_rel_val - 1) / 4999)
+                    interacted = true
+                end
+            end
+        end
+        
+        if ok_trig and trig_idx == 0 then
+            ctx:text_colored(0x888888FF, "Select a trigger mode")
+            ctx:text_colored(0x888888FF, "to see more options")
+        end
+        
+        r.ImGui_EndPopup(ctx.ctx)
+    end
+    
+    return interacted
+end
+
+-- Helper: Draw existing parameter links
+local function draw_existing_links(ctx, guid, fx, existing_links, state)
+    local interacted = false
+    
+    if #existing_links > 0 then
+        state.link_bipolar = state.link_bipolar or {}
+        
+        for i, link in ipairs(existing_links) do
+            local link_key = guid .. "_" .. link.param_idx
+            local is_bipolar = state.link_bipolar[link_key] or false
+            local plink_prefix = string.format("param.%d.plink.", link.param_idx)
+            local actual_depth = link.scale
+            
+            -- Parameter name (highlighted)
+            ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)
+            local short_name = link.param_name:sub(1, 10)
+            if #link.param_name > 10 then short_name = short_name .. ".." end
+            ctx:text(short_name)
+            ctx:pop_style_color()
+            
+            ctx:same_line()
+            
+            -- Uni/Bi buttons
+            if not is_bipolar then
+                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+            end
+            if ctx:button("U##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
+                if is_bipolar then
+                    state.link_bipolar[link_key] = false
+                    fx:set_named_config_param(plink_prefix .. "offset", "0")
+                    interacted = true
+                end
+            end
+            if not is_bipolar then
+                ctx:pop_style_color()
+            end
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("Unipolar: baseline + scale")
+            end
+            
+            ctx:same_line(0, 0)
+            
+            if is_bipolar then
+                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+            end
+            if ctx:button("B##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
+                if not is_bipolar then
+                    state.link_bipolar[link_key] = true
+                    fx:set_named_config_param(plink_prefix .. "offset", "-0.5")
+                    interacted = true
+                end
+            end
+            if is_bipolar then
+                ctx:pop_style_color()
+            end
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("Bipolar: baseline ± depth")
+            end
+            
+            ctx:same_line()
+            
+            -- Depth slider
+            ctx:set_next_item_width(80)
+            local depth_pct = actual_depth * 100
+            local min_depth = -100
+            local max_depth = 100
+            local changed, new_depth_pct = ctx:slider_double("##depth_" .. link.param_idx .. "_" .. guid, depth_pct, min_depth, max_depth, "%.0f%%")
+            if changed then
+                local new_depth = new_depth_pct / 100
+                if is_bipolar then
+                    fx:set_named_config_param(plink_prefix .. "offset", "-0.5")
+                    fx:set_named_config_param(plink_prefix .. "scale", tostring(new_depth))
+                else
+                    fx:set_named_config_param(plink_prefix .. "scale", tostring(new_depth))
+                end
+                interacted = true
+            end
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("Modulation depth")
+            end
+            
+            ctx:same_line()
+            
+            -- Remove button
+            if ctx:button("X##rm_" .. i .. "_" .. guid, 18, 0) then
+                local link_key = guid .. "_" .. link.param_idx
+                local restore_value = (state.link_baselines and state.link_baselines[link_key]) or link.baseline or 0
+                if fx:remove_param_link(link.param_idx) then
+                    fx:set_param_normalized(link.param_idx, restore_value)
+                    if state.link_baselines then state.link_baselines[link_key] = nil end
+                    if state.link_bipolar then state.link_bipolar[link_key] = nil end
+                    interacted = true
+                end
+            end
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("Remove link")
+            end
+        end
+    end
+    
+    return interacted
+end
+
 -- Main draw function for modulator sidebar
 function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
     local state = state_module.state
@@ -180,524 +697,57 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
         if expanded_slot_idx ~= nil then
             local expanded_modulator = modulators[expanded_slot_idx + 1]
             if expanded_modulator then
-                -- Get parameter values safely (ReaWrap uses get_num_params, not get_param_count)
                 local ok, param_count = pcall(function() return expanded_modulator:get_num_params() end)
                 if ok and param_count and param_count > 0 then
                     ctx:separator()
                     ctx:spacing()
                     
-                    -- Define editor key (used by preset/UI and curve editor)
                     local editor_key = "curve_" .. guid .. "_" .. expanded_slot_idx
                     
-                    -- Preset and UI icon row (above editor)
-                    local preset_idx, num_presets = r.TrackFX_GetPresetIndex(
-                        state.track.pointer,
-                        expanded_modulator.pointer
-                    )
-                    
-                    if num_presets and num_presets > 0 then
-                        local mod_guid = expanded_modulator:get_guid()
-                        if not state.cached_preset_names[mod_guid] then
-                            state.cached_preset_names[mod_guid] = {}
-                            local original_idx = preset_idx
-                            for i = 0, num_presets - 1 do
-                                r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
-                                local name = expanded_modulator:get_preset() or ("Preset " .. (i + 1))
-                                state.cached_preset_names[mod_guid][i] = name
-                            end
-                            if original_idx >= 0 then
-                                r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, original_idx)
-                            end
-                        end
-                        
-                        local cached_names = state.cached_preset_names[mod_guid]
-                        local current_preset_name = cached_names[preset_idx] or "—"
-                        
-                        local full_width = cfg.mod_sidebar_width - 16
-                        ctx:set_next_item_width(full_width - 32)
-                        if ctx:begin_combo("##preset_" .. guid, current_preset_name) then
-                            for i = 0, num_presets - 1 do
-                                local preset_name = cached_names[i] or ("Preset " .. (i + 1))
-                                if ctx:selectable(preset_name, i == preset_idx) then
-                                    r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
-                                    interacted = true
-                                end
-                            end
-                            ctx:end_combo()
-                        end
-                        if ctx:is_item_hovered() then
-                            ctx:set_tooltip("Waveform Preset")
-                        end
-                        
-                        ctx:same_line()
-                        
-                        -- UI icon
-                        if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20, opts.icon_font) then
-                            state.curve_editor_popup = state.curve_editor_popup or {}
-                            state.curve_editor_popup[editor_key] = state.curve_editor_popup[editor_key] or {}
-                            state.curve_editor_popup[editor_key].open_requested = true
-                            interacted = true
-                        end
-                        if ctx:is_item_hovered() then
-                            ctx:set_tooltip("Open Curve Editor")
-                        end
-                    end
-                    
-                    ctx:spacing()
-                    
-                    -- Curve Editor (main visual element)
-                    state.curve_editor_state = state.curve_editor_state or {}
-                    state.curve_editor_state[editor_key] = state.curve_editor_state[editor_key] or {}
-                    
-                    local editor_width = ctx:get_content_region_avail_width()  -- Use actual available width
-                    local editor_height = 120  -- Compact height for sidebar
-                    
-                    local editor_interacted, new_state = curve_editor.draw(
-                        ctx, expanded_modulator, editor_width, editor_height,
-                        state.curve_editor_state[editor_key]
-                    )
-                    state.curve_editor_state[editor_key] = new_state
-                    if editor_interacted then
-                        interacted = true
-                    end
-                    
-                    -- Popup curve editor window
-                    state.curve_editor_popup = state.curve_editor_popup or {}
-                    state.curve_editor_popup[editor_key] = state.curve_editor_popup[editor_key] or {}
-                    local popup_id = "Curve Editor##" .. editor_key
-                    local popup_interacted, popup_state = curve_editor.draw_popup(
-                        ctx, expanded_modulator, state.curve_editor_popup[editor_key], popup_id
-                    )
-                    state.curve_editor_popup[editor_key] = popup_state
-                    if popup_interacted then
+                    -- Preset and UI icon row
+                    if draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor_key, cfg, state, opts) then
                         interacted = true
                     end
                     
                     ctx:spacing()
                     
-                    -- Consistent control widths for symmetry
-                    local half_width = (cfg.mod_sidebar_width - 32) / 2  -- Two columns with padding
-                    local full_width = cfg.mod_sidebar_width - 16
-
-                    -- All main controls on one line: Free/Sync | Rate | Phase
-                    local tempo_mode = expanded_modulator:get_param(PARAM.PARAM_TEMPO_MODE)
-
-                    -- Free/Sync segmented buttons
-                    if tempo_mode then
-                        local is_free = tempo_mode < 0.5
-                        
-                        -- Free button
-                        if is_free then
-                            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-                        end
-                        if ctx:button("Free##tempo_" .. guid, 52, 0) then
-                            expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 0)
-                            interacted = true
-                        end
-                        if is_free then
-                            ctx:pop_style_color()
-                        end
-                        
-                        ctx:same_line(0, 0)  -- No gap
-                        
-                        -- Sync button
-                        if not is_free then
-                            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-                        end
-                        if ctx:button("Sync##tempo_" .. guid, 52, 0) then
-                            expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 1)
-                            interacted = true
-                        end
-                        if not is_free then
-                            ctx:pop_style_color()
-                        end
-                        
-                        ctx:same_line()
-                        
-                        -- Rate slider/dropdown
-                        if tempo_mode < 0.5 then
-                            -- Free mode - show Hz slider (slider2)
-                            local ok_rate, rate_norm = pcall(function() return expanded_modulator:get_param_normalized(1) end)
-                            if ok_rate then
-                                local rate_hz = 0.01 + rate_norm * 9.99
-                                ctx:set_next_item_width(80)
-                                local changed, new_rate = ctx:slider_double("##rate_" .. guid, rate_hz, 0.01, 10, "%.1f Hz")
-                                if changed then
-                                    local norm_val = (new_rate - 0.01) / 9.99
-                                    expanded_modulator:set_param_normalized(1, norm_val)
-                                    interacted = true
-                                end
-                                if ctx:is_item_hovered() then
-                                    ctx:set_tooltip("Rate (Hz)")
-                                end
-                            end
-                        else
-                            -- Sync mode - show sync rate dropdown (slider3)
-                            local ok_sync, sync_rate_idx = pcall(function() return expanded_modulator:get_param_normalized(2) end)
-                            if ok_sync then
-                                local sync_rates = {"8 bars", "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/4T", "1/4.", "1/8", "1/8T", "1/8.", "1/16", "1/16T", "1/16.", "1/32", "1/32T", "1/32.", "1/64"}
-                                local current_idx = math.floor(sync_rate_idx * 17 + 0.5)
-                                ctx:set_next_item_width(80)
-                                if ctx:begin_combo("##sync_rate_" .. guid, sync_rates[current_idx + 1] or "1/4") then
-                                    for i, rate_name in ipairs(sync_rates) do
-                                        if ctx:selectable(rate_name, i - 1 == current_idx) then
-                                            expanded_modulator:set_param_normalized(2, (i - 1) / 17)
-                                            interacted = true
-                                        end
-                                    end
-                                    ctx:end_combo()
-                                end
-                                if ctx:is_item_hovered() then
-                                    ctx:set_tooltip("Sync Rate")
-                                end
-                            end
-                        end
-                        
-                        ctx:same_line()
-                        
-                        -- Phase slider
-                        local ok_phase, phase = pcall(function() return expanded_modulator:get_param_normalized(4) end)
-                        if ok_phase then
-                            ctx:set_next_item_width(70)
-                            local phase_deg = phase * 360
-                            local changed, new_phase_deg = ctx:slider_double("##phase_" .. guid, phase_deg, 0, 360, "%.0f°")
-                            if changed then
-                                expanded_modulator:set_param_normalized(4, new_phase_deg / 360)
-                                interacted = true
-                            end
-                            if ctx:is_item_hovered() then
-                                ctx:set_tooltip("Phase")
-                            end
-                        end
+                    -- Curve Editor section
+                    if draw_curve_editor_section(ctx, expanded_modulator, editor_key, state) then
+                        interacted = true
                     end
-
+                    
                     ctx:spacing()
-
-                    -- Trigger Mode dropdown
-                    local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_TRIGGER_MODE) end)
-                    local trig_idx = nil  -- Declare outside so it's accessible in Advanced section
-                    if ok_trig then
-                        local trigger_modes = {"Free", "Transport", "MIDI", "Audio"}
-                        trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
-                        ctx:set_next_item_width(80)
-                        if ctx:begin_combo("##trigger_mode_" .. guid, trigger_modes[trig_idx + 1] or "Free") then
-                            for i, mode_name in ipairs(trigger_modes) do
-                                if ctx:selectable(mode_name, i - 1 == trig_idx) then
-                                    expanded_modulator:set_param_normalized(PARAM.PARAM_TRIGGER_MODE, (i - 1) / 3)
-                                    interacted = true
-                                end
-                            end
-                            ctx:end_combo()
-                        end
-                        if ctx:is_item_hovered() then
-                            ctx:set_tooltip("Trigger Mode")
-                        end
+                    
+                    -- Rate controls: Free/Sync, Rate, Phase
+                    if draw_rate_controls(ctx, guid, expanded_modulator) then
+                        interacted = true
                     end
                     
-                    ctx:same_line()
-                    
-                    -- Advanced button
-                    local advanced_popup_id = "Advanced##adv_popup_" .. guid
-                    if ctx:button("⚙##adv_btn_" .. guid, 24, 0) then
-                        r.ImGui_OpenPopup(ctx.ctx, advanced_popup_id)
-                    end
-                    if ctx:is_item_hovered() then
-                        ctx:set_tooltip("Advanced Settings")
-                    end
-                    
-                    ctx:same_line()
-
-                    -- Calculate parameter links section
-                    local existing_links = {}
-                    local expected_mod_idx = nil
-                    local my_parent = fx:get_parent_container()
-                    if my_parent then
-                        local children = my_parent:get_container_children()
-                        local mod_guid = expanded_modulator:get_guid()
-                        for i, child in ipairs(children) do
-                            if child:get_guid() == mod_guid then
-                                expected_mod_idx = i - 1
-                                break
-                            end
-                        end
-                    end
-                    
-                    if expected_mod_idx ~= nil then
-                        local ok_params, param_count = pcall(function() return fx:get_num_params() end)
-                        if ok_params and param_count then
-                            for param_idx = 0, param_count - 1 do
-                                local link_info = fx:get_param_link_info(param_idx)
-                                if link_info and link_info.effect == expected_mod_idx and link_info.param == PARAM.PARAM_OUTPUT then
-                                    local ok_pname, param_name = pcall(function() return fx:get_param_name(param_idx) end)
-                                    if ok_pname and param_name then
-                                        table.insert(existing_links, {
-                                            param_idx = param_idx,
-                                            param_name = param_name,
-                                            scale = link_info.scale or 1.0,
-                                            offset = link_info.offset or 0  -- Stored initial value
-                                        })
-                                    end
-                                end
-                            end
-                        end
-                    end
-                    
-                    ctx:same_line()
-                    
-                    -- Link Parameter dropdown (on same line as Trigger)
-                    local target_device = fx
-                    if target_device then
-                        local ok_params, param_count = pcall(function() return target_device:get_num_params() end)
-                        if ok_params and param_count and param_count > 0 then
-                            local current_param_name = "Link..."
-                            ctx:set_next_item_width(158)
-                            if ctx:begin_combo("##link_param_" .. guid, current_param_name) then
-                                for param_idx = 0, param_count - 1 do
-                                    local ok_pname, param_name = pcall(function() return target_device:get_param_name(param_idx) end)
-                                    if ok_pname and param_name then
-                                        local is_linked = false
-                                        for _, link in ipairs(existing_links) do
-                                            if link.param_idx == param_idx then
-                                                is_linked = true
-                                                break
-                                            end
-                                        end
-                                        if ctx:selectable(param_name .. (is_linked and " ✓" or ""), false) then
-                                            -- Capture current param value BEFORE linking
-                                            local initial_value = target_device:get_param_normalized(param_idx) or 0
-                                            
-                                            -- Create link with default 50% depth (more reasonable than 100%)
-                                            local default_depth = 0.5
-                                            local success = target_device:create_param_link(
-                                                expanded_modulator,
-                                                PARAM.PARAM_OUTPUT,
-                                                param_idx,
-                                                default_depth
-                                            )
-                                            if success then
-                                                -- Use REAPER's mod.baseline for initial value, plink.offset for mode adjustment
-                                                local plink_prefix = string.format("param.%d.plink.", param_idx)
-                                                local mod_prefix = string.format("param.%d.mod.", param_idx)
-                                                target_device:set_named_config_param(mod_prefix .. "baseline", tostring(initial_value))
-                                                target_device:set_named_config_param(plink_prefix .. "offset", "0")
-                                                
-                                                local link_key = guid .. "_" .. param_idx
-                                                
-                                                -- Store baseline in UI state (REAPER doesn't expose mod.baseline reliably)
-                                                state.link_baselines = state.link_baselines or {}
-                                                state.link_baselines[link_key] = initial_value
-                                                
-                                                -- Initialize bipolar state to false (unipolar)
-                                                state.link_bipolar = state.link_bipolar or {}
-                                                state.link_bipolar[link_key] = false
-                                                
-                                                interacted = true
-                                            end
-                                        end
-                                    end
-                                end
-                                ctx:end_combo()
-                            end
-                            if ctx:is_item_hovered() then
-                                ctx:set_tooltip("Link to parameter")
-                            end
-                        end
-                    end
-                    
-                    -- Advanced popup modal (defined earlier on same line)
-                    r.ImGui_SetNextWindowSize(ctx.ctx, 250, 0, imgui.Cond.FirstUseEver())
-                    if r.ImGui_BeginPopup(ctx.ctx, advanced_popup_id) then
-                        ctx:text("Advanced Settings")
-                        ctx:separator()
-                        
-                        -- Show additional params based on trigger mode
-                        if ok_trig and trig_idx == 2 then
-                            -- MIDI trigger mode
-                            ctx:text("MIDI Source")
-                            local midi_src = expanded_modulator:get_param(PARAM.PARAM_MIDI_SOURCE)
-                            if midi_src then
-                                if ctx:radio_button("This Track##midi_src_" .. guid, midi_src < 0.5) then
-                                    expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 0)
-                                    interacted = true
-                                end
-                                ctx:same_line()
-                                if ctx:radio_button("MIDI Bus##midi_src_" .. guid, midi_src >= 0.5) then
-                                    expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 1)
-                                    interacted = true
-                                end
-                            end
-
-                            -- MIDI Note (slider22)
-                            local ok_note, midi_note = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_MIDI_NOTE) end)
-                            if ok_note then
-                                ctx:set_next_item_width(150)
-                                local note_val = math.floor(midi_note * 127 + 0.5)
-                                local changed, new_note_val = ctx:slider_int("MIDI Note##note_" .. guid, note_val, 0, 127, note_val == 0 and "Any" or tostring(note_val))
-                                if changed then
-                                    expanded_modulator:set_param_normalized(PARAM.PARAM_MIDI_NOTE, new_note_val / 127)
-                                    interacted = true
-                                end
-                            end
-                        elseif ok_trig and trig_idx == 3 then
-                            -- Audio trigger mode
-                            local ok_thresh, audio_thresh = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD) end)
-                            if ok_thresh then
-                                ctx:set_next_item_width(150)
-                                local changed, new_thresh = ctx:slider_double("Threshold##thresh_" .. guid, audio_thresh, 0, 1, "%.2f")
-                                if changed then
-                                    expanded_modulator:set_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD, new_thresh)
-                                    interacted = true
-                                end
-                            end
-                        end
-
-                        -- Attack/Release (show when trigger mode is not Free)
-                        if ok_trig and trig_idx and trig_idx > 0 then
-                            ctx:spacing()
-                            ctx:text("Envelope")
-                            
-                            -- Attack (slider24)
-                            local ok_atk, attack_ms = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_ATTACK) end)
-                            if ok_atk then
-                                local atk_val = attack_ms * 1999 + 1  -- 1-2000ms
-                                ctx:set_next_item_width(150)
-                                local changed, new_atk_val = ctx:slider_double("Attack##atk_" .. guid, atk_val, 1, 2000, "%.0f ms")
-                                if changed then
-                                    expanded_modulator:set_param_normalized(PARAM.PARAM_ATTACK, (new_atk_val - 1) / 1999)
-                                    interacted = true
-                                end
-                            end
-
-                            -- Release (slider25)
-                            local ok_rel, release_ms = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_RELEASE) end)
-                            if ok_rel then
-                                local rel_val = release_ms * 4999 + 1  -- 1-5000ms
-                                ctx:set_next_item_width(150)
-                                local changed, new_rel_val = ctx:slider_double("Release##rel_" .. guid, rel_val, 1, 5000, "%.0f ms")
-                                if changed then
-                                    expanded_modulator:set_param_normalized(PARAM.PARAM_RELEASE, (new_rel_val - 1) / 4999)
-                                    interacted = true
-                                end
-                            end
-                        end
-                        
-                        -- Show message if trigger mode is Free
-                        if ok_trig and trig_idx == 0 then
-                            ctx:text_colored(0x888888FF, "Select a trigger mode")
-                            ctx:text_colored(0x888888FF, "to see more options")
-                        end
-                        
-                        r.ImGui_EndPopup(ctx.ctx)
-                    end
-
-                    -- Show existing links (visualization is now on the actual device param sliders)
                     ctx:spacing()
-                    if #existing_links > 0 then
-                        -- Track bipolar state per link (stored in state table, affects plink offset)
-                        state.link_bipolar = state.link_bipolar or {}
-                        
-                        for i, link in ipairs(existing_links) do
-                            local link_key = guid .. "_" .. link.param_idx
-                            local is_bipolar = state.link_bipolar[link_key] or false
-                            local plink_prefix = string.format("param.%d.plink.", link.param_idx)
-                            
-                            -- Scale = depth for both modes
-                            local actual_depth = link.scale
-                            
-                            -- Parameter name (highlighted)
-                            ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)
-                            local short_name = link.param_name:sub(1, 10)
-                            if #link.param_name > 10 then short_name = short_name .. ".." end
-                            ctx:text(short_name)
-                            ctx:pop_style_color()
-                            
-                            ctx:same_line()
-                            
-                            -- Uni/Bi buttons
-                            -- Unipolar: offset=0, scale=depth (±100%)
-                            -- Bipolar: offset=-|depth|, scale=2*|depth|
-                            if not is_bipolar then
-                                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-                            end
-                            if ctx:button("U##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
-                                if is_bipolar then
-                                    state.link_bipolar[link_key] = false
-                                    -- Bipolar -> Unipolar: offset=0, keep scale
-                                    fx:set_named_config_param(plink_prefix .. "offset", "0")
-                                    interacted = true
-                                end
-                            end
-                            if not is_bipolar then
-                                ctx:pop_style_color()
-                            end
-                            if ctx:is_item_hovered() then
-                                ctx:set_tooltip("Unipolar: baseline + scale")
-                            end
-                            
-                            ctx:same_line(0, 0)
-                            
-                            if is_bipolar then
-                                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-                            end
-                            if ctx:button("B##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
-                                if not is_bipolar then
-                                    state.link_bipolar[link_key] = true
-                                    -- Unipolar -> Bipolar: offset=-0.5, keep scale
-                                    fx:set_named_config_param(plink_prefix .. "offset", "-0.5")
-                                    interacted = true
-                                end
-                            end
-                            if is_bipolar then
-                                ctx:pop_style_color()
-                            end
-                            if ctx:is_item_hovered() then
-                                ctx:set_tooltip("Bipolar: baseline ± depth")
-                            end
-                            
-                            ctx:same_line()
-                            
-                            -- Depth slider: unipolar ±100%, bipolar ±50%
-                            ctx:set_next_item_width(80)
-                            local depth_pct = actual_depth * 100
-                            -- Both modes show ±100% on UI (bipolar is internally capped at ±50%)
-                            local min_depth = -100
-                            local max_depth = 100
-                            local changed, new_depth_pct = ctx:slider_double("##depth_" .. link.param_idx .. "_" .. guid, depth_pct, min_depth, max_depth, "%.0f%%")
-                            if changed then
-                                local new_depth = new_depth_pct / 100
-                                if is_bipolar then
-                                    -- Bipolar: offset=-0.5 (always), scale=depth
-                                    fx:set_named_config_param(plink_prefix .. "offset", "-0.5")
-                                    fx:set_named_config_param(plink_prefix .. "scale", tostring(new_depth))
-                                else
-                                    -- Unipolar: offset=0, scale=depth
-                                    fx:set_named_config_param(plink_prefix .. "scale", tostring(new_depth))
-                                end
-                                interacted = true
-                            end
-                            if ctx:is_item_hovered() then
-                                ctx:set_tooltip("Modulation depth")
-                            end
-                            
-                            ctx:same_line()
-                            
-                            -- Remove button
-                            if ctx:button("X##rm_" .. i .. "_" .. guid, 18, 0) then
-                                -- Get baseline from UI state (more reliable than REAPER API)
-                                local link_key = guid .. "_" .. link.param_idx
-                                local restore_value = (state.link_baselines and state.link_baselines[link_key]) or link.baseline or 0
-                                if fx:remove_param_link(link.param_idx) then
-                                    fx:set_param_normalized(link.param_idx, restore_value)
-                                    -- Clear stored state
-                                    if state.link_baselines then state.link_baselines[link_key] = nil end
-                                    if state.link_bipolar then state.link_bipolar[link_key] = nil end
-                                    interacted = true
-                                end
-                            end
-                            if ctx:is_item_hovered() then
-                                ctx:set_tooltip("Remove link")
-                            end
-                        end
+                    
+                    -- Trigger and Advanced controls
+                    local trig_interacted, ok_trig, trig_idx, advanced_popup_id = draw_trigger_and_advanced_button(ctx, guid, expanded_modulator)
+                    if trig_interacted then
+                        interacted = true
+                    end
+                    
+                    -- Get existing parameter links
+                    local existing_links = get_existing_param_links(fx, expanded_modulator, PARAM)
+                    
+                    -- Link Parameter dropdown
+                    if draw_link_param_dropdown(ctx, guid, fx, expanded_modulator, existing_links, state, PARAM) then
+                        interacted = true
+                    end
+                    
+                    -- Advanced popup modal
+                    if draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, advanced_popup_id, ok_trig, PARAM) then
+                        interacted = true
+                    end
+                    
+                    -- Show existing parameter links
+                    ctx:spacing()
+                    if draw_existing_links(ctx, guid, fx, existing_links, state) then
+                        interacted = true
                     end
                 end
             end
