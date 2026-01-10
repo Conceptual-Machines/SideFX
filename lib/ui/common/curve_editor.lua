@@ -442,13 +442,113 @@ function M.draw(ctx, modulator, width, height, state)
     r.ImGui_DrawList_AddCircleFilled(draw_list, playhead_x, out_y, 6, COLORS.output_dot)
     r.ImGui_DrawList_AddCircle(draw_list, playhead_x, out_y, 6, 0xFFFFFFFF, 0, 1)
     
-    -- Debug: show phase and output values
-    local debug_text = string.format("Ph:%.3f Out:%.3f", lfo_phase, lfo_output)
-    r.ImGui_DrawList_AddText(draw_list, area_x + 4, area_y + 4, 0xFFFF00FF, debug_text)
-    
     -- Border
     r.ImGui_DrawList_AddRect(draw_list, area_x, area_y, 
         area_x + area_w, area_y + area_h, COLORS.grid_major)
+    
+    return interacted, state
+end
+
+--------------------------------------------------------------------------------
+-- Draw curve editor in a popup window
+--------------------------------------------------------------------------------
+function M.draw_popup(ctx, modulator, state, popup_id)
+    state = state or {}
+    state.is_open = state.is_open or false
+    
+    -- Check if popup should be opened
+    if state.open_requested then
+        r.ImGui_OpenPopup(ctx.ctx, popup_id)
+        state.open_requested = false
+        state.is_open = true
+    end
+    
+    local interacted = false
+    
+    -- Larger size for popup
+    local popup_width = 600
+    local popup_height = 400
+    
+    -- Set window size before opening
+    r.ImGui_SetNextWindowSize(ctx.ctx, popup_width, popup_height, imgui.Cond.FirstUseEver())
+    
+    -- Draw popup as a regular window (resizable, no collapse)
+    local window_flags = imgui.WindowFlags.NoCollapse()
+    if state.is_open then
+        local visible, open = r.ImGui_Begin(ctx.ctx, popup_id, true, window_flags)
+        
+        -- Check if X button was clicked
+        if not open then
+            state.is_open = false
+        end
+        
+        if visible then
+            -- Get actual window size (may have been resized)
+            local win_w, win_h = r.ImGui_GetWindowSize(ctx.ctx)
+            local avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
+            
+            -- Draw editor first (takes most of the space)
+            local control_bar_height = 35
+            local editor_h = win_h - 55 - control_bar_height  -- Title bar + controls
+            
+            local editor_interacted, new_state = M.draw(ctx, modulator, avail_w, editor_h, state)
+            if editor_interacted then
+                interacted = true
+            end
+            state = new_state
+            
+            r.ImGui_Spacing(ctx.ctx)
+            
+            -- Control bar at bottom: Grid, Snap, Loop/OneShot
+            -- Grid dropdown
+            local grid_options = {"Off", "4", "8", "16", "32"}
+            local ok_grid, grid_norm = pcall(function() return modulator:get_param_normalized(PARAM.PARAM_GRID) end)
+            -- Discrete param with 5 values (0-4), normalized is 0-1
+            local grid_idx = ok_grid and math.floor(grid_norm * 4 + 0.5) or 0
+            
+            r.ImGui_SetNextItemWidth(ctx.ctx, 60)
+            if r.ImGui_BeginCombo(ctx.ctx, "Grid", grid_options[grid_idx + 1] or "Off") then
+                for i, opt in ipairs(grid_options) do
+                    if r.ImGui_Selectable(ctx.ctx, opt, i - 1 == grid_idx) then
+                        modulator:set_param_normalized(PARAM.PARAM_GRID, (i - 1) / 4)
+                        interacted = true
+                    end
+                end
+                r.ImGui_EndCombo(ctx.ctx)
+            end
+            
+            r.ImGui_SameLine(ctx.ctx)
+            
+            -- Snap checkbox
+            local ok_snap, snap_val = pcall(function() return modulator:get_param(PARAM.PARAM_SNAP) end)
+            local snap_on = ok_snap and snap_val >= 0.5
+            local snap_changed, snap_new = r.ImGui_Checkbox(ctx.ctx, "Snap", snap_on)
+            if snap_changed then
+                modulator:set_param(PARAM.PARAM_SNAP, snap_new and 1 or 0)
+                interacted = true
+            end
+            
+            r.ImGui_SameLine(ctx.ctx)
+            r.ImGui_Dummy(ctx.ctx, 20, 0)  -- Spacer
+            r.ImGui_SameLine(ctx.ctx)
+            
+            -- Loop/OneShot radio buttons
+            local ok_mode, lfo_mode = pcall(function() return modulator:get_param(PARAM.PARAM_LFO_MODE) end)
+            local is_loop = ok_mode and lfo_mode < 0.5
+            
+            if r.ImGui_RadioButton(ctx.ctx, "Loop", is_loop) then
+                modulator:set_param(PARAM.PARAM_LFO_MODE, 0)
+                interacted = true
+            end
+            r.ImGui_SameLine(ctx.ctx)
+            if r.ImGui_RadioButton(ctx.ctx, "One Shot", not is_loop) then
+                modulator:set_param(PARAM.PARAM_LFO_MODE, 1)
+                interacted = true
+            end
+            
+            r.ImGui_End(ctx.ctx)
+        end
+    end
     
     return interacted, state
 end

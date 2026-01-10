@@ -191,6 +191,18 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         interacted = true
                     end
                     
+                    -- Popup curve editor window
+                    state.curve_editor_popup = state.curve_editor_popup or {}
+                    state.curve_editor_popup[editor_key] = state.curve_editor_popup[editor_key] or {}
+                    local popup_id = "Curve Editor##" .. editor_key
+                    local popup_interacted, popup_state = curve_editor.draw_popup(
+                        ctx, expanded_modulator, state.curve_editor_popup[editor_key], popup_id
+                    )
+                    state.curve_editor_popup[editor_key] = popup_state
+                    if popup_interacted then
+                        interacted = true
+                    end
+                    
                     ctx:spacing()
                     
                     -- Set control width shorter for compact layout
@@ -275,7 +287,10 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         -- Column 3: UI icon
                         ctx:table_set_column_index(2)
                         if drawing.draw_ui_icon(ctx, "##ui_" .. guid, 24, 20, opts.icon_font) then
-                            expanded_modulator:show(3)
+                            -- Open popup curve editor instead of JSFX UI
+                            state.curve_editor_popup = state.curve_editor_popup or {}
+                            state.curve_editor_popup[editor_key] = state.curve_editor_popup[editor_key] or {}
+                            state.curve_editor_popup[editor_key].open_requested = true
                             interacted = true
                         end
                         if ctx:is_item_hovered() then

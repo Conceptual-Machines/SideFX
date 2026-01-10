@@ -481,20 +481,3 @@ final_output = raw_lfo * slider6 * env_value;
 slider4 = final_output;
 slider87 = phase;  // Expose current playhead position for UI (read-only, no automate)
 slider_automate(slider4);
-
-@gfx 300 80
-gfx_clear = 0x1a1a1a;
-
-// Simple status display - full editor is in SideFX UI
-gfx_set(0.5, 0.5, 0.5, 1);
-gfx_x = 20; gfx_y = 20;
-gfx_drawstr("SideFX Modulator");
-
-gfx_set(0.4, 0.4, 0.4, 1);
-gfx_x = 20; gfx_y = 40;
-gfx_drawstr("Open SideFX for curve editor");
-
-// Output indicator
-gfx_set(0.2, 0.8, 0.4, 1);
-gfx_x = 20; gfx_y = 60;
-gfx_drawstr(sprintf(#, "Output: %.3f", final_output));
