@@ -572,96 +572,104 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
         ctx:separator()
         ctx:spacing()
 
-        for i, link in ipairs(existing_links) do
-            local link_key = guid .. "_" .. link.param_idx
-            local is_bipolar = state.link_bipolar[link_key] or false
-            local plink_prefix = string.format("param.%d.plink.", link.param_idx)
-            local actual_depth = link.scale
-            
-            -- Parameter name (highlighted)
-            ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)
-            local short_name = link.param_name:sub(1, 10)
-            if #link.param_name > 10 then short_name = short_name .. ".." end
-            ctx:text(short_name)
-            ctx:pop_style_color()
-            
-            ctx:same_line()
-            
-            -- Uni/Bi buttons
-            if not is_bipolar then
-                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-            end
-            if ctx:button("U##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
-                if is_bipolar then
-                    state.link_bipolar[link_key] = false
-                    fx:set_named_config_param(plink_prefix .. "offset", "0")
-                    interacted = true
-                end
-            end
-            if not is_bipolar then
-                ctx:pop_style_color()
-            end
-            if ctx:is_item_hovered() then
-                ctx:set_tooltip("Unipolar")
-            end
-            
-            ctx:same_line(0, 0)
-            
-            if is_bipolar then
-                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-            end
-            if ctx:button("B##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
-                if not is_bipolar then
-                    state.link_bipolar[link_key] = true
-                    fx:set_named_config_param(plink_prefix .. "offset", "-0.5")
-                    interacted = true
-                end
-            end
-            if is_bipolar then
-                ctx:pop_style_color()
-            end
-            if ctx:is_item_hovered() then
-                ctx:set_tooltip("Bipolar")
-            end
-            
-            ctx:same_line()
-            
-            -- Depth slider
-            ctx:set_next_item_width(80)
-            local depth_pct = actual_depth * 100
-            local min_depth = -100
-            local max_depth = 100
-            local changed, new_depth_pct = ctx:slider_double("##depth_" .. link.param_idx .. "_" .. guid, depth_pct, min_depth, max_depth, "%.0f%%")
-            if changed then
-                local new_depth = new_depth_pct / 100
-                if is_bipolar then
-                    fx:set_named_config_param(plink_prefix .. "offset", "-0.5")
-                    fx:set_named_config_param(plink_prefix .. "scale", tostring(new_depth))
-                else
-                    fx:set_named_config_param(plink_prefix .. "scale", tostring(new_depth))
-                end
-                interacted = true
-            end
-            if ctx:is_item_hovered() then
-                ctx:set_tooltip("Modulation depth")
-            end
-            
-            ctx:same_line()
-            
-            -- Remove button
-            if ctx:button("X##rm_" .. i .. "_" .. guid, 18, 0) then
+        -- Use table for consistent column alignment
+        local table_flags = r.ImGui_TableFlags_SizingFixedFit()
+        if ctx:begin_table("links_" .. guid, 4, table_flags) then
+            -- Setup columns: Name (fixed), U/B (fixed), Depth (stretch), X (fixed)
+            r.ImGui_TableSetupColumn(ctx.ctx, "Name", r.ImGui_TableColumnFlags_WidthFixed(), 60)
+            r.ImGui_TableSetupColumn(ctx.ctx, "Mode", r.ImGui_TableColumnFlags_WidthFixed(), 42)
+            r.ImGui_TableSetupColumn(ctx.ctx, "Depth", r.ImGui_TableColumnFlags_WidthStretch(), 1)
+            r.ImGui_TableSetupColumn(ctx.ctx, "Del", r.ImGui_TableColumnFlags_WidthFixed(), 20)
+
+            for i, link in ipairs(existing_links) do
                 local link_key = guid .. "_" .. link.param_idx
-                local restore_value = (state.link_baselines and state.link_baselines[link_key]) or link.baseline or 0
-                if fx:remove_param_link(link.param_idx) then
-                    fx:set_param_normalized(link.param_idx, restore_value)
-                    if state.link_baselines then state.link_baselines[link_key] = nil end
-                    if state.link_bipolar then state.link_bipolar[link_key] = nil end
+                local is_bipolar = state.link_bipolar[link_key] or false
+                local plink_prefix = string.format("param.%d.plink.", link.param_idx)
+                local actual_depth = link.scale
+
+                ctx:table_next_row()
+
+                -- Column 1: Parameter name
+                ctx:table_set_column_index(0)
+                ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)
+                local short_name = link.param_name:sub(1, 8)
+                if #link.param_name > 8 then short_name = short_name .. ".." end
+                ctx:text(short_name)
+                ctx:pop_style_color()
+
+                -- Column 2: Uni/Bi buttons
+                ctx:table_set_column_index(1)
+                if not is_bipolar then
+                    ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+                end
+                if ctx:button("U##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
+                    if is_bipolar then
+                        state.link_bipolar[link_key] = false
+                        fx:set_named_config_param(plink_prefix .. "offset", "0")
+                        interacted = true
+                    end
+                end
+                if not is_bipolar then
+                    ctx:pop_style_color()
+                end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip("Unipolar")
+                end
+
+                ctx:same_line(0, 0)
+
+                if is_bipolar then
+                    ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+                end
+                if ctx:button("B##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
+                    if not is_bipolar then
+                        state.link_bipolar[link_key] = true
+                        fx:set_named_config_param(plink_prefix .. "offset", "-0.5")
+                        interacted = true
+                    end
+                end
+                if is_bipolar then
+                    ctx:pop_style_color()
+                end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip("Bipolar")
+                end
+
+                -- Column 3: Depth slider
+                ctx:table_set_column_index(2)
+                ctx:set_next_item_width(-1)
+                local depth_pct = actual_depth * 100
+                local changed, new_depth_pct = ctx:slider_double("##depth_" .. link.param_idx .. "_" .. guid, depth_pct, -100, 100, "%.0f%%")
+                if changed then
+                    local new_depth = new_depth_pct / 100
+                    if is_bipolar then
+                        fx:set_named_config_param(plink_prefix .. "offset", "-0.5")
+                    end
+                    fx:set_named_config_param(plink_prefix .. "scale", tostring(new_depth))
                     interacted = true
                 end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip("Modulation depth")
+                end
+
+                -- Column 4: Remove button
+                ctx:table_set_column_index(3)
+                if ctx:button("X##rm_" .. i .. "_" .. guid, 18, 0) then
+                    local lk = guid .. "_" .. link.param_idx
+                    local restore_value = (state.link_baselines and state.link_baselines[lk]) or link.baseline or 0
+                    if fx:remove_param_link(link.param_idx) then
+                        fx:set_param_normalized(link.param_idx, restore_value)
+                        if state.link_baselines then state.link_baselines[lk] = nil end
+                        if state.link_bipolar then state.link_bipolar[lk] = nil end
+                        interacted = true
+                    end
+                end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip("Remove link")
+                end
             end
-            if ctx:is_item_hovered() then
-                ctx:set_tooltip("Remove link")
-            end
+
+            ctx:end_table()
         end
     end
     
