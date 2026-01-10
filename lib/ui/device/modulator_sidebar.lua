@@ -602,14 +602,18 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                 ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                             end
                             if ctx:button("U##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
-                                -- Switch to unipolar: restore offset to initial, halve scale
-                                state.link_bipolar[link_key] = false
-                                local initial = link.offset + actual_depth  -- Recover initial from bipolar offset
-                                local new_offset = initial
-                                local new_scale = actual_depth
-                                fx:set_named_config_param(plink_prefix .. "offset", tostring(new_offset))
-                                fx:set_named_config_param(plink_prefix .. "scale", tostring(new_scale))
-                                interacted = true
+                                -- Only convert if actually changing from bipolar to unipolar
+                                if is_bipolar then
+                                    state.link_bipolar[link_key] = false
+                                    -- Bipolar -> Unipolar: depth = scale/2, initial = offset + depth
+                                    local depth = link.scale / 2
+                                    local initial = link.offset + depth
+                                    local new_offset = initial
+                                    local new_scale = depth
+                                    fx:set_named_config_param(plink_prefix .. "offset", tostring(new_offset))
+                                    fx:set_named_config_param(plink_prefix .. "scale", tostring(new_scale))
+                                    interacted = true
+                                end
                             end
                             if not is_bipolar then
                                 ctx:pop_style_color()
@@ -624,15 +628,18 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                 ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                             end
                             if ctx:button("B##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
-                                -- Switch to bipolar: offset = initial - depth, scale = 2*depth
-                                state.link_bipolar[link_key] = true
-                                local initial = link.offset  -- In unipolar, offset IS initial
-                                local depth = link.scale
-                                local new_offset = initial - depth
-                                local new_scale = depth * 2
-                                fx:set_named_config_param(plink_prefix .. "offset", tostring(new_offset))
-                                fx:set_named_config_param(plink_prefix .. "scale", tostring(new_scale))
-                                interacted = true
+                                -- Only convert if actually changing from unipolar to bipolar
+                                if not is_bipolar then
+                                    state.link_bipolar[link_key] = true
+                                    -- Unipolar -> Bipolar: offset = initial - depth, scale = 2*depth
+                                    local initial = link.offset  -- In unipolar, offset IS initial
+                                    local depth = link.scale
+                                    local new_offset = initial - depth
+                                    local new_scale = depth * 2
+                                    fx:set_named_config_param(plink_prefix .. "offset", tostring(new_offset))
+                                    fx:set_named_config_param(plink_prefix .. "scale", tostring(new_scale))
+                                    interacted = true
+                                end
                             end
                             if is_bipolar then
                                 ctx:pop_style_color()

@@ -503,8 +503,17 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         end
         opts.mod_links = mod_links
         
-        -- DEBUG: Always show link count
-        ctx:text_colored(0xFF00FFFF, string.format("DEBUG: %d links, bipolar=%s", link_count, state.link_bipolar and "yes" or "no"))
+        -- DEBUG: Show link details
+        if link_count > 0 then
+            local debug_parts = {}
+            for param_idx, link_info in pairs(mod_links) do
+                local link_key = guid .. "_" .. param_idx
+                local bi = state.link_bipolar and state.link_bipolar[link_key] or false
+                table.insert(debug_parts, string.format("p%d: off=%.2f sc=%.2f %s", 
+                    param_idx, link_info.offset or 0, link_info.scale or 0, bi and "BI" or "UNI"))
+            end
+            ctx:text_colored(0xFF00FFFF, "DEBUG: " .. table.concat(debug_parts, " | "))
+        end
         
         if device_column.draw(ctx, is_device_collapsed, params_column, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts, name, fx_naming, draw_sidebar_column, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, colors) then
             interacted = true
