@@ -4,8 +4,12 @@ Parameters Column Module - Draws device parameter grid with sliders
 
 local M = {}
 
---- Draw a single parameter cell (label + slider)
-local function draw_param_cell(ctx, fx, param_idx)
+--- Draw a single parameter cell (label + slider + modulation overlay)
+-- @param ctx ImGui context
+-- @param fx The FX object
+-- @param param_idx Parameter index
+-- @param mod_links Table of param_idx -> link_info for modulated params (optional)
+local function draw_param_cell(ctx, fx, param_idx, mod_links)
     local r = reaper
     local imgui = require('imgui')
 
@@ -18,8 +22,15 @@ local function draw_param_cell(ctx, fx, param_idx)
     if ok_name and ok_val then
         param_val = param_val or 0
 
-        -- Param name (truncated)
-        ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
+        -- Check if this param has modulation
+        local link = mod_links and mod_links[param_idx]
+
+        -- Param name (truncated) - highlight if modulated
+        if link then
+            ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)  -- Blue for modulated
+        else
+            ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
+        end
         local truncated = param_name:sub(1, 12)
         if #param_name > 12 then truncated = truncated .. ".." end
         ctx:text(truncated)
@@ -43,10 +54,47 @@ local function draw_param_cell(ctx, fx, param_idx)
         local avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
         local slider_w = avail_w * 0.8
         ctx:set_next_item_width(slider_w)
-        local changed, new_val = ctx:slider_double("##slider_" .. param_name .. "_" .. param_idx, param_val, 0.0, 1.0, "")
+        
+        -- Get slider position BEFORE drawing
+        local slider_x, slider_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+        
+        -- Draw the slider with the BASE value (offset) if modulated, otherwise current value
+        local display_val = link and (link.offset or 0) or param_val
+        local changed, new_val = ctx:slider_double("##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, "")
         if changed then
-            pcall(function() fx:set_param_normalized(param_idx, new_val) end)
+            if link then
+                -- If modulated, update the offset (base value)
+                local plink_prefix = string.format("param.%d.plink.", param_idx)
+                fx:set_named_config_param(plink_prefix .. "offset", tostring(new_val))
+            else
+                pcall(function() fx:set_param_normalized(param_idx, new_val) end)
+            end
             interacted = true
+        end
+        
+        -- Draw modulation indicator overlay on top of slider
+        if link then
+            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+            local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
+            
+            -- Draw moving indicator at current modulated value
+            local indicator_x = slider_x + param_val * slider_w
+            r.ImGui_DrawList_AddRectFilled(draw_list,
+                indicator_x - 2, slider_y,
+                indicator_x + 2, slider_y + slider_h,
+                0xFFFFFFFF)  -- White indicator
+            
+            -- Draw modulation range hint
+            local offset = link.offset or 0
+            local scale = link.scale or 1
+            local min_mod = math.max(0, math.min(offset, offset + scale))
+            local max_mod = math.min(1, math.max(offset, offset + scale))
+            local range_x1 = slider_x + min_mod * slider_w
+            local range_x2 = slider_x + max_mod * slider_w
+            r.ImGui_DrawList_AddRectFilled(draw_list,
+                range_x1, slider_y + slider_h - 2,
+                range_x2, slider_y + slider_h,
+                0x88CCFFAA)  -- Blue range indicator at bottom
         end
 
         ctx:pop_style_var(1)
@@ -70,7 +118,8 @@ local function draw_param_cell(ctx, fx, param_idx)
 end
 
 --- Draw parameter grid (rows × columns)
-local function draw_params_grid(ctx, fx, visible_params, visible_count, num_columns, params_per_column)
+-- @param mod_links Table of param_idx -> link_info for modulated params (optional)
+local function draw_params_grid(ctx, fx, visible_params, visible_count, num_columns, params_per_column, mod_links)
     local r = reaper
     local interacted = false
 
@@ -84,7 +133,7 @@ local function draw_params_grid(ctx, fx, visible_params, visible_count, num_colu
 
             if visible_idx <= visible_count then
                 local param_idx = visible_params[visible_idx]
-                if draw_param_cell(ctx, fx, param_idx) then
+                if draw_param_cell(ctx, fx, param_idx, mod_links) then
                     interacted = true
                 end
             end
@@ -95,9 +144,11 @@ local function draw_params_grid(ctx, fx, visible_params, visible_count, num_colu
 end
 
 --- Draw device parameters column
+-- @param opts.mod_links Table of param_idx -> link_info for modulated params (optional)
 function M.draw(ctx, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts)
     local r = reaper
     local interacted = false
+    local mod_links = opts and opts.mod_links
 
     if visible_count > 0 then
         -- Use nested table for parameter columns
@@ -108,7 +159,7 @@ function M.draw(ctx, fx, guid, visible_params, visible_count, num_columns, param
                 r.ImGui_TableSetupColumn(ctx.ctx, "col" .. col, r.ImGui_TableColumnFlags_WidthStretch())
             end
 
-            if draw_params_grid(ctx, fx, visible_params, visible_count, num_columns, params_per_column) then
+            if draw_params_grid(ctx, fx, visible_params, visible_count, num_columns, params_per_column, mod_links) then
                 interacted = true
             end
 

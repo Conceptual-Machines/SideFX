@@ -563,7 +563,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         r.ImGui_EndPopup(ctx.ctx)
                     end
 
-                    -- Show existing links with visualization
+                    -- Show existing links (visualization is now on the actual device param sliders)
                     ctx:spacing()
                     if #existing_links > 0 then
                         -- Track bipolar state per link (stored in state table)
@@ -573,75 +573,61 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             local link_key = guid .. "_" .. link.param_idx
                             local is_bipolar = state.link_bipolar[link_key] or false
                             
-                            -- Row 1: Parameter name and visualization bar
-                            local short_name = link.param_name:sub(1, 16)
-                            if #link.param_name > 16 then short_name = short_name .. ".." end
+                            -- Parameter name (highlighted)
+                            ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)
+                            local short_name = link.param_name:sub(1, 10)
+                            if #link.param_name > 10 then short_name = short_name .. ".." end
                             ctx:text(short_name)
+                            ctx:pop_style_color()
                             
                             ctx:same_line()
                             
-                            -- Visualization bar: static param value + moving modulated indicator
-                            local bar_width = 120
-                            local bar_height = 14
-                            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-                            local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+                            -- Uni/Bi buttons
+                            if not is_bipolar then
+                                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+                            end
+                            if ctx:button("U##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
+                                state.link_bipolar[link_key] = false
+                                interacted = true
+                            end
+                            if not is_bipolar then
+                                ctx:pop_style_color()
+                            end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Unipolar: Offset → Offset+Depth")
+                            end
                             
-                            -- Get current modulated value
-                            local ok_target, current_val = pcall(function() return target_device:get_param_normalized(link.param_idx) end)
-                            if not ok_target or not current_val then current_val = 0 end
+                            ctx:same_line(0, 0)
                             
-                            local offset = link.offset or 0  -- Initial/base value (static)
-                            local depth = link.scale
-                            
-                            -- Draw background track
-                            r.ImGui_DrawList_AddRectFilled(draw_list,
-                                cursor_x, cursor_y,
-                                cursor_x + bar_width, cursor_y + bar_height,
-                                0x222222FF)
-                            
-                            -- Draw static filled bar showing initial param value (offset)
-                            r.ImGui_DrawList_AddRectFilled(draw_list,
-                                cursor_x, cursor_y + 2,
-                                cursor_x + offset * bar_width, cursor_y + bar_height - 2,
-                                0x4466AAFF)  -- Static blue fill
-                            
-                            -- Draw modulation range overlay (semi-transparent)
-                            local min_mod, max_mod
                             if is_bipolar then
-                                min_mod = math.max(0, offset - math.abs(depth))
-                                max_mod = math.min(1, offset + math.abs(depth))
-                            else
-                                if depth >= 0 then
-                                    min_mod = offset
-                                    max_mod = math.min(1, offset + depth)
-                                else
-                                    min_mod = math.max(0, offset + depth)
-                                    max_mod = offset
+                                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+                            end
+                            if ctx:button("B##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
+                                state.link_bipolar[link_key] = true
+                                interacted = true
+                            end
+                            if is_bipolar then
+                                ctx:pop_style_color()
+                            end
+                            if ctx:is_item_hovered() then
+                                ctx:set_tooltip("Bipolar: Offset ± Depth")
+                            end
+                            
+                            ctx:same_line()
+                            
+                            -- Depth slider
+                            ctx:set_next_item_width(80)
+                            local depth_pct = link.scale * 100
+                            local changed, new_depth_pct = ctx:slider_double("##depth_" .. link.param_idx .. "_" .. guid, depth_pct, -200, 200, "%.0f%%")
+                            if changed then
+                                local plink_prefix = string.format("param.%d.plink.", link.param_idx)
+                                local new_scale = new_depth_pct / 100
+                                if fx:set_named_config_param(plink_prefix .. "scale", tostring(new_scale)) then
+                                    interacted = true
                                 end
                             end
-                            r.ImGui_DrawList_AddRectFilled(draw_list,
-                                cursor_x + min_mod * bar_width, cursor_y,
-                                cursor_x + max_mod * bar_width, cursor_y + bar_height,
-                                0x88CCFF33)  -- Semi-transparent range
-                            
-                            -- Draw moving indicator (current modulated value)
-                            local indicator_x = cursor_x + current_val * bar_width
-                            r.ImGui_DrawList_AddRectFilled(draw_list,
-                                indicator_x - 2, cursor_y,
-                                indicator_x + 2, cursor_y + bar_height,
-                                0xFFFFFFFF)  -- White indicator
-                            
-                            -- Draw border
-                            r.ImGui_DrawList_AddRect(draw_list,
-                                cursor_x, cursor_y,
-                                cursor_x + bar_width, cursor_y + bar_height,
-                                0x555555FF)
-                            
-                            -- Capture mouse on bar
-                            ctx:invisible_button("##bar_" .. link.param_idx .. "_" .. guid, bar_width, bar_height)
                             if ctx:is_item_hovered() then
-                                ctx:set_tooltip(string.format("%s\nBase: %.0f%%  Current: %.0f%%  Depth: %.0f%%", 
-                                    link.param_name, offset * 100, current_val * 100, depth * 100))
+                                ctx:set_tooltip("Modulation depth")
                             end
                             
                             ctx:same_line()
@@ -657,49 +643,6 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             if ctx:is_item_hovered() then
                                 ctx:set_tooltip("Remove link")
                             end
-                            
-                            -- Row 2: Uni/Bi buttons + Depth slider
-                            -- Uni button
-                            if not is_bipolar then
-                                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-                            end
-                            if ctx:button("Uni##bi_" .. link.param_idx .. "_" .. guid, 32, 0) then
-                                state.link_bipolar[link_key] = false
-                                interacted = true
-                            end
-                            if not is_bipolar then
-                                ctx:pop_style_color()
-                            end
-                            
-                            ctx:same_line(0, 0)
-                            
-                            -- Bi button
-                            if is_bipolar then
-                                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-                            end
-                            if ctx:button("Bi##bi_" .. link.param_idx .. "_" .. guid, 24, 0) then
-                                state.link_bipolar[link_key] = true
-                                interacted = true
-                            end
-                            if is_bipolar then
-                                ctx:pop_style_color()
-                            end
-                            
-                            ctx:same_line()
-                            
-                            -- Depth/Amount slider
-                            ctx:set_next_item_width(100)
-                            local depth_pct = link.scale * 100
-                            local changed, new_depth_pct = ctx:slider_double("##depth_" .. link.param_idx .. "_" .. guid, depth_pct, -200, 200, "Depth %.0f%%")
-                            if changed then
-                                local plink_prefix = string.format("param.%d.plink.", link.param_idx)
-                                local new_scale = new_depth_pct / 100
-                                if fx:set_named_config_param(plink_prefix .. "scale", tostring(new_scale)) then
-                                    interacted = true
-                                end
-                            end
-                            
-                            ctx:spacing()
                         end
                     end
                 end
