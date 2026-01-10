@@ -7,6 +7,7 @@ local r = reaper
 local imgui = require('imgui')
 local state_module = require('lib.core.state')
 local PARAM = require('lib.modulator.modulator_constants')
+local param_indices = require('lib.modulator.param_indices')
 local drawing = require('lib.ui.common.drawing')
 local modulator_module = require('lib.modulator.modulator')
 local curve_editor = require('lib.ui.common.curve_editor')
@@ -362,15 +363,22 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     ctx:spacing()
 
                     -- Offset and Bipolar controls on same line
-                    local ok_offset, offset_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_OFFSET) end)
-                    local ok_bipolar, bipolar_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_BIPOLAR) end)
+                    local track_ptr = state.track.pointer
+                    local mod_ptr = expanded_modulator.pointer
                     
-                    if ok_offset and offset_val then
+                    -- Get parameter indices (cached, handles REAPER's implicit params)
+                    local P = param_indices.get_modulator_params(state.track, expanded_modulator)
+                    
+                    local offset_val = P.offset and r.TrackFX_GetParamNormalized(track_ptr, mod_ptr, P.offset)
+                    local bipolar_val = P.bipolar and r.TrackFX_GetParamNormalized(track_ptr, mod_ptr, P.bipolar)
+                    local bipolar_val = r.TrackFX_GetParamNormalized(track_ptr, mod_ptr, PARAM.PARAM_BIPOLAR)
+                    
+                    if offset_val and P.offset then
                         ctx:set_next_item_width(124)  -- Leave room for Uni/Bi buttons
                         local offset_pct = offset_val * 100
                         local changed, new_offset_pct = ctx:slider_double("##offset_" .. guid, offset_pct, 0, 100, "Off %.0f%%")
                         if changed then
-                            expanded_modulator:set_param(PARAM.PARAM_OFFSET, new_offset_pct / 100)
+                            r.TrackFX_SetParamNormalized(track_ptr, mod_ptr, P.offset, new_offset_pct / 100)
                             interacted = true
                         end
                         if ctx:is_item_hovered() then
@@ -380,7 +388,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     
                     ctx:same_line()
                     
-                    if ok_bipolar then
+                    if bipolar_val and P.bipolar then
                         local is_unipolar = bipolar_val < 0.5
                         
                         -- Uni button
@@ -388,7 +396,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                         end
                         if ctx:button("Uni##bipolar_" .. guid, 36, 0) then
-                            expanded_modulator:set_param(PARAM.PARAM_BIPOLAR, 0)
+                            r.TrackFX_SetParamNormalized(track_ptr, mod_ptr, P.bipolar, 0)
                             interacted = true
                         end
                         if is_unipolar then
@@ -405,7 +413,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                         end
                         if ctx:button("Bi##bipolar_" .. guid, 36, 0) then
-                            expanded_modulator:set_param(PARAM.PARAM_BIPOLAR, 1)
+                            r.TrackFX_SetParamNormalized(track_ptr, mod_ptr, P.bipolar, 1)
                             interacted = true
                         end
                         if not is_unipolar then
@@ -417,13 +425,13 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     end
                     
                     -- Depth slider (always show)
-                    local ok_depth, depth_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_DEPTH) end)
-                    if ok_depth and depth_val then
+                    local depth_val = P.depth and r.TrackFX_GetParamNormalized(track_ptr, mod_ptr, P.depth)
+                    if depth_val and P.depth then
                         ctx:set_next_item_width(200)  -- Full width
                         local depth_pct = depth_val * 100
                         local changed, new_depth_pct = ctx:slider_double("##depth_" .. guid, depth_pct, 0, 100, "Depth %.0f%%")
                         if changed then
-                            expanded_modulator:set_param(PARAM.PARAM_DEPTH, new_depth_pct / 100)
+                            r.TrackFX_SetParamNormalized(track_ptr, mod_ptr, P.depth, new_depth_pct / 100)
                             interacted = true
                         end
                         if ctx:is_item_hovered() then
@@ -631,10 +639,9 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     -- Show existing links with ghost visualization
                     ctx:spacing()
                     if #existing_links > 0 then
-                        -- Get current modulator output for ghost visualization
-                        local ok_output, mod_output = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_OUTPUT) end)
-                        local ok_off, off_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_OFFSET) end)
-                        local ok_bi, bi_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_BIPOLAR) end)
+                        -- Get current modulator output for ghost visualization (use P indices)
+                        local off_val = P.offset and r.TrackFX_GetParamNormalized(track_ptr, mod_ptr, P.offset)
+                        local bi_val = P.bipolar and r.TrackFX_GetParamNormalized(track_ptr, mod_ptr, P.bipolar)
                         
                         for i, link in ipairs(existing_links) do
                             -- Parameter name (shortened)
@@ -655,8 +662,8 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             if not ok_target or not target_val then target_val = 0 end
                             
                             -- Calculate modulated range
-                            local offset = ok_off and off_val or 0
-                            local is_bipolar = ok_bi and bi_val >= 0.5
+                            local offset = off_val or 0
+                            local is_bipolar = bi_val and bi_val >= 0.5
                             local depth = link.scale  -- The scale is our depth/amount
                             
                             local min_val, max_val
