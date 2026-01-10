@@ -188,7 +188,8 @@ end
 
 -- Draw the curve editor
 -- Returns: interacted (bool), and updates state table with any changes
-function M.draw(ctx, modulator, width, height, state)
+-- skip_capture_button: when true, don't create InvisibleButton (caller handles it)
+function M.draw(ctx, modulator, width, height, state, skip_capture_button)
     local interacted = false
     state = state or {}
     
@@ -206,9 +207,13 @@ function M.draw(ctx, modulator, width, height, state)
     
     -- Get cursor position for drawing area
     local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-    
-    -- Reserve space
-    ctx:dummy(width, height)
+
+    -- Reserve space - use InvisibleButton to capture clicks unless caller handles it
+    if skip_capture_button then
+        ctx:dummy(width, height)  -- Just reserve space, caller provides click capture
+    else
+        r.ImGui_InvisibleButton(ctx.ctx, "curve_editor_area##" .. tostring(modulator.pointer), width, height)
+    end
     
     -- Padding
     local pad = 4
@@ -315,15 +320,11 @@ function M.draw(ctx, modulator, width, height, state)
     state.hover_segment = hover_segment
     
     -- Mouse interaction
-    -- Disable when any popup/combo is open (prevents clicking through menus)
-    local any_popup_open = r.ImGui_IsPopupOpen(ctx.ctx, "", r.ImGui_PopupFlags_AnyPopup())
-    local block_interaction = any_popup_open
-    
     local left_down = r.ImGui_IsMouseDown(ctx.ctx, 0)
     local left_clicked = r.ImGui_IsMouseClicked(ctx.ctx, 0)
     local right_clicked = r.ImGui_IsMouseClicked(ctx.ctx, 1)
     
-    if mouse_in_area and not block_interaction then
+    if mouse_in_area then
         if left_clicked then
             if shift and hover_segment > 0 then
                 -- Start dragging segment curve
@@ -366,33 +367,33 @@ function M.draw(ctx, modulator, width, height, state)
         end
     end
     
-    -- Continue dragging segment curve (Shift+drag) - only when no popup/combo open
-    if state.drag_segment > 0 and left_down and not block_interaction then
+    -- Continue dragging segment curve (Shift+drag)
+    if state.drag_segment > 0 and left_down then
         -- Vertical drag controls curve: drag DOWN = inward (negative), drag UP = outward (positive)
         local delta_y = norm_my - state.drag_start_y
         local new_curve = state.drag_start_curve + delta_y * 2  -- Drag up = outward, drag down = inward
         new_curve = math.max(-1, math.min(1, new_curve))
         M.write_segment_curve_to_fx(modulator, state.drag_segment, new_curve)
         interacted = true
-    elseif not left_down or block_interaction then
+    elseif not left_down then
         state.drag_segment = -1
     end
-    
-    -- Continue dragging node - only when no popup/combo open
-    if state.drag_node > 0 and left_down and not block_interaction then
+
+    -- Continue dragging node
+    if state.drag_node > 0 and left_down then
         local new_x = math.max(0.001, math.min(0.999, norm_mx))
         local new_y = math.max(0, math.min(1, norm_my))
-        
+
         -- Lock endpoints to x=0 or x=1
         if state.drag_start_x < 0.01 then new_x = 0 end
         if state.drag_start_x > 0.99 then new_x = 1 end
-        
+
         -- Ctrl = X-only (lock Y)
         if ctrl then new_y = state.drag_start_y end
-        
+
         M.write_point_to_fx(modulator, state.drag_node, new_x, new_y)
         interacted = true
-    elseif not left_down or block_interaction then
+    elseif not left_down then
         state.drag_node = -1
     end
     
@@ -507,14 +508,15 @@ function M.draw_popup(ctx, modulator, state, popup_id)
             -- Draw editor first (takes most of the space)
             local control_bar_height = 35
             local editor_h = win_h - 55 - control_bar_height  -- Title bar + controls
-            
+
             -- Create an invisible button to capture the editor area (prevents window dragging)
             local cursor_pos_x, cursor_pos_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
             r.ImGui_InvisibleButton(ctx.ctx, "editor_capture", avail_w, editor_h)
-            
+
             -- Draw editor on top of the button (using same position)
+            -- Pass skip_capture_button=true since we already have one above
             r.ImGui_SetCursorScreenPos(ctx.ctx, cursor_pos_x, cursor_pos_y)
-            local editor_interacted, new_state = M.draw(ctx, modulator, avail_w, editor_h, state)
+            local editor_interacted, new_state = M.draw(ctx, modulator, avail_w, editor_h, state, true)
             if editor_interacted then
                 interacted = true
             end
