@@ -8,10 +8,14 @@ local M = {}
 -- @param ctx ImGui context
 -- @param fx The FX object
 -- @param param_idx Parameter index
--- @param mod_links Table of param_idx -> link_info for modulated params (optional)
-local function draw_param_cell(ctx, fx, param_idx, mod_links)
+-- @param opts Table with mod_links, state, fx_guid
+local function draw_param_cell(ctx, fx, param_idx, opts)
     local r = reaper
     local imgui = require('imgui')
+    
+    local mod_links = opts and opts.mod_links
+    local state = opts and opts.state
+    local fx_guid = opts and opts.fx_guid
 
     -- Safely get param info (FX might have been deleted)
     local ok_name, param_name = pcall(function() return fx:get_param_name(param_idx) end)
@@ -71,9 +75,15 @@ local function draw_param_cell(ctx, fx, param_idx, mod_links)
         local changed, new_val = ctx:slider_double("##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, "")
         if changed then
             if link then
-                -- If modulated, update baseline
+                -- If modulated, update baseline in both REAPER and UI state
                 local mod_prefix = string.format("param.%d.mod.", param_idx)
                 fx:set_named_config_param(mod_prefix .. "baseline", tostring(new_val))
+                -- Also update UI state so restore works correctly
+                if state and fx_guid then
+                    state.link_baselines = state.link_baselines or {}
+                    local link_key = fx_guid .. "_" .. param_idx
+                    state.link_baselines[link_key] = new_val
+                end
             else
                 pcall(function() fx:set_param_normalized(param_idx, new_val) end)
             end
@@ -146,8 +156,8 @@ local function draw_param_cell(ctx, fx, param_idx, mod_links)
 end
 
 --- Draw parameter grid (rows × columns)
--- @param mod_links Table of param_idx -> link_info for modulated params (optional)
-local function draw_params_grid(ctx, fx, visible_params, visible_count, num_columns, params_per_column, mod_links)
+-- @param opts Table with mod_links, state, fx_guid
+local function draw_params_grid(ctx, fx, visible_params, visible_count, num_columns, params_per_column, opts)
     local r = reaper
     local interacted = false
 
@@ -161,7 +171,7 @@ local function draw_params_grid(ctx, fx, visible_params, visible_count, num_colu
 
             if visible_idx <= visible_count then
                 local param_idx = visible_params[visible_idx]
-                if draw_param_cell(ctx, fx, param_idx, mod_links) then
+                if draw_param_cell(ctx, fx, param_idx, opts) then
                     interacted = true
                 end
             end
@@ -172,11 +182,10 @@ local function draw_params_grid(ctx, fx, visible_params, visible_count, num_colu
 end
 
 --- Draw device parameters column
--- @param opts.mod_links Table of param_idx -> link_info for modulated params (optional)
+-- @param opts Table with mod_links, state, fx_guid
 function M.draw(ctx, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts)
     local r = reaper
     local interacted = false
-    local mod_links = opts and opts.mod_links
 
     if visible_count > 0 then
         -- Use nested table for parameter columns
@@ -187,7 +196,7 @@ function M.draw(ctx, fx, guid, visible_params, visible_count, num_columns, param
                 r.ImGui_TableSetupColumn(ctx.ctx, "col" .. col, r.ImGui_TableColumnFlags_WidthStretch())
             end
 
-            if draw_params_grid(ctx, fx, visible_params, visible_count, num_columns, params_per_column, mod_links) then
+            if draw_params_grid(ctx, fx, visible_params, visible_count, num_columns, params_per_column, opts) then
                 interacted = true
             end
 

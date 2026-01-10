@@ -470,9 +470,14 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                                 target_device:set_named_config_param(mod_prefix .. "baseline", tostring(initial_value))
                                                 target_device:set_named_config_param(plink_prefix .. "offset", "0")
                                                 
+                                                local link_key = guid .. "_" .. param_idx
+                                                
+                                                -- Store baseline in UI state (REAPER doesn't expose mod.baseline reliably)
+                                                state.link_baselines = state.link_baselines or {}
+                                                state.link_baselines[link_key] = initial_value
+                                                
                                                 -- Initialize bipolar state to false (unipolar)
                                                 state.link_bipolar = state.link_bipolar or {}
-                                                local link_key = guid .. "_" .. param_idx
                                                 state.link_bipolar[link_key] = false
                                                 
                                                 interacted = true
@@ -667,9 +672,14 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             
                             -- Remove button
                             if ctx:button("X##rm_" .. i .. "_" .. guid, 18, 0) then
-                                local restore_value = link.baseline or 0
+                                -- Get baseline from UI state (more reliable than REAPER API)
+                                local link_key = guid .. "_" .. link.param_idx
+                                local restore_value = (state.link_baselines and state.link_baselines[link_key]) or link.baseline or 0
                                 if fx:remove_param_link(link.param_idx) then
                                     fx:set_param_normalized(link.param_idx, restore_value)
+                                    -- Clear stored state
+                                    if state.link_baselines then state.link_baselines[link_key] = nil end
+                                    if state.link_bipolar then state.link_bipolar[link_key] = nil end
                                     interacted = true
                                 end
                             end

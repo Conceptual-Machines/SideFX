@@ -502,6 +502,8 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
             end
         end
         opts.mod_links = mod_links
+        opts.state = state  -- Pass state so params can update link_baselines
+        opts.fx_guid = guid  -- Pass guid for building link keys
         
         -- DEBUG: Show link details
         if link_count > 0 then
