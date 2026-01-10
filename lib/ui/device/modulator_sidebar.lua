@@ -7,6 +7,7 @@ local r = reaper
 local imgui = require('imgui')
 local state_module = require('lib.core.state')
 local PARAM = require('lib.modulator.modulator_constants')
+local param_indices = require('lib.modulator.param_indices')
 local drawing = require('lib.ui.common.drawing')
 local modulator_module = require('lib.modulator.modulator')
 local curve_editor = require('lib.ui.common.curve_editor')
@@ -566,12 +567,16 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     -- Show existing links (visualization is now on the actual device param sliders)
                     ctx:spacing()
                     if #existing_links > 0 then
-                        -- Track bipolar state per link (stored in state table)
-                        state.link_bipolar = state.link_bipolar or {}
+                        -- Get modulator param indices for bipolar control
+                        local P = param_indices.get_modulator_params(state.track, expanded_modulator)
+                        local track_ptr = state.track.pointer
+                        local mod_ptr = expanded_modulator.pointer
+                        
+                        -- Read current bipolar state from JSFX
+                        local jsfx_bipolar = P.bipolar and r.TrackFX_GetParamNormalized(track_ptr, mod_ptr, P.bipolar) >= 0.5
                         
                         for i, link in ipairs(existing_links) do
-                            local link_key = guid .. "_" .. link.param_idx
-                            local is_bipolar = state.link_bipolar[link_key] or false
+                            local is_bipolar = jsfx_bipolar  -- Use JSFX bipolar state (global for this modulator)
                             
                             -- Parameter name (highlighted)
                             ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)
@@ -582,12 +587,14 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             
                             ctx:same_line()
                             
-                            -- Uni/Bi buttons
+                            -- Uni/Bi buttons - these control the JSFX bipolar parameter
                             if not is_bipolar then
                                 ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                             end
                             if ctx:button("U##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
-                                state.link_bipolar[link_key] = false
+                                if P.bipolar then
+                                    r.TrackFX_SetParamNormalized(track_ptr, mod_ptr, P.bipolar, 0)
+                                end
                                 interacted = true
                             end
                             if not is_bipolar then
@@ -603,7 +610,9 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                 ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                             end
                             if ctx:button("B##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
-                                state.link_bipolar[link_key] = true
+                                if P.bipolar then
+                                    r.TrackFX_SetParamNormalized(track_ptr, mod_ptr, P.bipolar, 1)
+                                end
                                 interacted = true
                             end
                             if is_bipolar then
