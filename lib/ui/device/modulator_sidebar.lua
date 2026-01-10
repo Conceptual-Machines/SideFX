@@ -205,31 +205,50 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     
                     ctx:spacing()
                     
-                    -- Set control width shorter for compact layout
-                    local control_width = 180
+                    -- Consistent control widths for symmetry
+                    local half_width = (cfg.mod_sidebar_width - 32) / 2  -- Two columns with padding
+                    local full_width = cfg.mod_sidebar_width - 16
 
                     -- Rate section: Free/Sync buttons | Preset | UI icon (no label)
                     -- Read tempo mode BEFORE table so it's accessible inside and outside
                     local tempo_mode = expanded_modulator:get_param(PARAM.PARAM_TEMPO_MODE)
 
-                    if ctx:begin_table("##rate_table_" .. guid, 3, imgui.TableFlags.SizingStretchProp()) then
-                        ctx:table_setup_column("Mode", imgui.TableColumnFlags.WidthStretch())
-                        ctx:table_setup_column("Preset", imgui.TableColumnFlags.WidthFixed(), 80)
-                        ctx:table_setup_column("UI", imgui.TableColumnFlags.WidthFixed(), 30)
+                    if ctx:begin_table("##rate_table_" .. guid, 3) then
+                        ctx:table_setup_column("Mode", imgui.TableColumnFlags.WidthFixed(), 105)
+                        ctx:table_setup_column("Preset", imgui.TableColumnFlags.WidthFixed(), 85)
+                        ctx:table_setup_column("UI", imgui.TableColumnFlags.WidthFixed(), 28)
 
                         ctx:table_next_row()
 
-                        -- Column 1: Free/Sync buttons
+                        -- Column 1: Free/Sync segmented buttons
                         ctx:table_set_column_index(0)
                         if tempo_mode then
-                            if ctx:radio_button("Free##tempo_" .. guid, tempo_mode < 0.5) then
+                            local is_free = tempo_mode < 0.5
+                            
+                            -- Free button
+                            if is_free then
+                                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+                            end
+                            if ctx:button("Free##tempo_" .. guid, 50, 0) then
                                 expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 0)
                                 interacted = true
                             end
-                            ctx:same_line()
-                            if ctx:radio_button("Sync##tempo_" .. guid, tempo_mode >= 0.5) then
+                            if is_free then
+                                ctx:pop_style_color()
+                            end
+                            
+                            ctx:same_line(0, 0)  -- No gap between buttons
+                            
+                            -- Sync button
+                            if not is_free then
+                                ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
+                            end
+                            if ctx:button("Sync##tempo_" .. guid, 50, 0) then
                                 expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 1)
                                 interacted = true
+                            end
+                            if not is_free then
+                                ctx:pop_style_color()
                             end
                         end
 
@@ -301,10 +320,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     end
                     ctx:spacing()
 
-                    -- Rate and Phase on same line (no labels)
-                    local rate_width = 100
-                    local phase_width = 80
-
+                    -- Rate and Phase on same line (matching widths from top row)
                     -- Rate slider/dropdown
                     if tempo_mode and tempo_mode < 0.5 then
                         -- Free mode - show Hz slider (slider2)
@@ -314,7 +330,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             -- Linear conversion: norm (0-1) -> Hz (0.01-10)
                             local rate_hz = 0.01 + rate_norm * 9.99
 
-                            ctx:set_next_item_width(rate_width)
+                            ctx:set_next_item_width(105)
                             -- TODO: Make slider logarithmic feel when ImGui supports it
                             local changed, new_rate = ctx:slider_double("##rate_" .. guid, rate_hz, 0.01, 10, "%.2f Hz")
                             if changed then
@@ -333,7 +349,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         if ok_sync then
                             local sync_rates = {"8 bars", "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/4T", "1/4.", "1/8", "1/8T", "1/8.", "1/16", "1/16T", "1/16.", "1/32", "1/32T", "1/32.", "1/64"}
                             local current_idx = math.floor(sync_rate_idx * 17 + 0.5)
-                            ctx:set_next_item_width(rate_width)
+                            ctx:set_next_item_width(105)
                             if ctx:begin_combo("##sync_rate_" .. guid, sync_rates[current_idx + 1] or "1/4") then
                                 for i, rate_name in ipairs(sync_rates) do
                                     if ctx:selectable(rate_name, i - 1 == current_idx) then
@@ -351,10 +367,10 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
                     ctx:same_line()
 
-                    -- Phase slider
+                    -- Phase slider (matching Preset column width for symmetry)
                     local ok_phase, phase = pcall(function() return expanded_modulator:get_param_normalized(4) end)
                     if ok_phase then
-                        ctx:set_next_item_width(phase_width)
+                        ctx:set_next_item_width(85)
                         local phase_deg = phase * 360
                         local changed, new_phase_deg = ctx:slider_double("##phase_" .. guid, phase_deg, 0, 360, "%.0f°")
                         if changed then
@@ -368,16 +384,13 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
                     ctx:spacing()
 
-                    -- Trigger and Mode on same line (no labels)
-                    local trigger_width = 100
-
-                    -- Trigger Mode dropdown
+                    -- Trigger Mode dropdown (matching Rate column width for symmetry)
                     local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_TRIGGER_MODE) end)
                     local trig_idx = nil  -- Declare outside so it's accessible in Advanced section
                     if ok_trig then
                         local trigger_modes = {"Free", "Transport", "MIDI", "Audio"}
                         trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
-                        ctx:set_next_item_width(trigger_width)
+                        ctx:set_next_item_width(105)
                         if ctx:begin_combo("##trigger_mode_" .. guid, trigger_modes[trig_idx + 1] or "Free") then
                             for i, mode_name in ipairs(trigger_modes) do
                                 if ctx:selectable(mode_name, i - 1 == trig_idx) then
@@ -392,19 +405,27 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         end
                     end
 
-                    ctx:spacing()
+                    ctx:same_line()
 
-                    -- Advanced section (collapsible)
-                    local advanced_key = "mod_advanced_" .. guid .. "_" .. expanded_slot_idx
-                    local is_advanced_open = state.modulator_advanced[advanced_key] or false
-
-                    if ctx:tree_node("Advanced##adv_" .. guid) then
-                        state.modulator_advanced[advanced_key] = true
-
+                    -- Advanced button (opens popup)
+                    local advanced_popup_id = "Advanced##adv_popup_" .. guid
+                    if ctx:button("⚙##adv_btn_" .. guid, 24, 0) then
+                        r.ImGui_OpenPopup(ctx.ctx, advanced_popup_id)
+                    end
+                    if ctx:is_item_hovered() then
+                        ctx:set_tooltip("Advanced Settings")
+                    end
+                    
+                    -- Advanced popup modal
+                    r.ImGui_SetNextWindowSize(ctx.ctx, 250, 0, imgui.Cond.FirstUseEver())
+                    if r.ImGui_BeginPopup(ctx.ctx, advanced_popup_id) then
+                        ctx:text("Advanced Settings")
+                        ctx:separator()
+                        
                         -- Show additional params based on trigger mode
                         if ok_trig and trig_idx == 2 then
                             -- MIDI trigger mode
-                            -- MIDI Source (slider21 - discrete parameter)
+                            ctx:text("MIDI Source")
                             local midi_src = expanded_modulator:get_param(PARAM.PARAM_MIDI_SOURCE)
                             if midi_src then
                                 if ctx:radio_button("This Track##midi_src_" .. guid, midi_src < 0.5) then
@@ -421,7 +442,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             -- MIDI Note (slider22)
                             local ok_note, midi_note = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_MIDI_NOTE) end)
                             if ok_note then
-                                ctx:set_next_item_width(control_width)
+                                ctx:set_next_item_width(150)
                                 local note_val = math.floor(midi_note * 127 + 0.5)
                                 local changed, new_note_val = ctx:slider_int("MIDI Note##note_" .. guid, note_val, 0, 127, note_val == 0 and "Any" or tostring(note_val))
                                 if changed then
@@ -431,10 +452,9 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             end
                         elseif ok_trig and trig_idx == 3 then
                             -- Audio trigger mode
-                            -- Audio Threshold (slider23)
                             local ok_thresh, audio_thresh = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD) end)
                             if ok_thresh then
-                                ctx:set_next_item_width(control_width)
+                                ctx:set_next_item_width(150)
                                 local changed, new_thresh = ctx:slider_double("Threshold##thresh_" .. guid, audio_thresh, 0, 1, "%.2f")
                                 if changed then
                                     expanded_modulator:set_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD, new_thresh)
@@ -443,13 +463,16 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             end
                         end
 
-                        -- Attack/Release (always show in advanced)
+                        -- Attack/Release (show when trigger mode is not Free)
                         if ok_trig and trig_idx and trig_idx > 0 then
+                            ctx:spacing()
+                            ctx:text("Envelope")
+                            
                             -- Attack (slider24)
                             local ok_atk, attack_ms = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_ATTACK) end)
                             if ok_atk then
                                 local atk_val = attack_ms * 1999 + 1  -- 1-2000ms
-                                ctx:set_next_item_width(control_width)
+                                ctx:set_next_item_width(150)
                                 local changed, new_atk_val = ctx:slider_double("Attack##atk_" .. guid, atk_val, 1, 2000, "%.0f ms")
                                 if changed then
                                     expanded_modulator:set_param_normalized(PARAM.PARAM_ATTACK, (new_atk_val - 1) / 1999)
@@ -461,7 +484,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                             local ok_rel, release_ms = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_RELEASE) end)
                             if ok_rel then
                                 local rel_val = release_ms * 4999 + 1  -- 1-5000ms
-                                ctx:set_next_item_width(control_width)
+                                ctx:set_next_item_width(150)
                                 local changed, new_rel_val = ctx:slider_double("Release##rel_" .. guid, rel_val, 1, 5000, "%.0f ms")
                                 if changed then
                                     expanded_modulator:set_param_normalized(PARAM.PARAM_RELEASE, (new_rel_val - 1) / 4999)
@@ -469,10 +492,14 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                 end
                             end
                         end
-
-                        ctx:tree_pop()
-                    else
-                        state.modulator_advanced[advanced_key] = false
+                        
+                        -- Show message if trigger mode is Free
+                        if ok_trig and trig_idx == 0 then
+                            ctx:text_colored(0x888888FF, "Select a trigger mode")
+                            ctx:text_colored(0x888888FF, "to see more options")
+                        end
+                        
+                        r.ImGui_EndPopup(ctx.ctx)
                     end
 
                     ctx:spacing()
@@ -532,7 +559,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
                         if ok_params and param_count and param_count > 0 then
                             local current_param_name = "Link Parameter..."
-                            ctx:set_next_item_width(control_width)
+                            ctx:set_next_item_width(full_width)
                             if ctx:begin_combo("##link_param_" .. guid, current_param_name) then
                                 for param_idx = 0, param_count - 1 do
                                     local ok_pname, param_name = pcall(function() return target_device:get_param_name(param_idx) end)
