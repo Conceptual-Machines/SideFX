@@ -189,7 +189,8 @@ end
 -- Draw the curve editor
 -- Returns: interacted (bool), and updates state table with any changes
 -- skip_capture_button: when true, don't create InvisibleButton (caller handles it)
-function M.draw(ctx, modulator, width, height, state, skip_capture_button)
+-- item_hovered, item_clicked, item_right_clicked: when skip_capture_button=true, caller passes these
+function M.draw(ctx, modulator, width, height, state, skip_capture_button, item_hovered, item_clicked, item_right_clicked)
     local interacted = false
     state = state or {}
     
@@ -211,8 +212,13 @@ function M.draw(ctx, modulator, width, height, state, skip_capture_button)
     -- Reserve space - use InvisibleButton to capture clicks unless caller handles it
     if skip_capture_button then
         ctx:dummy(width, height)  -- Just reserve space, caller provides click capture
+        -- item_hovered, item_clicked, item_right_clicked are passed by caller
     else
         r.ImGui_InvisibleButton(ctx.ctx, "curve_editor_area##" .. tostring(modulator.pointer), width, height)
+        -- Capture item state - this respects ImGui's popup/focus system
+        item_hovered = r.ImGui_IsItemHovered(ctx.ctx)
+        item_clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
+        item_right_clicked = r.ImGui_IsItemClicked(ctx.ctx, 1)
     end
     
     -- Padding
@@ -320,50 +326,47 @@ function M.draw(ctx, modulator, width, height, state, skip_capture_button)
     state.hover_segment = hover_segment
     
     -- Mouse interaction
+    -- Use item_hovered/item_clicked which respect ImGui's popup/focus system
     local left_down = r.ImGui_IsMouseDown(ctx.ctx, 0)
-    local left_clicked = r.ImGui_IsMouseClicked(ctx.ctx, 0)
-    local right_clicked = r.ImGui_IsMouseClicked(ctx.ctx, 1)
-    
-    if mouse_in_area then
-        if left_clicked then
-            if shift and hover_segment > 0 then
-                -- Start dragging segment curve
-                state.drag_segment = hover_segment
-                state.drag_start_y = norm_my
-                state.drag_start_curve = segment_curves[hover_segment] or 0
-                interacted = true
-            elseif hover_node > 0 then
-                -- Start dragging existing node
-                state.drag_node = hover_node
-                state.drag_start_x = points[hover_node].x
-                state.drag_start_y = points[hover_node].y
-                interacted = true
-            elseif num_points < MAX_POINTS and not shift then
-                -- Add new node (only when not in Shift mode)
-                local new_x = math.max(0.001, math.min(0.999, norm_mx))
-                local new_y = math.max(0, math.min(1, norm_my))
-                -- Add to end and write
-                local new_idx = num_points + 1
-                M.write_num_points_to_fx(modulator, new_idx)
-                M.write_point_to_fx(modulator, new_idx, new_x, new_y)
-                interacted = true
-            end
+
+    if item_hovered and item_clicked then
+        if shift and hover_segment > 0 then
+            -- Start dragging segment curve
+            state.drag_segment = hover_segment
+            state.drag_start_y = norm_my
+            state.drag_start_curve = segment_curves[hover_segment] or 0
+            interacted = true
+        elseif hover_node > 0 then
+            -- Start dragging existing node
+            state.drag_node = hover_node
+            state.drag_start_x = points[hover_node].x
+            state.drag_start_y = points[hover_node].y
+            interacted = true
+        elseif num_points < MAX_POINTS and not shift then
+            -- Add new node (only when not in Shift mode)
+            local new_x = math.max(0.001, math.min(0.999, norm_mx))
+            local new_y = math.max(0, math.min(1, norm_my))
+            -- Add to end and write
+            local new_idx = num_points + 1
+            M.write_num_points_to_fx(modulator, new_idx)
+            M.write_point_to_fx(modulator, new_idx, new_x, new_y)
+            interacted = true
         end
-        
-        if right_clicked and hover_node > 0 and num_points > 2 then
-            -- Delete node (but not endpoints)
-            local sorted_pts = sort_points_by_x(points)
-            local is_endpoint = (sorted_pts[1].orig_idx == hover_node) or 
-                               (sorted_pts[#sorted_pts].orig_idx == hover_node)
-            if not is_endpoint then
-                -- Shift points down
-                for i = hover_node, num_points - 1 do
-                    local next_pt = points[i + 1]
-                    M.write_point_to_fx(modulator, i, next_pt.x, next_pt.y)
-                end
-                M.write_num_points_to_fx(modulator, num_points - 1)
-                interacted = true
+    end
+
+    if item_hovered and item_right_clicked and hover_node > 0 and num_points > 2 then
+        -- Delete node (but not endpoints)
+        local sorted_pts = sort_points_by_x(points)
+        local is_endpoint = (sorted_pts[1].orig_idx == hover_node) or
+                           (sorted_pts[#sorted_pts].orig_idx == hover_node)
+        if not is_endpoint then
+            -- Shift points down
+            for i = hover_node, num_points - 1 do
+                local next_pt = points[i + 1]
+                M.write_point_to_fx(modulator, i, next_pt.x, next_pt.y)
             end
+            M.write_num_points_to_fx(modulator, num_points - 1)
+            interacted = true
         end
     end
     
@@ -513,10 +516,15 @@ function M.draw_popup(ctx, modulator, state, popup_id)
             local cursor_pos_x, cursor_pos_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
             r.ImGui_InvisibleButton(ctx.ctx, "editor_capture", avail_w, editor_h)
 
+            -- Capture item state before drawing - this respects ImGui's popup/focus system
+            local editor_item_hovered = r.ImGui_IsItemHovered(ctx.ctx)
+            local editor_item_clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
+            local editor_item_right_clicked = r.ImGui_IsItemClicked(ctx.ctx, 1)
+
             -- Draw editor on top of the button (using same position)
-            -- Pass skip_capture_button=true since we already have one above
+            -- Pass skip_capture_button=true and item state since we handle capture above
             r.ImGui_SetCursorScreenPos(ctx.ctx, cursor_pos_x, cursor_pos_y)
-            local editor_interacted, new_state = M.draw(ctx, modulator, avail_w, editor_h, state, true)
+            local editor_interacted, new_state = M.draw(ctx, modulator, avail_w, editor_h, state, true, editor_item_hovered, editor_item_clicked, editor_item_right_clicked)
             if editor_interacted then
                 interacted = true
             end
