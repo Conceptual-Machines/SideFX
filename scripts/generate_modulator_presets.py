@@ -116,9 +116,6 @@ def main():
         ("Square", 4, [(0, 1), (0.499, 1), (0.5, 0), (1, 0)]),
         ("Ramp_Up", 2, [(0, 0), (1, 1)]),
         ("Ramp_Down", 2, [(0, 1), (1, 0)]),
-        ("Growl", 6, [(0, 0.1), (0.2, 0.8), (0.4, 0.2), (0.6, 0.9), (0.8, 0.3), (1, 0)]),
-        ("Exp_Rise", 2, [(0, 0), (1, 1)]),
-        ("Exp_Fall", 2, [(0, 1), (1, 0)]),
     ]
 
     for name, num_pts, points in basic:
@@ -128,8 +125,14 @@ def main():
         print("  >")
 
     # Curved shapes - WITH curves
+    # Note: Curve values are empirically determined from REAPER's UI.
+    # The visual effect depends on segment direction (up vs down),
+    # so values that look similar can produce opposite visual results.
     curved = [
-        ("Shark_Fin", 3, [(0, 0), (0.2, 1), (1, 0)], [-0.5, 0.5]),
+        ("Shark_Fin", 3, [(0, 0), (0.2, 1), (1, 0)], [0.82, 0.80]),
+        ("Growl", 6, [(0, 0.1), (0.2, 0.8), (0.4, 0.2), (0.6, 0.9), (0.8, 0.3), (1, 0)], [-1.0, 1.0, -1.0, 1.0, -0.52]),
+        ("Exp_Rise", 4, [(0, 0), (0.33, 0.05), (0.67, 0.3), (1, 1)], [0.5, 0.5, 0.5]),
+        ("Exp_Fall", 4, [(0, 1), (0.33, 0.25), (0.67, 0.05), (1, 0)], [-0.5, -0.5, -0.5]),
     ]
 
     for name, num_pts, points, curves in curved:
