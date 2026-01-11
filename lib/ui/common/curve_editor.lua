@@ -439,20 +439,39 @@ function M.draw(ctx, modulator, width, height, state, skip_capture_button, item_
         end
     end
 
-    if item_hovered and item_right_clicked and hover_node > 0 and num_points > 2 then
-        -- Delete node (but not endpoints)
-        local sorted_pts = sort_points_by_x(points)
-        local is_endpoint = (sorted_pts[1].orig_idx == hover_node) or
-                           (sorted_pts[#sorted_pts].orig_idx == hover_node)
-        if not is_endpoint then
-            -- Shift points down
-            for i = hover_node, num_points - 1 do
-                local next_pt = points[i + 1]
-                M.write_point_to_fx(modulator, i, next_pt.x, next_pt.y)
+    if item_hovered and item_right_clicked then
+        if hover_node > 0 and num_points > 2 then
+            -- Delete node (but not endpoints)
+            local sorted_pts = sort_points_by_x(points)
+            local is_endpoint = (sorted_pts[1].orig_idx == hover_node) or
+                               (sorted_pts[#sorted_pts].orig_idx == hover_node)
+            if not is_endpoint then
+                -- Shift points down
+                for i = hover_node, num_points - 1 do
+                    local next_pt = points[i + 1]
+                    M.write_point_to_fx(modulator, i, next_pt.x, next_pt.y)
+                end
+                M.write_num_points_to_fx(modulator, num_points - 1)
+                interacted = true
             end
-            M.write_num_points_to_fx(modulator, num_points - 1)
+        elseif hover_node <= 0 then
+            -- Right-click in empty space - open context menu
+            r.ImGui_OpenPopup(ctx.ctx, "curve_context_menu##" .. tostring(modulator.pointer))
+        end
+    end
+
+    -- Context menu popup
+    if r.ImGui_BeginPopup(ctx.ctx, "curve_context_menu##" .. tostring(modulator.pointer)) then
+        if r.ImGui_MenuItem(ctx.ctx, "Init (Line)") then
+            -- Reset to simple 2-point line: L (0,0) to R (1,1)
+            M.write_num_points_to_fx(modulator, 2)
+            M.write_point_to_fx(modulator, 1, 0, 0)  -- Left point at bottom
+            M.write_point_to_fx(modulator, 2, 1, 1)  -- Right point at top
+            -- Reset segment curve to linear
+            M.write_segment_curve_to_fx(modulator, 1, 0)
             interacted = true
         end
+        r.ImGui_EndPopup(ctx.ctx)
     end
     
     -- Continue dragging segment curve (Shift+drag)
