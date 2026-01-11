@@ -6,8 +6,8 @@ local M = {}
 local r = reaper
 local imgui = require('imgui')
 local state_module = require('lib.core.state')
+local config = require('lib.core.config')
 local PARAM = require('lib.modulator.modulator_constants')
-local param_indices = require('lib.modulator.param_indices')
 local drawing = require('lib.ui.common.drawing')
 local modulator_module = require('lib.modulator.modulator')
 local curve_editor = require('lib.ui.common.curve_editor')
@@ -627,24 +627,28 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
 end
 
 -- Helper: Draw existing parameter links
-local function draw_existing_links(ctx, guid, fx, existing_links, state)
+local function draw_existing_links(ctx, guid, fx, existing_links, state, expanded_modulator, opts)
     local interacted = false
 
     if #existing_links > 0 then
         state.link_bipolar = state.link_bipolar or {}
+        state.link_disabled = state.link_disabled or {}
+        state.link_saved_scale = state.link_saved_scale or {}
 
         -- Visual separator before linked params
         ctx:separator()
         ctx:spacing()
 
         -- Use table for consistent column alignment
+        -- Columns: Name | U/B | Depth | Disable | Bake | Remove
         local table_flags = r.ImGui_TableFlags_SizingFixedFit()
-        if ctx:begin_table("links_" .. guid, 4, table_flags) then
-            -- Setup columns: Name (fixed), U/B (fixed), Depth (stretch), X (fixed)
-            r.ImGui_TableSetupColumn(ctx.ctx, "Name", r.ImGui_TableColumnFlags_WidthFixed(), 60)
+        if ctx:begin_table("links_" .. guid, 6, table_flags) then
+            r.ImGui_TableSetupColumn(ctx.ctx, "Name", r.ImGui_TableColumnFlags_WidthFixed(), 55)
             r.ImGui_TableSetupColumn(ctx.ctx, "Mode", r.ImGui_TableColumnFlags_WidthFixed(), 42)
             r.ImGui_TableSetupColumn(ctx.ctx, "Depth", r.ImGui_TableColumnFlags_WidthStretch(), 1)
-            r.ImGui_TableSetupColumn(ctx.ctx, "Del", r.ImGui_TableColumnFlags_WidthFixed(), 20)
+            r.ImGui_TableSetupColumn(ctx.ctx, "Dis", r.ImGui_TableColumnFlags_WidthFixed(), 18)
+            r.ImGui_TableSetupColumn(ctx.ctx, "Bake", r.ImGui_TableColumnFlags_WidthFixed(), 18)
+            r.ImGui_TableSetupColumn(ctx.ctx, "Del", r.ImGui_TableColumnFlags_WidthFixed(), 18)
 
             for i, link in ipairs(existing_links) do
                 local link_key = guid .. "_" .. link.param_idx
@@ -652,19 +656,36 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
                 local plink_prefix = string.format("param.%d.plink.", link.param_idx)
                 local actual_depth = link.scale
 
+                -- Check if link is disabled (scale ~= 0 or we have saved scale)
+                local is_disabled = state.link_disabled[link_key] or false
+                -- Also detect if scale is 0 but we don't have it tracked
+                if math.abs(actual_depth) < 0.001 and state.link_saved_scale[link_key] then
+                    is_disabled = true
+                    state.link_disabled[link_key] = true
+                end
+
                 ctx:table_next_row()
+
+                -- Grey out disabled links
+                if is_disabled then
+                    ctx:push_style_color(imgui.Col.Text(), 0x666666FF)
+                end
 
                 -- Column 1: Parameter name
                 ctx:table_set_column_index(0)
-                ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)
-                local short_name = link.param_name:sub(1, 8)
-                if #link.param_name > 8 then short_name = short_name .. ".." end
+                if not is_disabled then
+                    ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)
+                end
+                local short_name = link.param_name:sub(1, 7)
+                if #link.param_name > 7 then short_name = short_name .. ".." end
                 ctx:text(short_name)
-                ctx:pop_style_color()
+                if not is_disabled then
+                    ctx:pop_style_color()
+                end
 
                 -- Column 2: Uni/Bi buttons
                 ctx:table_set_column_index(1)
-                if not is_bipolar then
+                if not is_bipolar and not is_disabled then
                     ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                 end
                 if ctx:button("U##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
@@ -674,7 +695,7 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
                         interacted = true
                     end
                 end
-                if not is_bipolar then
+                if not is_bipolar and not is_disabled then
                     ctx:pop_style_color()
                 end
                 if ctx:is_item_hovered() then
@@ -683,7 +704,7 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
 
                 ctx:same_line(0, 0)
 
-                if is_bipolar then
+                if is_bipolar and not is_disabled then
                     ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                 end
                 if ctx:button("B##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
@@ -693,7 +714,7 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
                         interacted = true
                     end
                 end
-                if is_bipolar then
+                if is_bipolar and not is_disabled then
                     ctx:pop_style_color()
                 end
                 if ctx:is_item_hovered() then
@@ -703,9 +724,12 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
                 -- Column 3: Depth slider
                 ctx:table_set_column_index(2)
                 ctx:set_next_item_width(-1)
-                local depth_pct = actual_depth * 100
-                local changed, new_depth_pct = ctx:slider_double("##depth_" .. link.param_idx .. "_" .. guid, depth_pct, -100, 100, "%.0f%%")
-                if changed then
+                local display_depth = is_disabled and (state.link_saved_scale[link_key] or 0) * 100 or actual_depth * 100
+                if is_disabled then
+                    r.ImGui_BeginDisabled(ctx.ctx)
+                end
+                local changed, new_depth_pct = ctx:slider_double("##depth_" .. link.param_idx .. "_" .. guid, display_depth, -100, 100, "%.0f%%")
+                if changed and not is_disabled then
                     local new_depth = new_depth_pct / 100
                     if is_bipolar then
                         fx:set_named_config_param(plink_prefix .. "offset", "-0.5")
@@ -713,12 +737,59 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
                     fx:set_named_config_param(plink_prefix .. "scale", tostring(new_depth))
                     interacted = true
                 end
+                if is_disabled then
+                    r.ImGui_EndDisabled(ctx.ctx)
+                end
                 if ctx:is_item_hovered() then
                     ctx:set_tooltip("Modulation depth")
                 end
 
-                -- Column 4: Remove button
+                -- Column 4: Disable/Enable toggle button
                 ctx:table_set_column_index(3)
+                local disable_icon = is_disabled and ">" or "||"
+                if is_disabled then
+                    ctx:push_style_color(imgui.Col.Button(), 0x444444FF)
+                end
+                if ctx:button(disable_icon .. "##dis_" .. i .. "_" .. guid, 18, 0) then
+                    if is_disabled then
+                        -- Re-enable: restore saved scale
+                        local saved = state.link_saved_scale[link_key] or 0.5
+                        fx:set_named_config_param(plink_prefix .. "scale", tostring(saved))
+                        state.link_disabled[link_key] = false
+                    else
+                        -- Disable: save current scale, set to 0
+                        state.link_saved_scale[link_key] = actual_depth
+                        fx:set_named_config_param(plink_prefix .. "scale", "0")
+                        state.link_disabled[link_key] = true
+                    end
+                    interacted = true
+                end
+                if is_disabled then
+                    ctx:pop_style_color()
+                end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip(is_disabled and "Enable link" or "Disable link")
+                end
+
+                -- Column 5: Bake button
+                ctx:table_set_column_index(4)
+                if ctx:button("B##bake_" .. i .. "_" .. guid, 18, 0) then
+                    -- Open bake modal for this specific link
+                    state.bake_modal = state.bake_modal or {}
+                    state.bake_modal[guid] = {
+                        open = true,
+                        link = link,
+                        modulator = expanded_modulator,
+                        fx = fx
+                    }
+                    interacted = true
+                end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip("Bake to automation")
+                end
+
+                -- Column 6: Remove button
+                ctx:table_set_column_index(5)
                 if ctx:button("X##rm_" .. i .. "_" .. guid, 18, 0) then
                     local lk = guid .. "_" .. link.param_idx
                     local restore_value = (state.link_baselines and state.link_baselines[lk]) or link.baseline or 0
@@ -726,18 +797,24 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
                         fx:set_param_normalized(link.param_idx, restore_value)
                         if state.link_baselines then state.link_baselines[lk] = nil end
                         if state.link_bipolar then state.link_bipolar[lk] = nil end
+                        if state.link_disabled then state.link_disabled[lk] = nil end
+                        if state.link_saved_scale then state.link_saved_scale[lk] = nil end
                         interacted = true
                     end
                 end
                 if ctx:is_item_hovered() then
                     ctx:set_tooltip("Remove link")
                 end
+
+                if is_disabled then
+                    ctx:pop_style_color()
+                end
             end
 
             ctx:end_table()
         end
     end
-    
+
     return interacted
 end
 
@@ -860,90 +937,58 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     
                     -- Show existing parameter links
                     ctx:spacing()
-                    if draw_existing_links(ctx, guid, fx, existing_links, state) then
+                    if draw_existing_links(ctx, guid, fx, existing_links, state, expanded_modulator, opts) then
                         interacted = true
                     end
 
-                    -- Bake section
-                    ctx:spacing()
-                    ctx:separator()
-                    ctx:spacing()
+                    -- Bake All button (opens modal or uses default range)
+                    if #existing_links > 0 then
+                        ctx:spacing()
+                        ctx:separator()
+                        ctx:spacing()
 
-                    -- Range mode dropdown
-                    state.bake_range_mode = state.bake_range_mode or {}
-                    local range_key = guid
-                    if state.bake_range_mode[range_key] == nil then
-                        state.bake_range_mode[range_key] = modulator_bake.RANGE_MODE.TRACK  -- Default to track items
-                    end
-                    local current_range_mode = state.bake_range_mode[range_key]
-                    local range_label = modulator_bake.RANGE_MODE_LABELS[current_range_mode] or "Track Items"
-
-                    ctx:text("Range:")
-                    ctx:same_line()
-                    ctx:set_next_item_width(-1)
-                    if ctx:begin_combo("##range_mode_" .. guid, range_label) then
-                        for mode_val, mode_label in pairs(modulator_bake.RANGE_MODE_LABELS) do
-                            if ctx:selectable(mode_label, mode_val == current_range_mode) then
-                                state.bake_range_mode[range_key] = mode_val
+                        local can_bake = state.track ~= nil
+                        if not can_bake then
+                            r.ImGui_BeginDisabled(ctx.ctx)
+                        end
+                        if ctx:button("Bake All##bake_all_" .. guid, -1, 0) then
+                            if can_bake then
+                                -- Check config: show picker or use default?
+                                if config.get('bake_show_range_picker') then
+                                    -- Open bake modal for all links
+                                    state.bake_modal = state.bake_modal or {}
+                                    state.bake_modal[guid] = {
+                                        open = true,
+                                        link = nil,  -- nil = all links
+                                        links = existing_links,
+                                        modulator = expanded_modulator,
+                                        fx = fx
+                                    }
+                                else
+                                    -- Use default range directly
+                                    local bake_options = {
+                                        range_mode = config.get('bake_default_range_mode'),
+                                        disable_link = config.get('bake_disable_link_after')
+                                    }
+                                    local ok, result, msg = pcall(function()
+                                        return modulator_bake.bake_all_links(state.track, expanded_modulator, fx, existing_links, bake_options)
+                                    end)
+                                    if ok and result then
+                                        r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
+                                    elseif not ok then
+                                        r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
+                                    else
+                                        r.ShowConsoleMsg("SideFX: " .. tostring(msg or "No parameters to bake") .. "\n")
+                                    end
+                                end
                                 interacted = true
                             end
                         end
-                        ctx:end_combo()
-                    end
-                    if ctx:is_item_hovered() then
-                        ctx:set_tooltip("Time range to bake automation")
-                    end
-
-                    ctx:spacing()
-
-                    -- Disable link checkbox
-                    state.bake_disable_link = state.bake_disable_link or {}
-                    local disable_key = guid
-                    if state.bake_disable_link[disable_key] == nil then
-                        state.bake_disable_link[disable_key] = true  -- Default to checked
-                    end
-                    local changed, new_disable = r.ImGui_Checkbox(ctx.ctx, "Disable link after bake##disable_" .. guid, state.bake_disable_link[disable_key])
-                    if changed then
-                        state.bake_disable_link[disable_key] = new_disable
-                        interacted = true
-                    end
-                    if ctx:is_item_hovered() then
-                        ctx:set_tooltip("Set modulation depth to 0 after baking (automation takes over)")
-                    end
-
-                    -- Bake All button
-                    local can_bake = #existing_links > 0 and state.track
-                    if not can_bake then
-                        r.ImGui_BeginDisabled(ctx.ctx)
-                    end
-                    if ctx:button("Bake All##bake_" .. guid, -1, 0) then
-                        if can_bake then
-                            local bake_options = {
-                                range_mode = state.bake_range_mode[range_key],
-                                disable_link = state.bake_disable_link[disable_key]
-                            }
-                            local ok, result, msg = pcall(function()
-                                return modulator_bake.bake_all_links(state.track, expanded_modulator, fx, existing_links, bake_options)
-                            end)
-                            if ok and result then
-                                r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
-                            elseif not ok then
-                                r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
-                            else
-                                r.ShowConsoleMsg("SideFX: " .. tostring(msg or "No parameters to bake") .. "\n")
-                            end
-                            interacted = true
+                        if not can_bake then
+                            r.ImGui_EndDisabled(ctx.ctx)
                         end
-                    end
-                    if not can_bake then
-                        r.ImGui_EndDisabled(ctx.ctx)
-                    end
-                    if ctx:is_item_hovered() then
-                        if can_bake then
-                            local range_tip = modulator_bake.RANGE_MODE_LABELS[state.bake_range_mode[range_key]] or "Track Items"
-                            ctx:set_tooltip("Bake LFO to automation (" .. range_tip .. ")")
-                        else
-                            ctx:set_tooltip("Link a parameter first")
+                        if ctx:is_item_hovered() then
+                            ctx:set_tooltip("Bake all linked parameters to automation")
                         end
                     end
                 end
@@ -1055,6 +1100,101 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
             if not p_open then
                 popup_state.open = false
                 popup_state.opened_frame = nil
+            end
+        end
+    end
+
+    -- Draw bake modal popup
+    state.bake_modal = state.bake_modal or {}
+    for modal_guid, modal_state in pairs(state.bake_modal) do
+        if modal_state.open then
+            local popup_id = "Bake to Automation##bake_modal_" .. modal_guid
+            if not modal_state.opened_frame then
+                r.ImGui_OpenPopup(ctx.ctx, popup_id)
+                modal_state.opened_frame = true
+            end
+
+            local popup_flags = r.ImGui_WindowFlags_AlwaysAutoResize()
+            local visible = r.ImGui_BeginPopup(ctx.ctx, popup_id, popup_flags)
+            if visible then
+                local is_all_links = modal_state.link == nil
+                local title = is_all_links and "Bake All Parameters" or ("Bake: " .. (modal_state.link and modal_state.link.param_name or ""))
+                ctx:text(title)
+                ctx:separator()
+                ctx:spacing()
+
+                ctx:text("Select range:")
+                ctx:spacing()
+
+                -- Range mode buttons (one per line for clarity)
+                local default_range = config.get('bake_default_range_mode')
+                for mode_val = 1, 4 do
+                    local mode_label = modulator_bake.RANGE_MODE_LABELS[mode_val]
+                    if mode_label then
+                        local is_default = mode_val == default_range
+                        local btn_label = mode_label .. (is_default and " *" or "")
+
+                        if ctx:button(btn_label .. "##range_" .. mode_val, -1, 0) then
+                            -- Perform the bake
+                            local bake_options = {
+                                range_mode = mode_val,
+                                disable_link = config.get('bake_disable_link_after')
+                            }
+
+                            local ok, result, msg
+                            if is_all_links then
+                                ok, result, msg = pcall(function()
+                                    return modulator_bake.bake_all_links(
+                                        state.track,
+                                        modal_state.modulator,
+                                        modal_state.fx,
+                                        modal_state.links,
+                                        bake_options
+                                    )
+                                end)
+                            else
+                                ok, result, msg = pcall(function()
+                                    return modulator_bake.bake_to_automation(
+                                        state.track,
+                                        modal_state.modulator,
+                                        modal_state.fx,
+                                        modal_state.link.param_idx,
+                                        bake_options
+                                    )
+                                end)
+                            end
+
+                            if ok and result then
+                                r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
+                            elseif not ok then
+                                r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
+                            else
+                                r.ShowConsoleMsg("SideFX: " .. tostring(msg or "Bake failed") .. "\n")
+                            end
+
+                            modal_state.open = false
+                            modal_state.opened_frame = nil
+                            r.ImGui_CloseCurrentPopup(ctx.ctx)
+                            interacted = true
+                        end
+                    end
+                end
+
+                ctx:spacing()
+                ctx:separator()
+                ctx:spacing()
+
+                if ctx:button("Cancel##cancel_bake", -1, 0) then
+                    modal_state.open = false
+                    modal_state.opened_frame = nil
+                    r.ImGui_CloseCurrentPopup(ctx.ctx)
+                end
+
+                r.ImGui_EndPopup(ctx.ctx)
+            else
+                -- Popup was closed externally
+                modal_state.open = false
+                modal_state.opened_frame = nil
             end
         end
     end

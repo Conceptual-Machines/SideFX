@@ -35,6 +35,11 @@ local defaults = {
     gain_target_db = -12.0,
     gain_tolerance_db = 1.0,
 
+    -- Bake settings
+    bake_disable_link_after = true,   -- Disable link (set scale=0) after baking
+    bake_default_range_mode = 2,      -- Default range: 1=Project, 2=Track, 3=Time Sel, 4=Selected Item
+    bake_show_range_picker = true,    -- Show range picker modal (false = use default directly)
+
     -- Paths (nil = use defaults)
     presets_folder = nil,  -- nil = [Resource Path]/presets/SideFX_Presets/
 }
