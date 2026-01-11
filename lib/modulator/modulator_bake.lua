@@ -7,7 +7,6 @@
 local r = reaper
 local PARAM = require('lib.modulator.modulator_constants')
 local curve_editor = require('lib.ui.common.curve_editor')
-local state_module = require('lib.core.state')
 
 local M = {}
 
@@ -21,6 +20,14 @@ M.DEFAULT_OPTIONS = {
     disable_link = false,   -- Set link scale to 0 after bake (keeps link but disables it)
     remove_link = false,    -- Remove parameter link after bake
     remove_modulator = false, -- Remove modulator after bake
+}
+
+-- Trigger modes
+local TRIGGER_MODE = {
+    FREE = 0,
+    TRANSPORT = 1,
+    MIDI = 2,
+    AUDIO = 3,
 }
 
 -- Sync rate divisors (beats per cycle)
@@ -49,6 +56,94 @@ local SYNC_RATE_BEATS = {
 --------------------------------------------------------------------------------
 -- Helpers
 --------------------------------------------------------------------------------
+
+--- Get the trigger mode of a modulator
+-- @param modulator TrackFX The modulator FX object
+-- @return number Trigger mode (0=Free, 1=Transport, 2=MIDI, 3=Audio)
+function M.get_trigger_mode(modulator)
+    local ok, trigger_mode = pcall(function()
+        return modulator:get_param(PARAM.PARAM_TRIGGER_MODE)
+    end)
+    return ok and math.floor(trigger_mode + 0.5) or TRIGGER_MODE.FREE
+end
+
+--- Get all MIDI notes (start and end times) from a track within a time range
+-- @param track Track The track object (ReaWrap)
+-- @param start_time number Start time in seconds
+-- @param end_time number End time in seconds
+-- @return table Array of {start, duration} sorted by start time
+function M.get_midi_notes(track, start_time, end_time)
+    local notes = {}
+
+    -- Iterate through all media items on the track
+    local item_count = r.CountTrackMediaItems(track.pointer)
+    for i = 0, item_count - 1 do
+        local item = r.GetTrackMediaItem(track.pointer, i)
+        if item then
+            local item_pos = r.GetMediaItemInfo_Value(item, "D_POSITION")
+            local item_len = r.GetMediaItemInfo_Value(item, "D_LENGTH")
+            local item_end = item_pos + item_len
+
+            -- Check for looped items
+            local take = r.GetActiveTake(item)
+            if take and r.TakeIsMIDI(take) then
+                local source = r.GetMediaItemTake_Source(take)
+                local source_len = r.GetMediaSourceLength(source)
+
+                -- Skip items completely outside our time range
+                if item_end >= start_time and item_pos <= end_time then
+                    -- Get all MIDI notes in this take
+                    local _, note_count = r.MIDI_CountEvts(take)
+
+                    -- Calculate how many loops fit in the item
+                    local num_loops = math.ceil(item_len / source_len)
+
+                    for loop = 0, num_loops - 1 do
+                        local loop_offset = loop * source_len
+
+                        for n = 0, note_count - 1 do
+                            local _, _, _, note_start_ppq, note_end_ppq = r.MIDI_GetNote(take, n)
+                            -- Convert PPQ to project time (relative to item start)
+                            local note_start_rel = r.MIDI_GetProjTimeFromPPQPos(take, note_start_ppq) - item_pos
+                            local note_end_rel = r.MIDI_GetProjTimeFromPPQPos(take, note_end_ppq) - item_pos
+
+                            -- Apply loop offset
+                            local note_start = item_pos + note_start_rel + loop_offset
+                            local note_end = item_pos + note_end_rel + loop_offset
+
+                            -- Clamp to item bounds
+                            if note_start >= item_end then break end
+                            if note_end > item_end then note_end = item_end end
+
+                            -- Only include notes within our time range
+                            if note_start >= start_time and note_start < end_time then
+                                local duration = note_end - note_start
+                                if duration > 0 then
+                                    notes[#notes + 1] = { start = note_start, duration = duration }
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Sort by start time
+    table.sort(notes, function(a, b) return a.start < b.start end)
+
+    -- Filter to monophonic: skip notes that start while previous note is still sounding
+    local mono_notes = {}
+    local last_end = -1
+    for _, note in ipairs(notes) do
+        if note.start >= last_end then
+            mono_notes[#mono_notes + 1] = note
+            last_end = note.start + note.duration
+        end
+    end
+
+    return mono_notes
+end
 
 --- Get the cycle duration of a modulator in seconds
 -- @param modulator TrackFX The modulator FX object
@@ -122,10 +217,10 @@ function M.calculate_param_value(lfo_output, link_info)
     local scale = link_info.scale or 1.0
     local offset = link_info.offset or 0
 
-    -- REAPER plink formula: baseline + (source - offset) * scale
+    -- REAPER plink formula: baseline + (lfo + offset) * scale
     -- For unipolar (offset=0): baseline + lfo * scale → baseline to baseline+scale
-    -- For bipolar (offset=0.5): baseline + (lfo - 0.5) * scale → baseline ± scale/2
-    local final = baseline + (lfo_output - offset) * scale
+    -- For bipolar (offset=-0.5): baseline + (lfo - 0.5) * scale → baseline ± scale/2
+    local final = baseline + (lfo_output + offset) * scale
 
     -- Clamp to 0-1
     return math.max(0, math.min(1, final))
@@ -185,24 +280,17 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
         return false, "Parameter is not linked to a modulator"
     end
 
-
-    -- Get cycle duration
+    -- Get cycle duration and trigger mode
     local cycle_duration = M.get_cycle_duration(modulator)
+    local trigger_mode = M.get_trigger_mode(modulator)
 
-    -- Calculate number of cycles
-    local num_cycles = options.num_cycles
-    if not num_cycles then
-        -- Calculate from num_bars
-        local num_bars = options.num_bars or M.DEFAULT_OPTIONS.num_bars
-        local bpm = r.Master_GetTempo()
-        local _, beats_per_bar = r.GetProjectTimeSignature2(0)
-        beats_per_bar = beats_per_bar or 4
-        local bar_duration = (60 / bpm) * beats_per_bar
-        local total_bar_duration = bar_duration * num_bars
-        num_cycles = math.ceil(total_bar_duration / cycle_duration)
-    end
-
-    local total_duration = cycle_duration * num_cycles
+    -- Determine time range
+    local num_bars = options.num_bars or M.DEFAULT_OPTIONS.num_bars
+    local bpm = r.Master_GetTempo()
+    local _, beats_per_bar = r.GetProjectTimeSignature2(0)
+    beats_per_bar = beats_per_bar or 4
+    local bar_duration = (60 / bpm) * beats_per_bar
+    local total_bar_duration = bar_duration * num_bars
 
     -- Determine start time
     local start_time = options.start_time or M.DEFAULT_OPTIONS.start_time
@@ -213,7 +301,7 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
     if use_edit_cursor then
         start_time = r.GetCursorPosition()
     end
-    local end_time = start_time + total_duration
+    local end_time = start_time + total_bar_duration
 
     -- Get phase offset from modulator
     local ok_phase, phase = pcall(function()
@@ -239,15 +327,75 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
     -- Clear existing points in range
     r.DeleteEnvelopePointRange(envelope, start_time - 0.001, end_time + 0.001)
 
-    -- Insert new points
-    for cycle = 0, num_cycles - 1 do
-        local cycle_start = start_time + cycle * cycle_duration
-        for _, sample in ipairs(samples) do
-            local time = cycle_start + sample.t * cycle_duration
-            local value = M.calculate_param_value(sample.value, link_info)
+    local total_points = 0
+    local num_cycles = 0
 
-            -- shape: 0=linear, 1=square, 2=slow start/end, 3=fast start, 4=fast end, 5=bezier
-            r.InsertEnvelopePointEx(envelope, -1, time, value, 0, 0, false, true)
+    if trigger_mode == TRIGGER_MODE.MIDI then
+        -- MIDI trigger mode: phase resets at each note, rate determines cycle frequency
+        local midi_notes = M.get_midi_notes(track, start_time, end_time)
+
+        if #midi_notes == 0 then
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("Bake LFO to Automation", -1)
+            return false, "No MIDI notes found in time range"
+        end
+
+        r.ShowConsoleMsg(string.format("Bake: Found %d MIDI notes for trigger (cycle_duration=%.3fs)\n",
+            #midi_notes, cycle_duration))
+
+        for _, note in ipairs(midi_notes) do
+            local note_duration = note.duration
+            local note_end = note.start + note_duration
+
+            -- Calculate how many cycles fit in this note based on rate
+            local cycles_in_note = note_duration / cycle_duration
+            local full_cycles = math.floor(cycles_in_note)
+            local partial_cycle_fraction = cycles_in_note - full_cycles
+
+            -- Bake full cycles
+            for cycle = 0, full_cycles - 1 do
+                local cycle_start = note.start + cycle * cycle_duration
+                for _, sample in ipairs(samples) do
+                    local time = cycle_start + sample.t * cycle_duration
+                    if time <= note_end then
+                        local value = M.calculate_param_value(sample.value, link_info)
+                        r.InsertEnvelopePointEx(envelope, -1, time, value, 0, 0, false, true)
+                        total_points = total_points + 1
+                    end
+                end
+                num_cycles = num_cycles + 1
+            end
+
+            -- Bake partial cycle at end of note (if any significant portion remains)
+            if partial_cycle_fraction > 0.01 then
+                local partial_start = note.start + full_cycles * cycle_duration
+                for _, sample in ipairs(samples) do
+                    if sample.t <= partial_cycle_fraction then
+                        local time = partial_start + sample.t * cycle_duration
+                        if time <= note_end then
+                            local value = M.calculate_param_value(sample.value, link_info)
+                            r.InsertEnvelopePointEx(envelope, -1, time, value, 0, 0, false, true)
+                            total_points = total_points + 1
+                        end
+                    end
+                end
+            end
+        end
+    else
+        -- Free/Transport mode: bake continuous cycles
+        num_cycles = options.num_cycles
+        if not num_cycles then
+            num_cycles = math.ceil(total_bar_duration / cycle_duration)
+        end
+
+        for cycle = 0, num_cycles - 1 do
+            local cycle_start = start_time + cycle * cycle_duration
+            for _, sample in ipairs(samples) do
+                local time = cycle_start + sample.t * cycle_duration
+                local value = M.calculate_param_value(sample.value, link_info)
+                r.InsertEnvelopePointEx(envelope, -1, time, value, 0, 0, false, true)
+                total_points = total_points + 1
+            end
         end
     end
 
@@ -270,7 +418,8 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("Bake LFO to Automation", -1)
 
-    return true, string.format("Baked %d points over %.2f seconds (%d cycles)", #samples * num_cycles, total_duration, num_cycles)
+    local mode_str = trigger_mode == TRIGGER_MODE.MIDI and "MIDI triggered" or "continuous"
+    return true, string.format("Baked %d points (%d cycles, %s)", total_points, num_cycles, mode_str)
 end
 
 --- Bake all provided links to automation
