@@ -42,7 +42,8 @@ end
 -- @param guid string FX GUID
 -- @param avail_height number Available height
 -- @param utility ReaWrap utility FX (optional)
-local function draw_fallback_device_panel(ctx, fx, guid, avail_height, utility)
+-- @param on_select function Optional callback when panel is clicked
+local function draw_fallback_device_panel(ctx, fx, guid, avail_height, utility, on_select)
     local name = get_fx_display_name(fx)
     local enabled = fx:get_enabled()
     local total_params = fx:get_num_params()
@@ -58,6 +59,11 @@ local function draw_fallback_device_panel(ctx, fx, guid, avail_height, utility)
 
     ctx:push_style_color(imgui.Col.ChildBg(), enabled and 0x2A2A2AFF or 0x1A1A1AFF)
     if ctx:begin_child("fx_" .. guid, panel_w, panel_h, imgui.ChildFlags.Border()) then
+        -- Click-to-select: detect clicks on panel background
+        if on_select and r.ImGui_IsWindowHovered(ctx.ctx, r.ImGui_HoveredFlags_ChildWindows())
+           and r.ImGui_IsMouseClicked(ctx.ctx, 0) then
+            on_select()
+        end
         ctx:text(name:sub(1, 35))
         ctx:separator()
 
@@ -192,6 +198,13 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
         if ok_name then container_name = name end
     end
 
+    -- Use the container guid if available, otherwise the fx guid
+    local device_guid = container and container:get_guid() or guid
+
+    -- Check if this device is selected (standalone device = single item in path)
+    local is_selected = (#state.expanded_path == 1 and state.expanded_path[1] == device_guid)
+
+    ctx:begin_group()
     if device_panel then
         -- Use full device panel
         device_panel.draw(ctx, fx, {
@@ -203,11 +216,19 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
             icon_font = icon_font,
             track = state.track,
             refresh_fx_list = refresh_fx_list,
+            is_selected = is_selected,  -- For border highlighting
+            on_select = function()
+                -- Click-to-select for standalone devices
+                local state_module = require('lib.core.state')
+                if state.expanded_path[1] ~= device_guid then
+                    state_module.select_standalone_device(device_guid)
+                end
+            end,
             on_delete = function(fx_to_delete)
                 -- Set flag FIRST to stop all rendering immediately
                 local state_module = require('lib.core.state')
                 state_module.state.deletion_pending = true
-                
+
                 if container then
                     -- Delete the whole D-container
                     container:delete()
@@ -238,9 +259,15 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
             end,
         })
     else
-        -- Fallback UI
-        draw_fallback_device_panel(ctx, fx, guid, avail_height, utility)
+        -- Fallback UI with on_select callback
+        draw_fallback_device_panel(ctx, fx, guid, avail_height, utility, function()
+            local state_module = require('lib.core.state')
+            if state.expanded_path[1] ~= device_guid then
+                state_module.select_standalone_device(device_guid)
+            end
+        end)
     end
+    ctx:end_group()
 end
 
 return M

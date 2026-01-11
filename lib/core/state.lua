@@ -329,6 +329,48 @@ function M.toggle_fx_detail(guid)
 end
 
 --------------------------------------------------------------------------------
+-- Breadcrumb Selection Path
+--------------------------------------------------------------------------------
+
+--- Set selection to a rack (clears deeper selections).
+-- @param rack_guid string Rack GUID
+function M.select_rack(rack_guid)
+    state.expanded_path = { rack_guid }
+end
+
+--- Set selection to a chain within a rack.
+-- @param rack_guid string Rack GUID
+-- @param chain_guid string Chain GUID
+function M.select_chain(rack_guid, chain_guid)
+    state.expanded_path = { rack_guid, chain_guid }
+end
+
+--- Set selection to a device within a chain.
+-- @param rack_guid string Rack GUID
+-- @param chain_guid string Chain GUID
+-- @param device_guid string Device GUID
+function M.select_device(rack_guid, chain_guid, device_guid)
+    state.expanded_path = { rack_guid, chain_guid, device_guid }
+end
+
+--- Set selection to a standalone device (not in a rack/chain).
+-- @param device_guid string Device GUID
+function M.select_standalone_device(device_guid)
+    state.expanded_path = { device_guid }
+end
+
+--- Clear the selection path (back to top level).
+function M.clear_selection()
+    state.expanded_path = {}
+end
+
+--- Get the current selection path.
+-- @return table Array of GUIDs representing the selection hierarchy
+function M.get_selection_path()
+    return state.expanded_path
+end
+
+--------------------------------------------------------------------------------
 -- Multi-Selection
 --------------------------------------------------------------------------------
 

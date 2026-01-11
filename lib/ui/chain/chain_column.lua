@@ -29,12 +29,11 @@ local function draw_device_separator(ctx, is_first)
     ctx:same_line()
 end
 
---- Draw chain column header with name and identifier
+--- Draw chain column header with name
 -- @param ctx ImGui context
 -- @param chain_name string Display name of chain
--- @param chain_id string|nil Chain identifier (e.g., "R1_C1")
 -- @param default_font ImGui font handle (optional)
-local function draw_chain_header(ctx, chain_name, chain_id, default_font)
+local function draw_chain_header(ctx, chain_name, default_font)
     ctx:table_next_row(0, 20)  -- Smaller row height (20px)
     ctx:table_set_column_index(0)
     if default_font then
@@ -43,10 +42,6 @@ local function draw_chain_header(ctx, chain_name, chain_id, default_font)
     ctx:text_colored(0xAAAAAAFF, "Chain:")
     ctx:same_line()
     ctx:text(chain_name)
-    if chain_id then
-        ctx:same_line()
-        ctx:text_colored(0x888888FF, " [" .. chain_id .. "]")
-    end
     if default_font then
         ctx:pop_font()
     end
@@ -133,11 +128,14 @@ end
 -- @param device_panel module Device panel module (optional)
 -- @param get_device_main_fx function (container) -> TrackFX|nil
 -- @param get_device_utility function (container) -> TrackFX|nil
-local function draw_device_in_chain(ctx, dev, chain_content_h, selected_chain, callbacks, device_panel, get_device_main_fx, get_device_utility)
+local function draw_device_in_chain(ctx, dev, chain_content_h, selected_chain, callbacks, device_panel, get_device_main_fx, get_device_utility, state)
     local dev_main_fx = get_device_main_fx(dev)
     local dev_utility = get_device_utility(dev)
     local dev_name = fx_utils.get_device_display_name(dev)
     local dev_enabled = dev:get_enabled()
+
+    -- Get device GUID for selection
+    local ok_dev_guid, dev_guid = pcall(function() return dev:get_guid() end)
 
     if dev_main_fx and device_panel then
         device_panel.draw(ctx, dev_main_fx, callbacks)
@@ -145,10 +143,27 @@ local function draw_device_in_chain(ctx, dev, chain_content_h, selected_chain, c
         -- Fallback: simple button
         local btn_color = dev_enabled and 0x3A5A4AFF or 0x2A2A35FF
         ctx:push_style_color(imgui.Col.Button(), btn_color)
-        if ctx:button(dev_name:sub(1, 20) .. "##dev_fallback_" .. dev:get_guid(), 120, chain_content_h - 20) then
+        if ctx:button(dev_name:sub(1, 20) .. "##dev_fallback_" .. (ok_dev_guid and dev_guid or "unknown"), 120, chain_content_h - 20) then
             dev:show(3)
         end
         ctx:pop_style_color()
+    end
+
+    -- Click-to-select for device (check if last item was clicked)
+    if ok_dev_guid and dev_guid and reaper.ImGui_IsItemClicked(ctx.ctx, 0) then
+        -- Get chain and rack GUIDs
+        local ok_chain_guid, chain_guid = pcall(function() return selected_chain:get_guid() end)
+        local ok_parent, parent_rack = pcall(function() return selected_chain:get_parent_container() end)
+        if ok_chain_guid and chain_guid and ok_parent and parent_rack then
+            local ok_rack_guid, rack_guid = pcall(function() return parent_rack:get_guid() end)
+            if ok_rack_guid and rack_guid then
+                local state_module = require('lib.core.state')
+                -- Select device if not already selected
+                if state.expanded_path[3] ~= dev_guid then
+                    state_module.select_device(rack_guid, chain_guid, dev_guid)
+                end
+            end
+        end
     end
 end
 
@@ -236,19 +251,10 @@ function M.draw(ctx, selected_chain, rack_h, opts)
     end
 
     local selected_chain_guid = selected_chain:get_guid()
-    -- Get chain name and identifier separately
+    -- Get chain name for display
     local chain_name_full = fx_utils.get_chain_label_name(selected_chain)
     local fx_naming = require('lib.fx.fx_naming')
     local chain_name = fx_naming.get_short_path(chain_name_full)
-
-    local chain_id = nil
-    local ok_name, raw_name = pcall(function() return selected_chain:get_name() end)
-    if ok_name and raw_name then
-        local chain_id_full = raw_name:match("^(R%d+_C%d+)") or raw_name:match("R%d+_C%d+")
-        if chain_id_full then
-            chain_id = fx_naming.get_short_path(chain_id_full)
-        end
-    end
 
     -- Get devices from chain
     local devices = {}
@@ -269,16 +275,38 @@ function M.draw(ctx, selected_chain, rack_h, opts)
     -- Add padding around content, especially on the right
     ctx:push_style_var(imgui.StyleVar.WindowPadding(), 12, 8)
 
+    -- Check if this chain is selected (second item in expanded_path)
+    local is_chain_selected = (#state.expanded_path >= 2 and state.expanded_path[2] == selected_chain_guid)
+
     ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
+    -- Highlight border if selected
+    if is_chain_selected then
+        ctx:push_style_color(reaper.ImGui_Col_Border(), 0x5588BBAA)  -- Subtle blue highlight
+    end
     local window_flags = imgui.WindowFlags.NoScrollbar()
     if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, 0, rack_h, wrapper_flags, window_flags) then
+        -- Click anywhere on chain to select it (deselects device if one was selected)
+        if reaper.ImGui_IsWindowHovered(ctx.ctx, reaper.ImGui_HoveredFlags_ChildWindows())
+           and reaper.ImGui_IsMouseClicked(ctx.ctx, 0) then
+            -- Get the parent rack to build the selection path
+            local ok_parent, parent_rack = pcall(function() return selected_chain:get_parent_container() end)
+            if ok_parent and parent_rack then
+                local ok_rack_guid, rack_guid = pcall(function() return parent_rack:get_guid() end)
+                if ok_rack_guid and rack_guid then
+                    local state_module = require('lib.core.state')
+                    -- Always select chain level (removes device from path if selected)
+                    state_module.select_chain(rack_guid, selected_chain_guid)
+                end
+            end
+        end
+
         -- Wrap in pcall to ensure end_child is always called
         local ok, err = pcall(function()
             -- Use table layout so header width matches content width
             local table_flags = imgui.TableFlags.SizingStretchSame()
             if ctx:begin_table("chain_table_" .. selected_chain_guid, 1, table_flags) then
-                -- Draw header with chain name and identifier
-                draw_chain_header(ctx, chain_name, chain_id, default_font)
+                -- Draw header with chain name
+                draw_chain_header(ctx, chain_name, default_font)
 
                 -- Row 2: Content
                 ctx:table_next_row()
@@ -326,7 +354,7 @@ function M.draw(ctx, selected_chain, rack_h, opts)
                                             local plugin = { full_name = plugin_name, name = plugin_name }
                                             add_device_to_chain(selected_chain, plugin)
                                         end,
-                                    }, device_panel, get_device_main_fx, get_device_utility)
+                                    }, device_panel, get_device_main_fx, get_device_utility, state)
                                 end
                             end
 
@@ -351,7 +379,11 @@ function M.draw(ctx, selected_chain, rack_h, opts)
             reaper.ShowConsoleMsg("SideFX chain column error: " .. tostring(err) .. "\n")
         end
     end
-    ctx:pop_style_color()
+    -- Pop border color if it was pushed
+    if is_chain_selected then
+        ctx:pop_style_color()
+    end
+    ctx:pop_style_color()  -- ChildBg
     ctx:pop_style_var()
 end
 

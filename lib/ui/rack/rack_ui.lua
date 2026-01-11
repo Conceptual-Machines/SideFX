@@ -122,7 +122,9 @@ local function draw_rack_toggle_button(ctx, rack_guid, expand_icon, rack_name, i
     -- Show only icon when collapsed, full name when expanded
     local button_text = is_expanded and (expand_icon .. " " .. rack_name:sub(1, 20)) or expand_icon
     if ctx:button(button_text .. "##" .. button_id, -1, 20) then
-        callbacks.on_toggle_expand(rack_guid, is_expanded)
+        if callbacks and callbacks.on_toggle_expand then
+            callbacks.on_toggle_expand(rack_guid, is_expanded)
+        end
         return true
     end
     return false
@@ -329,21 +331,19 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
     -- Check if rack is being renamed
     local is_renaming_rack = (state.renaming_fx == rack_guid)
 
-    -- Use table for layout with burger menu, name, path, on/off, and delete
+    -- Use table for layout with burger menu, name, on/off, and delete
     local table_flags = imgui.TableFlags.SizingStretchProp()
-    if ctx:begin_table("rack_header_" .. rack_guid, 5, table_flags) then
+    if ctx:begin_table("rack_header_" .. rack_guid, 4, table_flags) then
         -- Column 0: Burger menu (fixed width)
         ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
         if is_expanded then
             -- Expanded: name gets most space
             ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 7)
-            ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 1)
             ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
             ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
         else
             -- Collapsed: equal distribution
             ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthStretch(), 1)
-            ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 1)
             ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
             ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
         end
@@ -401,16 +401,8 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
             draw_rack_context_menu(ctx, button_id, rack_guid, rack, state, callbacks)
         end
 
-        -- Column 2: Path identifier
+        -- Column 2: ON button
         ctx:table_set_column_index(2)
-        local rack_id = fx_utils.get_rack_identifier(rack)
-        if rack_id then
-            local short_id = fx_naming.get_short_path(rack_id)
-            ctx:text_colored(0x888888FF, "[" .. short_id .. "]")
-        end
-
-        -- Column 3: ON button
-        ctx:table_set_column_index(3)
         local ok_enabled, rack_enabled = pcall(function() return rack:get_enabled() end)
         rack_enabled = ok_enabled and rack_enabled or false
         -- Draw custom circle indicator with colored background
@@ -419,8 +411,8 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
             pcall(function() rack:set_enabled(not rack_enabled) end)
         end
 
-        -- Column 4: X button
-        ctx:table_set_column_index(4)
+        -- Column 3: X button
+        ctx:table_set_column_index(3)
         ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
         if ctx:button("×##rack_del", -1, 20) then
             callbacks.on_delete(rack)

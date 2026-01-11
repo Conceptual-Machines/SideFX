@@ -34,7 +34,10 @@ function M.add_rack_to_track(position)
     if rack then
         -- Use expanded_racks for top-level racks (consistent with nested racks)
         local state = state_module.state
-        state.expanded_racks[rack:get_guid()] = true
+        local rack_guid = rack:get_guid()
+        state.expanded_racks[rack_guid] = true
+        -- Auto-select the newly created rack
+        state_module.select_rack(rack_guid)
         refresh_fx_list()
     end
     return rack
@@ -62,6 +65,24 @@ function M.add_chain_to_rack(rack, plugin)
                 state.expanded_racks[rack_guid] = true
                 -- Track which chain is selected (works for both top-level and nested)
                 state.expanded_nested_chains[rack_guid] = chain_guid
+
+                -- Find the device inside the chain and select it
+                local device_guid = nil
+                for child in chain:iter_container_children() do
+                    local ok, child_guid = pcall(function() return child:get_guid() end)
+                    if ok and child_guid then
+                        device_guid = child_guid
+                        break  -- Take the first device
+                    end
+                end
+
+                if device_guid then
+                    -- Auto-select the device (chain + device)
+                    state_module.select_device(rack_guid, chain_guid, device_guid)
+                else
+                    -- No device found, just select the chain
+                    state_module.select_chain(rack_guid, chain_guid)
+                end
             end
             state_module.save_expansion_state()
         end
@@ -74,8 +95,18 @@ end
 -- @param rack TrackFX Rack container
 -- @return TrackFX|nil Chain FX or nil on failure
 function M.add_empty_chain_to_rack(rack)
+    local rack_guid = rack:get_guid()
     local chain = rack_module.add_empty_chain_to_rack(rack)
     if chain then
+        local chain_guid = chain:get_guid()
+        if chain_guid and rack_guid then
+            local state = state_module.state
+            state.expanded_racks[rack_guid] = true
+            state.expanded_nested_chains[rack_guid] = chain_guid
+            -- Auto-select the newly created chain
+            state_module.select_chain(rack_guid, chain_guid)
+            state_module.save_expansion_state()
+        end
         refresh_fx_list()
     end
     return chain
@@ -112,6 +143,8 @@ function M.add_nested_rack_to_rack(parent_rack)
                     state.expanded_nested_chains[parent_rack_guid] = chain_guid
                 end
             end
+            -- Auto-select the nested rack in breadcrumb path
+            state_module.select_rack(nested_rack_guid)
             state_module.save_expansion_state()
         end
         refresh_fx_list()
@@ -149,6 +182,11 @@ function M.add_device_to_chain(chain, plugin)
             state.expanded_racks[rack_guid] = true
             -- Track which chain is selected (works for both top-level and nested)
             state.expanded_nested_chains[rack_guid] = chain_guid
+            -- Auto-select the newly created device in breadcrumb path
+            local device_guid = device:get_guid()
+            if device_guid then
+                state_module.select_device(rack_guid, chain_guid, device_guid)
+            end
         end
         state_module.save_expansion_state()
         refresh_fx_list()

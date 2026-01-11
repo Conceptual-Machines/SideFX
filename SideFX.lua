@@ -292,7 +292,12 @@ end
 -- Device operations (uses state singleton via device_module)
 local function add_plugin_to_track(plugin, position)
     local result = device_module.add_plugin_to_track(plugin, position)
-    if result then 
+    if result then
+        -- Auto-select the newly created standalone device
+        local device_guid = result:get_guid()
+        if device_guid then
+            state_module.select_standalone_device(device_guid)
+        end
         refresh_fx_list()
     end
     return result
@@ -300,7 +305,14 @@ end
 
 local function add_plugin_by_name(plugin_name, position)
     local result = device_module.add_plugin_by_name(plugin_name, position)
-    if result then refresh_fx_list() end
+    if result then
+        -- Auto-select the newly created standalone device
+        local device_guid = result:get_guid()
+        if device_guid then
+            state_module.select_standalone_device(device_guid)
+        end
+        refresh_fx_list()
+    end
     return result
 end
 

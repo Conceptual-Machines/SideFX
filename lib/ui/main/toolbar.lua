@@ -75,20 +75,32 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         end
 
         -- Breadcrumb trail (for navigating into containers)
-        if config.get('show_breadcrumbs') and #state.expanded_path > 0 then
-            ctx:same_line()
-            ctx:text_disabled(">")
+        if config.get('show_breadcrumbs') and state.track and #state.expanded_path > 0 then
+            -- Build list of valid breadcrumb items
+            local breadcrumbs = {}
             for i, guid in ipairs(state.expanded_path) do
-                ctx:same_line()
-                local container = state.track:find_fx_by_guid(guid)
-                if container then
-                    if ctx:small_button(get_fx_display_name(container) .. "##bread_" .. i) then
-                        callbacks.on_collapse_from_depth(i + 1)
+                local ok, container = pcall(function() return state.track:find_fx_by_guid(guid) end)
+                if ok and container then
+                    local ok_name, name = pcall(function() return get_fx_display_name(container) end)
+                    if ok_name and name then
+                        table.insert(breadcrumbs, { index = i, name = name, guid = guid })
                     end
                 end
-                if i < #state.expanded_path then
+            end
+
+            -- Only display if we have valid breadcrumbs
+            if #breadcrumbs > 0 then
+                ctx:same_line()
+                ctx:text_disabled(">")
+                for j, crumb in ipairs(breadcrumbs) do
                     ctx:same_line()
-                    ctx:text_disabled(">")
+                    if ctx:small_button(crumb.name .. "##bread_" .. crumb.index) then
+                        callbacks.on_collapse_from_depth(crumb.index + 1)
+                    end
+                    if j < #breadcrumbs then
+                        ctx:same_line()
+                        ctx:text_disabled(">")
+                    end
                 end
             end
         end

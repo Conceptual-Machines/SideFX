@@ -42,8 +42,9 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         end
     end
 
-    -- Calculate number of columns: drag | name | path | mix | delta | ui
-    local num_cols = 3  -- base: drag, name, path
+    -- Calculate number of columns: drag | name | mix | delta | ui
+    -- (path column removed - now shown in breadcrumbs)
+    local num_cols = 2  -- base: drag, name
     if has_mix then num_cols = num_cols + 1 end
     if has_delta then num_cols = num_cols + 1 end
     num_cols = num_cols + 1  -- ui button
@@ -52,8 +53,7 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
     local table_flags = imgui.TableFlags.SizingStretchProp()
     if ctx:begin_table("header_left_" .. guid, num_cols, table_flags) then
         ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
-        ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 50)
-        ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 20)
+        ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 70)
         if has_mix then
             ctx:table_setup_column("mix", imgui.TableColumnFlags.WidthFixed(), 28)
         end
@@ -153,16 +153,7 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
             end
         end
 
-        -- Column 3: Path identifier
-        ctx:table_set_column_index(2)
-        if device_id then
-            ctx:push_style_color(r.ImGui_Col_Text(), 0x666666FF)
-            local short_id = fx_naming.get_short_path(device_id)
-            ctx:text("[" .. short_id .. "]")
-            ctx:pop_style_color()
-        end
-
-        local col_idx = 3
+        local col_idx = 2
 
         -- Column: Mix (if present)
         if has_mix then

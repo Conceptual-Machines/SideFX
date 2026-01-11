@@ -539,7 +539,7 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
 end
 
 --- Draw panel frame (background + border)
-local function draw_panel_frame(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg)
+local function draw_panel_frame(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg, is_selected)
     local r = reaper
 
     -- Draw panel background (filled rectangle)
@@ -548,11 +548,12 @@ local function draw_panel_frame(draw_list, cursor_x, cursor_y, panel_width, pane
         cursor_x + panel_width, cursor_y + panel_height,
         colors.panel_bg, cfg.border_radius)
 
-    -- Draw panel border
+    -- Draw panel border (highlighted when selected)
+    local border_color = is_selected and 0x5588BBAA or colors.panel_border
     r.ImGui_DrawList_AddRect(draw_list,
         cursor_x, cursor_y,
         cursor_x + panel_width, cursor_y + panel_height,
-        colors.panel_border, cfg.border_radius, 0, 1)
+        border_color, cfg.border_radius, 0, 1)
 end
 
 --- Calculate panel dimensions based on collapsed state
@@ -734,12 +735,18 @@ local function draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, 
     local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
     local interacted = false
 
-    -- Draw panel frame (background + border)
-    draw_panel_frame(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg)
+    -- Draw panel frame (background + border) - border color changes when selected
+    draw_panel_frame(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg, opts.is_selected)
 
-    -- Begin child for panel content (hide scrollbars)
+    -- Begin child for panel content (no child border - panel frame handles it)
     local window_flags = imgui.WindowFlags.NoScrollbar()
     if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0, window_flags) then
+        -- Click-to-select: detect clicks on panel background
+        if opts.on_select and r.ImGui_IsWindowHovered(ctx.ctx, r.ImGui_HoveredFlags_ChildWindows())
+           and r.ImGui_IsMouseClicked(ctx.ctx, 0) then
+            opts.on_select()
+        end
+
         -- Wrap ALL content in pcall to ensure end_child is ALWAYS called
         -- This prevents ImGui state corruption ("Missing EndChild" errors)
         local ok, err = pcall(function()
