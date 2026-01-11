@@ -206,8 +206,9 @@ renumber_device_chain = function()
         local parent = fx:get_parent_container()
         if not parent then  -- Top level only
             local name = fx:get_name()
+            local is_container = fx:is_container()
 
-            -- Check if it's a D-container
+            -- Check if it's a D-container (matches pattern)
             local old_idx, fx_name = name:match("^D(%d+): (.+)$")
             if old_idx and fx_name then
                 device_idx = device_idx + 1
@@ -229,6 +230,52 @@ renumber_device_chain = function()
                         utility:set_named_config_param("renamed_name", util_name)
                     end
                 end
+            elseif is_container then
+                -- Container that doesn't match D{n}: pattern - might have been renamed
+                -- Check if it has a main FX inside (SideFX device structure)
+                local main_fx = get_device_main_fx(fx)
+                if main_fx then
+                    -- This looks like a SideFX device that was renamed
+                    device_idx = device_idx + 1
+                    
+                    -- Get original plugin name by temporarily clearing renamed_name
+                    -- This gets the actual plugin identifier, not the renamed name
+                    local ok_renamed, renamed_name = pcall(function() 
+                        return main_fx:get_named_config_param("renamed_name") 
+                    end)
+                    
+                    -- Clear renamed_name temporarily to get original plugin name
+                    if ok_renamed and renamed_name and renamed_name ~= "" then
+                        main_fx:set_named_config_param("renamed_name", "")
+                    end
+                    
+                    local ok_plugin, plugin_name = pcall(function() return main_fx:get_name() end)
+                    
+                    -- Restore renamed_name if we cleared it
+                    if ok_renamed and renamed_name and renamed_name ~= "" then
+                        main_fx:set_named_config_param("renamed_name", renamed_name)
+                    end
+                    
+                    if ok_plugin and plugin_name then
+                        -- Get short name from original plugin identifier
+                        local short_name = naming.get_short_plugin_name(plugin_name)
+                        local new_container_name = naming.build_device_name(device_idx, short_name)
+                        local new_fx_name = naming.build_device_fx_name(device_idx, short_name)
+                        local new_util_name = naming.build_device_util_name(device_idx)
+                        
+                        -- Restore container name
+                        fx:set_named_config_param("renamed_name", new_container_name)
+                        
+                        -- Restore FX name inside
+                        main_fx:set_named_config_param("renamed_name", new_fx_name)
+                        
+                        -- Restore utility name inside
+                        local utility = get_device_utility(fx)
+                        if utility then
+                            utility:set_named_config_param("renamed_name", new_util_name)
+                        end
+                    end
+                end
             end
 
             -- Check if it's an R-container (rack)
@@ -244,7 +291,9 @@ end
 -- Device operations (uses state singleton via device_module)
 local function add_plugin_to_track(plugin, position)
     local result = device_module.add_plugin_to_track(plugin, position)
-    if result then refresh_fx_list() end
+    if result then 
+        refresh_fx_list()
+    end
     return result
 end
 
@@ -395,12 +444,24 @@ local is_modulator_fx = fx_utils.is_modulator_fx
 -- UI: Toolbar (v2 - horizontal layout)
 --------------------------------------------------------------------------------
 
+-- Settings and Preset dialogs
+local settings_dialog = require('lib.ui.settings.settings_dialog')
+local preset_dialog = require('lib.ui.presets.preset_dialog')
+local presets_mod = require('lib.utils.presets')
+
 local function draw_toolbar(ctx, icon_font_ref)
     toolbar.draw(ctx, state, icon_font_ref.value, icon_size, get_fx_display_name, {
+        on_refresh_sidefx = function()
+            -- Ensure callback is set before refreshing
+            state_module.on_refresh = renumber_device_chain
+            refresh_fx_list()
+        end,
         on_refresh = refresh_fx_list,
         on_add_rack = add_rack_to_track,
         on_add_fx = function() end,  -- TODO: Implement
         on_collapse_from_depth = collapse_from_depth,
+        on_config = function() settings_dialog.open(ctx) end,
+        on_preset = function() preset_dialog.open(ctx) end,
     })
 end
 
@@ -519,6 +580,10 @@ local function main()
     refresh_fx_list()
     scan_plugins()
     
+    -- Initialize presets module
+    presets_mod.init()
+    presets_mod.ensure_folder()
+    
     -- Load user configuration (global, not per-track)
     state_module.load_config()
 
@@ -550,6 +615,8 @@ local function main()
         EmojImGui = EmojImGui,
         default_font_ref = default_font_ref,
         icon_font_ref = icon_font_ref,
+        settings_dialog = settings_dialog,
+        preset_dialog = preset_dialog,
     })
 
     Window.run({

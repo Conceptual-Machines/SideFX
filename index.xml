@@ -1,8 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <index version="1" name="SideFX" commit="HEAD">
-  <category name="Scripts">
+  <category name="Various">
     <reapack name="SideFX.lua" type="script" desc="SideFX - Smart FX Container Manager">
       <metadata>
+        <description><![CDATA[Smart FX container management for REAPER 7+.
+
+Requirements (install via ReaPack):
+- ReaWrap >= 0.7.3
+- ReaImGui extension
+- EmojImGui (talagan_EmojImGui)
+- RPP-Parser (ReaTeam Scripts > Development)]]></description>
         <link rel="homepage">https://github.com/Conceptual-Machines/SideFX</link>
       </metadata>
       <version name="0.1.1" author="Nomad Monad" time="2026-01-06T00:00:00Z">
@@ -51,9 +58,14 @@
         <source file="lib/ui/rack/rack_panel_main.lua">lib/ui/rack/rack_panel_main.lua</source>
         <source file="lib/ui/rack/rack_panel.lua">lib/ui/rack/rack_panel.lua</source>
         <source file="lib/ui/rack/rack_ui.lua">lib/ui/rack/rack_ui.lua</source>
+        <source file="lib/ui/settings/settings_dialog.lua">lib/ui/settings/settings_dialog.lua</source>
+        <source file="lib/ui/presets/preset_dialog.lua">lib/ui/presets/preset_dialog.lua</source>
+        <source file="lib/ui/device/param_selector.lua">lib/ui/device/param_selector.lua</source>
         <source file="lib/utils/naming.lua">lib/utils/naming.lua</source>
         <source file="lib/utils/param_utils.lua">lib/utils/param_utils.lua</source>
         <source file="lib/utils/presets.lua">lib/utils/presets.lua</source>
+        <source file="lib/utils/json.lua">lib/utils/json.lua</source>
+        <source file="lib/utils/track_detection.lua">lib/utils/track_detection.lua</source>
       </version>
       <version name="0.1.0" author="Nomad Monad" time="2026-01-01T00:00:00Z">
         <changelog><![CDATA[v0.1.0 (2026-01-01)

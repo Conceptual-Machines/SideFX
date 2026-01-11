@@ -261,7 +261,7 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
     local imgui = require('imgui')
     local interacted = false
 
-    -- Use table for proper layout: on | x | collapse
+    -- 3 columns: on | x | collapse
     if ctx:begin_table("header_right_" .. state_guid, 3, 0) then
         ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 24)
         ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 20)
@@ -273,7 +273,7 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
         ctx:table_set_column_index(0)
         if drawing.draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, 24, 20, colors.bypass_on, colors.bypass_off) then
             if container then
-                container:set_enabled(not enabled)
+            container:set_enabled(not enabled)
             else
                 -- Fallback: use FX directly if no container
                 fx:set_enabled(not enabled)
@@ -306,7 +306,7 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
         ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
         ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
         ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
-        local collapse_icon = "◀"
+        local collapse_icon = "▼"  -- Down arrow for expanded (click to collapse)
         if ctx:button(collapse_icon .. "##collapse_device_" .. state_guid, 20, 20) then
             device_collapsed[state_guid] = true
             interacted = true

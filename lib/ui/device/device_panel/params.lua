@@ -4,10 +4,18 @@ Parameters Column Module - Draws device parameter grid with sliders
 
 local M = {}
 
---- Draw a single parameter cell (label + slider)
-local function draw_param_cell(ctx, fx, param_idx)
+--- Draw a single parameter cell (label + slider + modulation overlay)
+-- @param ctx ImGui context
+-- @param fx The FX object
+-- @param param_idx Parameter index
+-- @param opts Table with mod_links, state, fx_guid
+local function draw_param_cell(ctx, fx, param_idx, opts)
     local r = reaper
     local imgui = require('imgui')
+    
+    local mod_links = opts and opts.mod_links
+    local state = opts and opts.state
+    local fx_guid = opts and opts.fx_guid
 
     -- Safely get param info (FX might have been deleted)
     local ok_name, param_name = pcall(function() return fx:get_param_name(param_idx) end)
@@ -18,8 +26,15 @@ local function draw_param_cell(ctx, fx, param_idx)
     if ok_name and ok_val then
         param_val = param_val or 0
 
-        -- Param name (truncated)
-        ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
+        -- Check if this param has modulation
+        local link = mod_links and mod_links[param_idx]
+
+        -- Param name (truncated) - highlight if modulated
+        if link then
+            ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)  -- Blue for modulated
+        else
+            ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
+        end
         local truncated = param_name:sub(1, 12)
         if #param_name > 12 then truncated = truncated .. ".." end
         ctx:text(truncated)
@@ -43,10 +58,81 @@ local function draw_param_cell(ctx, fx, param_idx)
         local avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
         local slider_w = avail_w * 0.8
         ctx:set_next_item_width(slider_w)
-        local changed, new_val = ctx:slider_double("##slider_" .. param_name .. "_" .. param_idx, param_val, 0.0, 1.0, "")
+        
+        -- Get slider position BEFORE drawing
+        local slider_x, slider_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+        
+        -- Unipolar uses: baseline + (lfo * scale)
+        -- baseline = initial value, scale = depth
+        local base_val = param_val  -- Default: actual current value
+        if link then
+            local baseline = link.baseline or 0
+            base_val = baseline
+        end
+        
+        -- Draw the slider with the BASELINE value if modulated, otherwise current value
+        local display_val = link and base_val or param_val
+        local changed, new_val = ctx:slider_double("##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, "")
         if changed then
-            pcall(function() fx:set_param_normalized(param_idx, new_val) end)
+            if link then
+                -- If modulated, update baseline in both REAPER and UI state
+                local mod_prefix = string.format("param.%d.mod.", param_idx)
+                fx:set_named_config_param(mod_prefix .. "baseline", tostring(new_val))
+                -- Also update UI state so restore works correctly
+                if state and fx_guid then
+                    state.link_baselines = state.link_baselines or {}
+                    local link_key = fx_guid .. "_" .. param_idx
+                    state.link_baselines[link_key] = new_val
+                end
+            else
+                pcall(function() fx:set_param_normalized(param_idx, new_val) end)
+            end
             interacted = true
+        end
+        
+        -- Draw modulation indicator overlay on top of slider
+        if link then
+            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+            local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
+            
+            local baseline = link.baseline or 0
+            local offset = link.offset or 0
+            local scale = link.scale or 0.5
+            
+            -- Calculate visualization range based on mode
+            local range_start, range_end
+            if link.is_bipolar then
+                -- Bipolar: centered around baseline, ±|scale|/2
+                local half_range = math.abs(scale) / 2
+                range_start = baseline - half_range
+                range_end = baseline + half_range
+            else
+                -- Unipolar: from baseline, direction based on scale sign
+                range_start = baseline
+                range_end = baseline + scale
+            end
+            local min_mod = math.max(0, math.min(range_start, range_end))
+            local max_mod = math.min(1, math.max(range_start, range_end))
+            local range_x1 = slider_x + min_mod * slider_w
+            local range_x2 = slider_x + max_mod * slider_w
+            r.ImGui_DrawList_AddRectFilled(draw_list,
+                range_x1, slider_y + slider_h - 3,
+                range_x2, slider_y + slider_h,
+                0x88CCFFAA)  -- Blue range indicator at bottom
+            
+            -- Draw moving indicator at current modulated value
+            local indicator_x = slider_x + param_val * slider_w
+            r.ImGui_DrawList_AddRectFilled(draw_list,
+                indicator_x - 2, slider_y,
+                indicator_x + 2, slider_y + slider_h,
+                0xFFFFFFFF)  -- White indicator
+            
+            -- DEBUG: Show values as tooltip on hover
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                local tooltip = string.format("base=%.3f off=%.3f sc=%.3f\ncurrent=%.3f\nbipolar=%s", 
+                    baseline, offset, scale, param_val, link.is_bipolar and "yes" or "no")
+                ctx:set_tooltip(tooltip)
+            end
         end
 
         ctx:pop_style_var(1)
@@ -70,7 +156,8 @@ local function draw_param_cell(ctx, fx, param_idx)
 end
 
 --- Draw parameter grid (rows × columns)
-local function draw_params_grid(ctx, fx, visible_params, visible_count, num_columns, params_per_column)
+-- @param opts Table with mod_links, state, fx_guid
+local function draw_params_grid(ctx, fx, visible_params, visible_count, num_columns, params_per_column, opts)
     local r = reaper
     local interacted = false
 
@@ -84,7 +171,7 @@ local function draw_params_grid(ctx, fx, visible_params, visible_count, num_colu
 
             if visible_idx <= visible_count then
                 local param_idx = visible_params[visible_idx]
-                if draw_param_cell(ctx, fx, param_idx) then
+                if draw_param_cell(ctx, fx, param_idx, opts) then
                     interacted = true
                 end
             end
@@ -95,6 +182,7 @@ local function draw_params_grid(ctx, fx, visible_params, visible_count, num_colu
 end
 
 --- Draw device parameters column
+-- @param opts Table with mod_links, state, fx_guid
 function M.draw(ctx, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts)
     local r = reaper
     local interacted = false
@@ -103,16 +191,16 @@ function M.draw(ctx, fx, guid, visible_params, visible_count, num_columns, param
         -- Use nested table for parameter columns
         -- Wrap in pcall to handle context corruption gracefully
         local ok, err = pcall(function()
-            if r.ImGui_BeginTable(ctx.ctx, "params_" .. guid, num_columns, r.ImGui_TableFlags_SizingStretchSame()) then
-                for col = 0, num_columns - 1 do
-                    r.ImGui_TableSetupColumn(ctx.ctx, "col" .. col, r.ImGui_TableColumnFlags_WidthStretch())
-                end
+        if r.ImGui_BeginTable(ctx.ctx, "params_" .. guid, num_columns, r.ImGui_TableFlags_SizingStretchSame()) then
+            for col = 0, num_columns - 1 do
+                r.ImGui_TableSetupColumn(ctx.ctx, "col" .. col, r.ImGui_TableColumnFlags_WidthStretch())
+            end
 
-                if draw_params_grid(ctx, fx, visible_params, visible_count, num_columns, params_per_column) then
-                    interacted = true
-                end
+            if draw_params_grid(ctx, fx, visible_params, visible_count, num_columns, params_per_column, opts) then
+                interacted = true
+            end
 
-                r.ImGui_EndTable(ctx.ctx)
+            r.ImGui_EndTable(ctx.ctx)
             end
         end)
         

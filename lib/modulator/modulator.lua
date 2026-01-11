@@ -65,6 +65,10 @@ function M.add_modulator()
     r.Undo_BeginBlock()
     -- Add at position 0 (before instruments)
     local fx = state.track:add_fx_by_name(M.MODULATOR_JSFX, false, -1000)
+    -- Select first preset (Sine) by default
+    if fx and fx.pointer >= 0 then
+        r.TrackFX_SetPresetByIndex(state.track.pointer, fx.pointer, 0)
+    end
     r.Undo_EndBlock("Add SideFX Modulator", -1)
     if fx and refresh_callback then
         refresh_callback()
@@ -399,6 +403,11 @@ function M.add_modulator_to_device(device_container, modulator_type, track)
         -- Set LFO Mode to Loop (0) by default
         local PARAM = require('lib.modulator.modulator_constants')
         moved_modulator:set_param(PARAM.PARAM_LFO_MODE, 0)
+
+        -- Select first preset (Sine) by default
+        if moved_modulator.pointer >= 0 then
+            r.TrackFX_SetPresetByIndex(track.pointer, moved_modulator.pointer, 0)
+        end
     end
 
     r.PreventUIRefresh(-1)

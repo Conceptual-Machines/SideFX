@@ -88,6 +88,57 @@ local function draw_not_sidefx_warning(ctx, state, device_module, refresh_fx_lis
     ctx:pop_style_color()
 end
 
+--- Draw FX chain protection warning banner.
+-- Shows when FX chain has been modified externally (outside SideFX).
+-- @param ctx ImGui context
+-- @param state_module State module
+local function draw_fx_chain_warning_banner(ctx, state_module)
+    local avail_w = ctx:get_content_region_avail_width()
+    
+    -- Warning banner with yellow/orange background
+    ctx:push_style_color(imgui.Col.ChildBg(), 0x4A3A1AFF)  -- Dark yellow/orange
+    ctx:push_style_color(imgui.Col.Text(), 0xFFFFAAFF)  -- Light yellow text
+    ctx:push_style_var(imgui.StyleVar.WindowPadding(), 12, 8)
+    
+    -- Use auto height for banner
+    if ctx:begin_child("fx_chain_warning", avail_w, -1, 0) then
+        ctx:push_style_color(imgui.Col.Text(), 0xFFFF00FF)  -- Bright yellow for warning icon
+        ctx:text("⚠️")
+        ctx:pop_style_color()
+        
+        ctx:same_line()
+        ctx:text("FX chain has been modified outside SideFX. This may break SideFX structure.")
+        
+        ctx:same_line()
+        local button_w = 120
+        local spacing = 8
+        
+        -- "Revert Changes" button
+        ctx:push_style_color(imgui.Col.Button(), 0x663333FF)  -- Dark red
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x884444FF)  -- Lighter red
+        if ctx:button("Revert Changes", button_w, 0) then
+            state_module.revert_fx_chain_changes()
+        end
+        ctx:pop_style_color(2)
+        
+        ctx:same_line()
+        ctx:dummy(spacing, 0)
+        ctx:same_line()
+        
+        -- "Refresh SideFX" button
+        ctx:push_style_color(imgui.Col.Button(), 0x336633FF)  -- Dark green
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x448844FF)  -- Lighter green
+        if ctx:button("Refresh SideFX", button_w, 0) then
+            refresh_fx_list()
+        end
+        ctx:pop_style_color(2)
+    end
+    ctx:end_child()
+    
+    ctx:pop_style_var()
+    ctx:pop_style_color(2)
+end
+
 --- Create window callbacks for SideFX main window
 -- @param opts table Options:
 --   - state: State table
@@ -132,6 +183,12 @@ function M.create_callbacks(opts)
         end,
 
         on_draw = function(self, ctx)
+            -- Handle pending deletion: refresh FX list
+            if state.deletion_pending then
+                state.deletion_pending = false
+                refresh_fx_list()
+            end
+            
             reaper_theme:apply(ctx)
 
             -- Load fonts on first frame
@@ -362,6 +419,14 @@ function M.create_callbacks(opts)
                     state_module.save_display_names()
                 end
                 state.last_save_frame = ctx.frame_count
+            end
+            
+            -- Draw modal dialogs (settings, presets, etc.)
+            if opts.settings_dialog then
+                opts.settings_dialog.draw(ctx)
+            end
+            if opts.preset_dialog then
+                opts.preset_dialog.draw(ctx)
             end
         end,
     }

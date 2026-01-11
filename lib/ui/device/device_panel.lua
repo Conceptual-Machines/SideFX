@@ -13,6 +13,7 @@ local drawing = require('lib.ui.common.drawing')
 local fx_naming = require('lib.fx.fx_naming')
 local param_utils = require('lib.utils.param_utils')
 local state_module = require('lib.core.state')
+local state = state_module.state
 
 -- Device panel sub-modules
 local header = require('lib.ui.device.device_panel.header')
@@ -38,7 +39,7 @@ M.config = {
     fader_height = 70,         -- Fader height
     knob_size = 48,            -- Knob diameter
     -- Modulator sidebar (left side of device)
-    mod_sidebar_width = 260,   -- Width for modulator 4×2 grid
+    mod_sidebar_width = 280,   -- Width for modulator controls
     mod_sidebar_collapsed_width = 24,  -- Collapsed width
     mod_slot_width = 60,
     mod_slot_height = 60,
@@ -86,6 +87,64 @@ local device_collapsed = {}
 -- Rename state: which FX is being renamed and the edit buffer
 local rename_active = {}    -- guid -> true if rename mode active
 local rename_buffer = {}    -- guid -> current edit text
+
+--------------------------------------------------------------------------------
+-- Utility Restoration
+--------------------------------------------------------------------------------
+
+--- Restore missing utility FX to a device container
+local function restore_utility(container)
+    if not container or not container:is_container() then
+        return false
+    end
+    
+    if not state.track then
+        return false
+    end
+    
+    -- Set flag to stop rendering immediately (prevents stale data errors)
+    state.deletion_pending = true
+    
+    -- Use the JSFX path constant from device module
+    local device_module = require('lib.device.device')
+    local utility_jsfx = device_module.UTILITY_JSFX
+    
+    -- Step 1: Add utility to the TRACK first (not directly to container)
+    local ok_add, util_fx = pcall(function()
+        return state.track:add_fx_by_name(utility_jsfx, false, -1)
+    end)
+    
+    if not ok_add or not util_fx or util_fx.pointer < 0 then
+        return false
+    end
+    
+    -- Step 2: Move utility INTO the container at position 1 (after main FX)
+    local ok_move = pcall(function()
+        container:add_fx_to_container(util_fx, 1)
+    end)
+    
+    if not ok_move then
+        -- Clean up: delete the utility we just added
+        pcall(function() util_fx:delete() end)
+        return false
+    end
+    
+    -- Step 3: Rename utility to match device naming
+    local ok_name, container_name = pcall(function() return container:get_name() end)
+    if ok_name and container_name then
+        local device_idx = container_name:match("^D(%d+):")
+        if device_idx then
+            local util_name = string.format("D%d_Util", tonumber(device_idx))
+            -- Re-find utility inside container after move
+            local util_inside = fx_utils.get_device_utility(container)
+            if util_inside then
+                pcall(function() util_inside:set_named_config_param("renamed_name", util_name) end)
+            end
+        end
+    end
+    
+    return true
+end
 
 --------------------------------------------------------------------------------
 -- Custom Widgets
@@ -231,7 +290,16 @@ local sidebar_column = require('lib.ui.device.device_panel.sidebar')
 
 --- Draw chain sidebar column wrapper
 local function draw_sidebar_column(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors)
-    return sidebar_column.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, opts, colors)
+    -- Add on_restore_utility callback to opts if not present
+    local sidebar_opts = opts
+    if not opts.on_restore_utility then
+        sidebar_opts = {}
+        for k, v in pairs(opts) do sidebar_opts[k] = v end
+        sidebar_opts.on_restore_utility = function(target_container)
+            restore_utility(target_container)
+        end
+    end
+    return sidebar_column.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_collapsed, cfg, sidebar_opts, colors)
 end
 
 --- Filter FX parameters, excluding sidebar controls (wet, delta, bypass)
@@ -242,13 +310,7 @@ local function get_visible_params(fx)
     local visible_params = {}
     
     -- Get max params from config (default 64, max 128)
-    local state_module = require('lib.core.state')
     local MAX_VISIBLE_PARAMS = state_module.get_max_visible_params()
-    
-    -- Get plugin name to look up stored selections
-    local state_module = require('lib.core.state')
-    local state = state_module.state
-    local fx_naming = require('lib.fx.fx_naming')
     
     -- Get the actual plugin name (stripped of SideFX prefixes)
     local ok_name, fx_name = pcall(function() return fx:get_name() end)
@@ -305,21 +367,21 @@ local function get_visible_params(fx)
         end
     else
         -- Default: first MAX_VISIBLE_PARAMS
-        for i = 0, param_count - 1 do
+    for i = 0, param_count - 1 do
             if #visible_params >= MAX_VISIBLE_PARAMS then
                 break
             end
 
-            local ok_pn, pname = pcall(function() return fx:get_param_name(i) end)
-            local skip = false
-            if ok_pn and pname then
-                local lower = pname:lower()
-                if lower == "wet" or lower == "delta" or lower == "bypass" then
-                    skip = true
-                end
+        local ok_pn, pname = pcall(function() return fx:get_param_name(i) end)
+        local skip = false
+        if ok_pn and pname then
+            local lower = pname:lower()
+            if lower == "wet" or lower == "delta" or lower == "bypass" then
+                skip = true
             end
-            if not skip then
-                table.insert(visible_params, i)
+        end
+        if not skip then
+            table.insert(visible_params, i)
             end
         end
     end
@@ -391,7 +453,13 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         -- Header Column 3: Control buttons (only when expanded)
         if not is_device_collapsed then
             r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
-            if header.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_device_collapsed, device_collapsed, opts, colors) then
+            
+            -- Prepare options for header buttons
+            local header_opts = {
+                on_delete = opts.on_delete,
+            }
+            
+            if header.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_device_collapsed, device_collapsed, header_opts, colors) then
                 interacted = true
             end
         end
@@ -417,6 +485,26 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         end
 
         -- Content Column 2: Device params or collapsed view
+        -- Build mod_links: map of param_idx -> link_info for all modulated params
+        local mod_links = {}
+        local link_count = 0
+        local ok_params, param_count = pcall(function() return fx:get_num_params() end)
+        if ok_params and param_count then
+            for param_idx = 0, param_count - 1 do
+                local link_info = fx:get_param_link_info(param_idx)
+                if link_info then
+                    -- Add bipolar flag from state (if set)
+                    local link_key = guid .. "_" .. param_idx
+                    link_info.is_bipolar = state.link_bipolar and state.link_bipolar[link_key] or false
+                    mod_links[param_idx] = link_info
+                    link_count = link_count + 1
+                end
+            end
+        end
+        opts.mod_links = mod_links
+        opts.state = state  -- Pass state so params can update link_baselines
+        opts.fx_guid = guid  -- Pass guid for building link keys
+
         if device_column.draw(ctx, is_device_collapsed, params_column, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts, name, fx_naming, draw_sidebar_column, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, colors) then
             interacted = true
         end
@@ -545,9 +633,6 @@ end
 -- @param cfg table Configuration table
 -- @return boolean is_collapsed, number width
 local function setup_modulator_sidebar_state(state_guid, cfg)
-    local state_module = require('lib.core.state')
-    local state = state_module.state
-
     -- Initialize modulator sidebar state tables if needed
     state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
     state.expanded_mod_slot = state.expanded_mod_slot or {}
@@ -603,10 +688,8 @@ local function draw_context_menu(ctx, fx, guid, name, enabled, opts)
             else
                 -- Fallback: use SideFX state system directly
                 -- Use FX GUID for renaming since we display the FX name
-                local state_module = require('lib.core.state')
-                local sidefx_state = state_module.state
-                sidefx_state.renaming_fx = guid  -- Use FX GUID
-                sidefx_state.rename_text = name
+                state.renaming_fx = guid  -- Use FX GUID
+                state.rename_text = name
             end
         end
         ctx:separator()

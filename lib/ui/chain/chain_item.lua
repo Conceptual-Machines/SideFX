@@ -174,10 +174,15 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
             utility = utility,  -- Paired SideFX_Utility for gain/pan
             container = container,  -- Pass container reference
             container_name = container and container:get_name() or nil,
+            missing_utility = item.missing_utility,  -- Flag for warning icon
             icon_font = icon_font,
             track = state.track,
             refresh_fx_list = refresh_fx_list,
             on_delete = function(fx_to_delete)
+                -- Set flag FIRST to stop all rendering immediately
+                local state_module = require('lib.core.state')
+                state_module.state.deletion_pending = true
+                
                 if container then
                     -- Delete the whole D-container
                     container:delete()
@@ -188,7 +193,8 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
                     end
                     fx_to_delete:delete()
                 end
-                refresh_fx_list()
+                -- Clear FX list cache - will rebuild on next frame
+                state_module.state.fx_list = nil
             end,
             on_drop = function(dragged_guid, target_guid)
                 if callbacks.on_drop then

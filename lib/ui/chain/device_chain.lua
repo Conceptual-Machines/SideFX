@@ -6,12 +6,16 @@
 
 local imgui = require('imgui')
 local r = reaper
+local helpers = require('helpers')
 
 local M = {}
 
 -- Lazy-loaded modules
 local device_panel = nil
 local rack_panel = nil
+
+-- Logger that only logs each message once (prevents spam)
+local log_once = helpers.log_once_func("DeviceChain")
 
 --------------------------------------------------------------------------------
 -- Device Chain Drawing
@@ -38,6 +42,13 @@ local rack_panel = nil
 --   - draw_rack_panel: function (ctx, rack, avail_height, is_nested) -> table
 function M.draw(ctx, fx_list, avail_width, avail_height, opts)
     local state = opts.state
+    
+    -- If a deletion just occurred, skip rendering this frame
+    -- The next frame will have fresh FX data
+    if state.deletion_pending then
+        return
+    end
+    
     local get_fx_display_name = opts.get_fx_display_name
     local refresh_fx_list = opts.refresh_fx_list
     local add_plugin_by_name = opts.add_plugin_by_name
@@ -77,18 +88,35 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
 
     -- Build display list - handles D-containers and legacy FX
     local display_fx = {}
+    
     for i, fx in ipairs(fx_list) do
         if is_device_container(fx) then
             -- D-container: extract main FX and utility from inside
             local main_fx = get_device_main_fx(fx)
             local utility = get_device_utility(fx)
+            local missing = (utility == nil)
+            
+            -- Log when utility is missing
+            if missing then
+                log_once("Missing utility in:", fx:get_name())
+            end
+            
             if main_fx then
+                -- Update state with missing utility info
+                local container_guid = fx:get_guid()
+                if missing then
+                    state.missing_utilities[container_guid] = true
+                else
+                    state.missing_utilities[container_guid] = nil
+                end
+                
                 table.insert(display_fx, {
                     fx = main_fx,
                     utility = utility,
                     container = fx,  -- Reference to the container
                     original_idx = fx.pointer,
                     is_device = true,
+                    missing_utility = missing,  -- Flag if utility is missing
                 })
             end
         elseif is_rack_container(fx) then
@@ -163,6 +191,11 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
     -- Draw each FX as a device panel, horizontally
     local display_idx = 0
     for _, item in ipairs(display_fx) do
+        -- Check before processing each item - previous iteration may have deleted
+        if state.deletion_pending then
+            break
+        end
+        
         local fx = item.fx
         display_idx = display_idx + 1
         ctx:push_id("device_" .. display_idx)
@@ -196,6 +229,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         else
             -- Draw device (full UI or fallback)
             chain_item.draw_device_item(ctx, fx, item, avail_height, {
+                missing_utility = item.missing_utility,  -- Pass missing utility flag
                 on_drop = function(dragged_guid, target_guid)
                     -- Handle FX/container reordering
                     local dragged = state.track:find_fx_by_guid(dragged_guid)
@@ -219,6 +253,11 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         end
 
         ctx:pop_id()
+        
+        -- Break immediately if deletion occurred - remaining items have stale pointers
+        if state.deletion_pending then
+            break
+        end
     end
 
     -- Always show add button at end of chain (full height drop zone)
