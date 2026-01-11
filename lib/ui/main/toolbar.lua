@@ -75,7 +75,7 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         end
 
         -- Breadcrumb trail (for navigating into containers)
-        if #state.expanded_path > 0 then
+        if config.get('show_breadcrumbs') and #state.expanded_path > 0 then
             ctx:same_line()
             ctx:text_disabled(">")
             for i, guid in ipairs(state.expanded_path) do
