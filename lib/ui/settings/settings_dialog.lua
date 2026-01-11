@@ -136,22 +136,39 @@ function M.draw(ctx)
 
     ctx:text("Presets Folder:")
 
-    -- Editable path input
-    ctx:set_next_item_width(-1)
-    local changed, new_path = r.ImGui_InputText(ctx.ctx, "##presets_path", presets_folder)
-    if changed and new_path ~= presets_folder then
-        if new_path == "" or new_path == config.get_default_presets_folder() then
-            config.reset('presets_folder')
-        else
-            config.set('presets_folder', new_path)
+    -- Show current path (truncated if too long)
+    local display_path = presets_folder
+    if #display_path > 50 then
+        display_path = "..." .. display_path:sub(-47)
+    end
+    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_Text(), 0x888888FF)
+    ctx:text(display_path)
+    r.ImGui_PopStyleColor(ctx.ctx)
+
+    -- Browse button (requires JS extension)
+    local has_js = r.JS_Dialog_BrowseForFolder ~= nil
+    if has_js then
+        if ctx:button("Browse...##presets_folder", 80, 0) then
+            local retval, folder = r.JS_Dialog_BrowseForFolder("Select Presets Folder", presets_folder)
+            if retval == 1 and folder and folder ~= "" then
+                config.set('presets_folder', folder)
+            end
         end
+        ctx:same_line()
     end
 
     -- Reset to default button (only show if custom path is set)
     if is_custom then
-        if ctx:button("Reset to Default##presets_folder", -1, 0) then
+        if ctx:button("Reset##presets_folder", 50, 0) then
             config.reset('presets_folder')
         end
+    end
+
+    -- Show hint if JS extension not installed
+    if not has_js then
+        r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_Text(), 0x888888FF)
+        ctx:text("Install JS extension for folder browser")
+        r.ImGui_PopStyleColor(ctx.ctx)
     end
 
     ctx:spacing()
