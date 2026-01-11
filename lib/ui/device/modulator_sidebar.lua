@@ -11,6 +11,7 @@ local param_indices = require('lib.modulator.param_indices')
 local drawing = require('lib.ui.common.drawing')
 local modulator_module = require('lib.modulator.modulator')
 local curve_editor = require('lib.ui.common.curve_editor')
+local modulator_presets = require('lib.modulator.modulator_presets')
 
 -- Modulator types
 local MODULATOR_TYPES = {
@@ -209,10 +210,13 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
             ctx:push_font(opts.icon_font, 14)
         end
         if ctx:button(save_icon .. "##save_" .. guid, icon_btn_size, 0) then
-            -- Open REAPER's save preset dialog
-            r.TrackFX_SetPreset(state.track.pointer, expanded_modulator.pointer, "+")
-            -- Clear cache to reload presets after save
-            state.cached_preset_names[mod_guid] = nil
+            -- Open save preset popup
+            state.save_preset_popup = state.save_preset_popup or {}
+            state.save_preset_popup[mod_guid] = {
+                open = true,
+                name = "",
+                modulator = expanded_modulator
+            }
             interacted = true
         end
         if opts.icon_font then
@@ -826,6 +830,78 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         interacted = true
                     end
                 end
+            end
+        end
+    end
+
+    -- Draw save preset popup (modal dialog)
+    state.save_preset_popup = state.save_preset_popup or {}
+    for mod_guid, popup_state in pairs(state.save_preset_popup) do
+        if popup_state.open then
+            local popup_id = "Save Preset##save_preset_" .. mod_guid
+            if not popup_state.opened_frame then
+                r.ImGui_OpenPopup(ctx.ctx, popup_id)
+                popup_state.opened_frame = true
+            end
+
+            local popup_flags = r.ImGui_WindowFlags_AlwaysAutoResize()
+            local visible, p_open = r.ImGui_BeginPopupModal(ctx.ctx, popup_id, true, popup_flags)
+            if visible then
+                ctx:text("Enter preset name:")
+                ctx:spacing()
+
+                ctx:set_next_item_width(200)
+                local changed, new_name = ctx:input_text("##preset_name_" .. mod_guid, popup_state.name or "")
+                if changed then
+                    popup_state.name = new_name
+                end
+
+                ctx:spacing()
+                ctx:separator()
+                ctx:spacing()
+
+                local can_save = popup_state.name and #popup_state.name > 0
+
+                if not can_save then
+                    r.ImGui_BeginDisabled(ctx.ctx)
+                end
+                if ctx:button("Save", 80, 0) then
+                    -- Save the preset using our backend
+                    local mod = popup_state.modulator
+                    if mod and state.track then
+                        local success = modulator_presets.save_current_shape(
+                            state.track.pointer,
+                            mod.pointer,
+                            popup_state.name
+                        )
+                        if success then
+                            -- Clear preset cache to reload
+                            state.cached_preset_names[mod_guid] = nil
+                        else
+                            r.ShowMessageBox("Failed to save preset", "SideFX", 0)
+                        end
+                    end
+                    popup_state.open = false
+                    popup_state.opened_frame = nil
+                    r.ImGui_CloseCurrentPopup(ctx.ctx)
+                end
+                if not can_save then
+                    r.ImGui_EndDisabled(ctx.ctx)
+                end
+
+                ctx:same_line()
+                if ctx:button("Cancel", 80, 0) then
+                    popup_state.open = false
+                    popup_state.opened_frame = nil
+                    r.ImGui_CloseCurrentPopup(ctx.ctx)
+                end
+
+                r.ImGui_EndPopup(ctx.ctx)
+            end
+
+            if not p_open then
+                popup_state.open = false
+                popup_state.opened_frame = nil
             end
         end
     end
