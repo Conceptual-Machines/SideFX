@@ -869,7 +869,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     -- Save the preset using our backend
                     local mod = popup_state.modulator
                     if mod and state.track then
-                        local success = modulator_presets.save_current_shape(
+                        local success, err = modulator_presets.save_current_shape(
                             state.track.pointer,
                             mod.pointer,
                             popup_state.name
@@ -877,9 +877,13 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         if success then
                             -- Clear preset cache to reload
                             state.cached_preset_names[mod_guid] = nil
+                            r.ShowMessageBox("Preset saved: " .. popup_state.name, "SideFX", 0)
                         else
-                            r.ShowMessageBox("Failed to save preset", "SideFX", 0)
+                            local debug_info = modulator_presets.debug_paths()
+                            r.ShowMessageBox("Failed to save preset.\n\n" .. (err or "Unknown error") .. "\n\nDebug:\n" .. debug_info, "SideFX", 0)
                         end
+                    else
+                        r.ShowMessageBox("No modulator or track selected", "SideFX", 0)
                     end
                     popup_state.open = false
                     popup_state.opened_frame = nil

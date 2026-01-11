@@ -149,16 +149,55 @@ end
 -- Preset File Operations
 --------------------------------------------------------------------------------
 
+-- Cached root path (set during first use)
+local cached_root_path = nil
+
+--- Get the SideFX root directory
+-- @return string Root path with trailing slash
+local function get_root_path()
+    if cached_root_path then
+        return cached_root_path
+    end
+
+    -- Try to get path from debug info
+    local info = debug.getinfo(1, "S")
+    if info and info.source then
+        local script_path = info.source:match("@?(.*)")
+        if script_path then
+            -- This file is in lib/modulator/, so go up two levels
+            local root = script_path:match("(.*/lib/modulator/)"):gsub("/lib/modulator/$", "/")
+            if root then
+                cached_root_path = root
+                return root
+            end
+        end
+    end
+
+    -- Fallback: search in common locations
+    local resource_path = r.GetResourcePath()
+    local possible_paths = {
+        resource_path .. "/Scripts/SideFX/",
+        resource_path .. "/Scripts/ReaTeam Scripts/SideFX/",
+    }
+
+    for _, path in ipairs(possible_paths) do
+        local test_file = io.open(path .. "SideFX.lua", "r")
+        if test_file then
+            test_file:close()
+            cached_root_path = path
+            return path
+        end
+    end
+
+    -- Last resort: use resource path
+    cached_root_path = resource_path .. "/Scripts/SideFX/"
+    return cached_root_path
+end
+
 --- Get the path to the modulator preset library file
 -- @return string Path to .rpl file
 function M.get_preset_library_path()
-    -- Get the script's directory
-    local info = debug.getinfo(1, "S")
-    local script_path = info.source:match("@?(.*)")
-    local lib_dir = script_path:match("(.*/)")
-    -- Go up to SideFX root, then to jsfx/
-    local root = lib_dir:match("(.*/lib/)"):gsub("/lib/$", "/")
-    return root .. "jsfx/SideFX_Modulator.jsfx.rpl"
+    return get_root_path() .. "jsfx/SideFX_Modulator.jsfx.rpl"
 end
 
 --- Read the current preset library
@@ -177,7 +216,7 @@ end
 --- Save a new preset to the library
 -- @param name string Preset name
 -- @param shape table Shape data from read_shape()
--- @return boolean Success
+-- @return boolean, string Success and error message
 function M.save_preset_to_library(name, shape)
     local path = M.get_preset_library_path()
 
@@ -196,33 +235,45 @@ function M.save_preset_to_library(name, shape)
     local preset_block = string.format('  <PRESET `%s`\n    %s\n  >', name, formatted)
 
     -- Insert before closing >
-    local insert_pos = content:find("\n>%s*$")
-    if insert_pos then
-        content = content:sub(1, insert_pos - 1) .. "\n" .. preset_block .. "\n>"
+    -- Try multiple patterns
+    local new_content
+    if content:match("\n>%s*$") then
+        new_content = content:gsub("\n>%s*$", "\n" .. preset_block .. "\n>")
+    elseif content:match(">%s*$") then
+        new_content = content:gsub(">%s*$", preset_block .. "\n>")
     else
-        -- Fallback: append
-        content = content:gsub(">%s*$", preset_block .. "\n>")
+        -- Append at end
+        new_content = content .. "\n" .. preset_block .. "\n>"
     end
 
     -- Write back
-    local file = io.open(path, "w")
+    local file, err = io.open(path, "w")
     if not file then
-        return false
+        return false, "Cannot open file for writing: " .. (err or path)
     end
-    file:write(content)
+    file:write(new_content)
     file:close()
 
-    return true
+    return true, nil
 end
 
 --- Save current modulator shape as a preset
 -- @param track MediaTrack pointer
 -- @param fx_idx number FX index
 -- @param name string Preset name
--- @return boolean Success
+-- @return boolean, string Success and error message
 function M.save_current_shape(track, fx_idx, name)
     local shape = M.read_shape(track, fx_idx)
     return M.save_preset_to_library(name, shape)
+end
+
+--- Debug: Get current paths
+-- @return string Path info for debugging
+function M.debug_paths()
+    local root = get_root_path()
+    local rpl_path = M.get_preset_library_path()
+    local exists = io.open(rpl_path, "r") ~= nil
+    return string.format("Root: %s\nRPL: %s\nExists: %s", root, rpl_path, tostring(exists))
 end
 
 return M
