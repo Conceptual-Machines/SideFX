@@ -175,6 +175,13 @@ end
 -- @param state table State table
 -- @param opts table Options for chain_column.draw
 local function draw_nested_rack_in_chain(ctx, dev, chain_content_h, draw_rack_panel, draw_chain_column_fn, state, opts)
+    -- Safety check: draw_rack_panel must be provided
+    if not draw_rack_panel then
+        -- Draw placeholder for nested rack when draw_rack_panel is not available
+        ctx:text("[Nested Rack]")
+        return
+    end
+
     local rack_data = draw_rack_panel(ctx, dev, chain_content_h - 20, true)
 
     -- If a chain in this nested rack is selected, show its chain column
@@ -265,75 +272,84 @@ function M.draw(ctx, selected_chain, rack_h, opts)
     ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
     local window_flags = imgui.WindowFlags.NoScrollbar()
     if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, 0, rack_h, wrapper_flags, window_flags) then
-        -- Use table layout so header width matches content width
-        local table_flags = imgui.TableFlags.SizingStretchSame()
-        if ctx:begin_table("chain_table_" .. selected_chain_guid, 1, table_flags) then
-            -- Draw header with chain name and identifier
-            draw_chain_header(ctx, chain_name, chain_id, default_font)
+        -- Wrap in pcall to ensure end_child is always called
+        local ok, err = pcall(function()
+            -- Use table layout so header width matches content width
+            local table_flags = imgui.TableFlags.SizingStretchSame()
+            if ctx:begin_table("chain_table_" .. selected_chain_guid, 1, table_flags) then
+                -- Draw header with chain name and identifier
+                draw_chain_header(ctx, chain_name, chain_id, default_font)
 
-            -- Row 2: Content
-            ctx:table_next_row()
-            ctx:table_set_column_index(0)
+                -- Row 2: Content
+                ctx:table_next_row()
+                ctx:table_set_column_index(0)
 
-            -- Chain contents - auto-resize to fit devices
-            ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
-            local chain_content_flags = 81  -- Border (1) + AutoResizeX (16) + AlwaysAutoResize (64)
-            if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, chain_content_flags) then
-
-                if #devices == 0 then
-                    -- Empty chain - show drop zone
-                    draw_empty_chain_content(ctx, chain_content_h, has_plugin_payload or has_rack_payload, selected_chain, add_device_to_chain, add_rack_to_chain)
-                else
-                    -- Draw each device or rack HORIZONTALLY with arrows
-                    ctx:begin_group()
-
-                    for k, dev in ipairs(devices) do
-                        -- Draw arrow separator between devices
-                        draw_device_separator(ctx, k == 1)
-
-                        -- Draw device or nested rack
-                        if is_rack_container(dev) then
-                            draw_nested_rack_in_chain(ctx, dev, chain_content_h, draw_rack_panel, M.draw, state, opts)
+                -- Chain contents - auto-resize to fit devices
+                ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
+                local chain_content_flags = 81  -- Border (1) + AutoResizeX (16) + AlwaysAutoResize (64)
+                if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, chain_content_flags) then
+                    -- Inner pcall for chain contents
+                    local ok_inner, err_inner = pcall(function()
+                        if #devices == 0 then
+                            -- Empty chain - show drop zone
+                            draw_empty_chain_content(ctx, chain_content_h, has_plugin_payload or has_rack_payload, selected_chain, add_device_to_chain, add_rack_to_chain)
                         else
-                            draw_device_in_chain(ctx, dev, chain_content_h, selected_chain, {
-                                avail_height = chain_content_h - 20,
-                                utility = get_device_utility(dev),
-                                container = dev,
-                                icon_font = icon_font,
-                                track = state.track,
-                                refresh_fx_list = refresh_fx_list,
-                                on_delete = function()
-                                    dev:delete()
-                                    refresh_fx_list()
-                                end,
-                                on_rename = function(fx)
-                                    -- Rename the container (dev), not the main FX
-                                    local dev_guid = dev:get_guid()
-                                    state.renaming_fx = dev_guid
-                                    state.rename_text = get_fx_display_name(dev)
-                                end,
-                                on_plugin_drop = function(plugin_name, insert_before_idx)
-                                    local plugin = { full_name = plugin_name, name = plugin_name }
-                                    add_device_to_chain(selected_chain, plugin)
-                                end,
-                            }, device_panel, get_device_main_fx, get_device_utility)
+                            -- Draw each device or rack HORIZONTALLY with arrows
+                            ctx:begin_group()
+
+                            for k, dev in ipairs(devices) do
+                                -- Draw arrow separator between devices
+                                draw_device_separator(ctx, k == 1)
+
+                                -- Draw device or nested rack
+                                if is_rack_container(dev) then
+                                    draw_nested_rack_in_chain(ctx, dev, chain_content_h, draw_rack_panel, M.draw, state, opts)
+                                else
+                                    draw_device_in_chain(ctx, dev, chain_content_h, selected_chain, {
+                                        avail_height = chain_content_h - 20,
+                                        utility = get_device_utility(dev),
+                                        container = dev,
+                                        icon_font = icon_font,
+                                        track = state.track,
+                                        refresh_fx_list = refresh_fx_list,
+                                        on_delete = function()
+                                            dev:delete()
+                                            refresh_fx_list()
+                                        end,
+                                        on_rename = function(fx)
+                                            -- Rename the container (dev), not the main FX
+                                            local dev_guid = dev:get_guid()
+                                            state.renaming_fx = dev_guid
+                                            state.rename_text = get_fx_display_name(dev)
+                                        end,
+                                        on_plugin_drop = function(plugin_name, insert_before_idx)
+                                            local plugin = { full_name = plugin_name, name = plugin_name }
+                                            add_device_to_chain(selected_chain, plugin)
+                                        end,
+                                    }, device_panel, get_device_main_fx, get_device_utility)
+                                end
+                            end
+
+                            -- Draw add button at end of chain
+                            draw_chain_add_button(ctx, chain_content_h, has_plugin_payload or has_rack_payload, selected_chain, add_device_to_chain, add_rack_to_chain)
+
+                            ctx:end_group()
                         end
+                    end)
+                    ctx:end_child()  -- Always end chain_contents child
+                    if not ok_inner then
+                        reaper.ShowConsoleMsg("SideFX chain contents error: " .. tostring(err_inner) .. "\n")
                     end
-
-                    -- Draw add button at end of chain
-                    draw_chain_add_button(ctx, chain_content_h, has_plugin_payload or has_rack_payload, selected_chain, add_device_to_chain, add_rack_to_chain)
-
-                    ctx:end_group()
                 end
+                ctx:pop_style_color()
 
-                ctx:end_child()
+                ctx:end_table()
             end
-            ctx:pop_style_color()
-
-            ctx:end_table()
+        end)
+        ctx:end_child()  -- Always end chain_wrapper child
+        if not ok then
+            reaper.ShowConsoleMsg("SideFX chain column error: " .. tostring(err) .. "\n")
         end
-
-        ctx:end_child()
     end
     ctx:pop_style_color()
     ctx:pop_style_var()

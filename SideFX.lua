@@ -482,29 +482,16 @@ local rack_panel = nil    -- Lazy loaded
 -- Rack panel drawing helpers moved to lib/ui/rack_panel_main.lua
 -- Chain column drawing moved to lib/ui/chain_column.lua
 
--- Draw expanded chain column with devices
-local function draw_chain_column(ctx, selected_chain, rack_h)
-    chain_column.draw(ctx, selected_chain, rack_h, {
-        state = state,
-        get_fx_display_name = get_fx_display_name,
-                            refresh_fx_list = refresh_fx_list,
-        get_device_main_fx = get_device_main_fx,
-        get_device_utility = get_device_utility,
-        is_rack_container = is_rack_container,
-        add_device_to_chain = add_device_to_chain,
-        add_rack_to_chain = add_rack_to_chain,
-        draw_rack_panel = draw_rack_panel,
-        icon_font = icon_font,
-        default_font = default_font,
-    })
-end
+-- Forward declaration for mutual recursion
+local draw_chain_column
 
 -- Draw the rack panel (main rack UI without chain column)
+-- NOTE: Must be defined BEFORE draw_chain_column which references it
 local function draw_rack_panel(ctx, rack, avail_height, is_nested, callbacks)
     callbacks = callbacks or {}
     return rack_panel_main.draw(ctx, rack, avail_height, is_nested, {
         state = state,
-            icon_font = icon_font,
+        icon_font = icon_font,
         state_module = state_module,
         refresh_fx_list = refresh_fx_list,
         get_rack_mixer = get_rack_mixer,
@@ -519,6 +506,24 @@ local function draw_rack_panel(ctx, rack, avail_height, is_nested, callbacks)
         add_nested_rack_to_rack = add_nested_rack_to_rack,
         drawing = drawing,
         on_drop = callbacks.on_drop,  -- Pass through on_drop callback for rack swapping
+    })
+end
+
+-- Draw expanded chain column with devices
+-- NOTE: Uses draw_rack_panel for nested racks inside chains
+draw_chain_column = function(ctx, selected_chain, rack_h)
+    chain_column.draw(ctx, selected_chain, rack_h, {
+        state = state,
+        get_fx_display_name = get_fx_display_name,
+        refresh_fx_list = refresh_fx_list,
+        get_device_main_fx = get_device_main_fx,
+        get_device_utility = get_device_utility,
+        is_rack_container = is_rack_container,
+        add_device_to_chain = add_device_to_chain,
+        add_rack_to_chain = add_rack_to_chain,
+        draw_rack_panel = draw_rack_panel,
+        icon_font = icon_font,
+        default_font = default_font,
     })
 end
 
