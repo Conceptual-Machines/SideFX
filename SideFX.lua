@@ -230,8 +230,9 @@ renumber_device_chain = function()
                         utility:set_named_config_param("renamed_name", util_name)
                     end
                 end
-            elseif is_container then
-                -- Container that doesn't match D{n}: pattern - might have been renamed
+            elseif is_container and not name:match("^R%d+") then
+                -- Container that doesn't match D{n}: or R{n} pattern - might have been renamed
+                -- Skip R-containers (racks) - they have their own naming scheme
                 -- Check if it has a main FX inside (SideFX device structure)
                 local main_fx = get_device_main_fx(fx)
                 if main_fx then

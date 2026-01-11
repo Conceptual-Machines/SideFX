@@ -49,6 +49,11 @@ function M.add_plugin_to_track(plugin, position)
         return nil
     end
 
+    -- Don't wrap mixer in containers (it should only be added by rack creation)
+    if name_lower:find("sidefx_mixer") or name_lower:find("sidefx chain mixer") then
+        return nil
+    end
+
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
 

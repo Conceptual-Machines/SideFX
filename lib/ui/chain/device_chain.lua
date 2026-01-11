@@ -88,7 +88,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
 
     -- Build display list - handles D-containers and legacy FX
     local display_fx = {}
-    
+
     for i, fx in ipairs(fx_list) do
         if is_device_container(fx) then
             -- D-container: extract main FX and utility from inside
