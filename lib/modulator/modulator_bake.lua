@@ -10,13 +10,26 @@ local curve_editor = require('lib.ui.common.curve_editor')
 
 local M = {}
 
+-- Range modes for bake duration
+M.RANGE_MODE = {
+    PROJECT = 1,        -- Full project length
+    TRACK = 2,          -- Track items extent (first item start to last item end)
+    TIME_SELECTION = 3, -- Current time selection
+    SELECTED_ITEM = 4,  -- Selected MIDI item(s) on track
+}
+
+-- Range mode labels for UI
+M.RANGE_MODE_LABELS = {
+    [1] = "Full Project",
+    [2] = "Track Items",
+    [3] = "Time Selection",
+    [4] = "Selected Item(s)",
+}
+
 -- Default bake options
 M.DEFAULT_OPTIONS = {
     resolution = 32,        -- Points per cycle
-    num_cycles = nil,       -- Number of cycles to bake (nil = calculate from num_bars)
-    num_bars = 4,           -- Number of bars to bake (used if num_cycles is nil)
-    start_time = 0,         -- Start time in seconds (0 = project start)
-    use_edit_cursor = false, -- If true, start from edit cursor instead of start_time
+    range_mode = 2,         -- Default to track items (M.RANGE_MODE.TRACK)
     disable_link = false,   -- Set link scale to 0 after bake (keeps link but disables it)
     remove_link = false,    -- Remove parameter link after bake
     remove_modulator = false, -- Remove modulator after bake
@@ -52,6 +65,131 @@ local SYNC_RATE_BEATS = {
     [16] = 0.1875,-- 1/32.
     [17] = 0.0625,-- 1/64
 }
+
+--------------------------------------------------------------------------------
+-- Range Calculation Helpers
+--------------------------------------------------------------------------------
+
+--- Get project length in seconds
+-- @return number Project length in seconds
+function M.get_project_length()
+    -- GetProjectLength returns the length of the project (end of last item or marker)
+    local length = r.GetProjectLength(0)
+    -- Minimum 1 second to avoid zero-length bakes
+    return math.max(length, 1)
+end
+
+--- Get track items extent (first item start to last item end)
+-- @param track Track The track object (ReaWrap)
+-- @return number, number start_time, end_time
+function M.get_track_items_extent(track)
+    local item_count = r.CountTrackMediaItems(track.pointer)
+    if item_count == 0 then
+        return 0, 1  -- Default to 1 second if no items
+    end
+
+    local min_start = math.huge
+    local max_end = 0
+
+    for i = 0, item_count - 1 do
+        local item = r.GetTrackMediaItem(track.pointer, i)
+        if item then
+            local item_pos = r.GetMediaItemInfo_Value(item, "D_POSITION")
+            local item_len = r.GetMediaItemInfo_Value(item, "D_LENGTH")
+            local item_end = item_pos + item_len
+
+            if item_pos < min_start then min_start = item_pos end
+            if item_end > max_end then max_end = item_end end
+        end
+    end
+
+    if min_start == math.huge then
+        return 0, 1
+    end
+
+    return min_start, max_end
+end
+
+--- Get current time selection
+-- @return number, number start_time, end_time (or nil if no selection)
+function M.get_time_selection()
+    local start_time, end_time = r.GetSet_LoopTimeRange(false, false, 0, 0, false)
+    if start_time == end_time then
+        return nil, nil  -- No time selection
+    end
+    return start_time, end_time
+end
+
+--- Get selected items extent on a track
+-- @param track Track The track object (ReaWrap)
+-- @return number, number start_time, end_time (or nil if no selected items)
+function M.get_selected_items_extent(track)
+    local selected_count = r.CountSelectedMediaItems(0)
+    if selected_count == 0 then
+        return nil, nil
+    end
+
+    local min_start = math.huge
+    local max_end = 0
+    local found_on_track = false
+
+    for i = 0, selected_count - 1 do
+        local item = r.GetSelectedMediaItem(0, i)
+        if item then
+            local item_track = r.GetMediaItemTrack(item)
+            if item_track == track.pointer then
+                found_on_track = true
+                local item_pos = r.GetMediaItemInfo_Value(item, "D_POSITION")
+                local item_len = r.GetMediaItemInfo_Value(item, "D_LENGTH")
+                local item_end = item_pos + item_len
+
+                if item_pos < min_start then min_start = item_pos end
+                if item_end > max_end then max_end = item_end end
+            end
+        end
+    end
+
+    if not found_on_track or min_start == math.huge then
+        return nil, nil
+    end
+
+    return min_start, max_end
+end
+
+--- Get time range based on range mode
+-- @param track Track The track object
+-- @param range_mode number One of M.RANGE_MODE values
+-- @return number, number, string start_time, end_time, error_message
+function M.get_time_range(track, range_mode)
+    range_mode = range_mode or M.DEFAULT_OPTIONS.range_mode
+
+    if range_mode == M.RANGE_MODE.PROJECT then
+        return 0, M.get_project_length(), nil
+
+    elseif range_mode == M.RANGE_MODE.TRACK then
+        local start_time, end_time = M.get_track_items_extent(track)
+        return start_time, end_time, nil
+
+    elseif range_mode == M.RANGE_MODE.TIME_SELECTION then
+        local start_time, end_time = M.get_time_selection()
+        if not start_time then
+            return nil, nil, "No time selection. Create a time selection first."
+        end
+        return start_time, end_time, nil
+
+    elseif range_mode == M.RANGE_MODE.SELECTED_ITEM then
+        local start_time, end_time = M.get_selected_items_extent(track)
+        if not start_time then
+            return nil, nil, "No items selected on this track. Select MIDI item(s) first."
+        end
+        return start_time, end_time, nil
+
+    else
+        -- Fallback to track items
+        local start_time, end_time = M.get_track_items_extent(track)
+        return start_time, end_time, nil
+    end
+end
 
 --------------------------------------------------------------------------------
 -- Helpers
@@ -273,6 +411,7 @@ end
 function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
     options = options or {}
     local resolution = options.resolution or M.DEFAULT_OPTIONS.resolution
+    local range_mode = options.range_mode or M.DEFAULT_OPTIONS.range_mode
 
     -- Get link information
     local link_info = M.get_link_info(target_fx, param_idx)
@@ -284,24 +423,16 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
     local cycle_duration = M.get_cycle_duration(modulator)
     local trigger_mode = M.get_trigger_mode(modulator)
 
-    -- Determine time range
-    local num_bars = options.num_bars or M.DEFAULT_OPTIONS.num_bars
-    local bpm = r.Master_GetTempo()
-    local _, beats_per_bar = r.GetProjectTimeSignature2(0)
-    beats_per_bar = beats_per_bar or 4
-    local bar_duration = (60 / bpm) * beats_per_bar
-    local total_bar_duration = bar_duration * num_bars
+    -- Determine time range based on range mode
+    local start_time, end_time, range_error = M.get_time_range(track, range_mode)
+    if range_error then
+        return false, range_error
+    end
 
-    -- Determine start time
-    local start_time = options.start_time or M.DEFAULT_OPTIONS.start_time
-    local use_edit_cursor = options.use_edit_cursor
-    if use_edit_cursor == nil then
-        use_edit_cursor = M.DEFAULT_OPTIONS.use_edit_cursor
+    local total_duration = end_time - start_time
+    if total_duration <= 0 then
+        return false, "Invalid time range (duration <= 0)"
     end
-    if use_edit_cursor then
-        start_time = r.GetCursorPosition()
-    end
-    local end_time = start_time + total_bar_duration
 
     -- Get phase offset from modulator
     local ok_phase, phase = pcall(function()
@@ -383,18 +514,18 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
         end
     else
         -- Free/Transport mode: bake continuous cycles
-        num_cycles = options.num_cycles
-        if not num_cycles then
-            num_cycles = math.ceil(total_bar_duration / cycle_duration)
-        end
+        num_cycles = math.ceil(total_duration / cycle_duration)
 
         for cycle = 0, num_cycles - 1 do
             local cycle_start = start_time + cycle * cycle_duration
             for _, sample in ipairs(samples) do
                 local time = cycle_start + sample.t * cycle_duration
-                local value = M.calculate_param_value(sample.value, link_info)
-                r.InsertEnvelopePointEx(envelope, -1, time, value, 0, 0, false, true)
-                total_points = total_points + 1
+                -- Don't exceed end_time
+                if time <= end_time then
+                    local value = M.calculate_param_value(sample.value, link_info)
+                    r.InsertEnvelopePointEx(envelope, -1, time, value, 0, 0, false, true)
+                    total_points = total_points + 1
+                end
             end
         end
     end
@@ -419,7 +550,8 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
     r.Undo_EndBlock("Bake LFO to Automation", -1)
 
     local mode_str = trigger_mode == TRIGGER_MODE.MIDI and "MIDI triggered" or "continuous"
-    return true, string.format("Baked %d points (%d cycles, %s)", total_points, num_cycles, mode_str)
+    return true, string.format("Baked %d points (%d cycles, %s, %.1f-%.1fs)",
+        total_points, num_cycles, mode_str, start_time, end_time)
 end
 
 --- Bake all provided links to automation

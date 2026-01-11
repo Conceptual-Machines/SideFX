@@ -869,6 +869,33 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     ctx:separator()
                     ctx:spacing()
 
+                    -- Range mode dropdown
+                    state.bake_range_mode = state.bake_range_mode or {}
+                    local range_key = guid
+                    if state.bake_range_mode[range_key] == nil then
+                        state.bake_range_mode[range_key] = modulator_bake.RANGE_MODE.TRACK  -- Default to track items
+                    end
+                    local current_range_mode = state.bake_range_mode[range_key]
+                    local range_label = modulator_bake.RANGE_MODE_LABELS[current_range_mode] or "Track Items"
+
+                    ctx:text("Range:")
+                    ctx:same_line()
+                    ctx:set_next_item_width(-1)
+                    if ctx:begin_combo("##range_mode_" .. guid, range_label) then
+                        for mode_val, mode_label in pairs(modulator_bake.RANGE_MODE_LABELS) do
+                            if ctx:selectable(mode_label, mode_val == current_range_mode) then
+                                state.bake_range_mode[range_key] = mode_val
+                                interacted = true
+                            end
+                        end
+                        ctx:end_combo()
+                    end
+                    if ctx:is_item_hovered() then
+                        ctx:set_tooltip("Time range to bake automation")
+                    end
+
+                    ctx:spacing()
+
                     -- Disable link checkbox
                     state.bake_disable_link = state.bake_disable_link or {}
                     local disable_key = guid
@@ -892,6 +919,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     if ctx:button("Bake All##bake_" .. guid, -1, 0) then
                         if can_bake then
                             local bake_options = {
+                                range_mode = state.bake_range_mode[range_key],
                                 disable_link = state.bake_disable_link[disable_key]
                             }
                             local ok, result, msg = pcall(function()
@@ -912,7 +940,8 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     end
                     if ctx:is_item_hovered() then
                         if can_bake then
-                            ctx:set_tooltip("Bake LFO to automation (4 bars from project start)")
+                            local range_tip = modulator_bake.RANGE_MODE_LABELS[state.bake_range_mode[range_key]] or "Track Items"
+                            ctx:set_tooltip("Bake LFO to automation (" .. range_tip .. ")")
                         else
                             ctx:set_tooltip("Link a parameter first")
                         end
