@@ -72,12 +72,45 @@ def generate_sine_points(num_points):
     return points
 
 
+def generate_presets():
+    """Generate all preset definitions."""
+    presets = []
+
+    # Sine (16 points for smooth curve)
+    presets.append(("Sine", 16, generate_sine_points(16)))
+
+    # Triangle: 3 points - up and down
+    presets.append(("Triangle", 3, [(0, 0), (0.5, 1), (1, 0)]))
+
+    # Sawtooth: 4 points - ramp up then instant drop
+    presets.append(("Sawtooth", 4, [(0, 0.5), (0.499, 1), (0.5, 0), (1, 0.5)]))
+
+    # Square: 4 points - high, instant drop, low, instant rise
+    presets.append(("Square", 4, [(0, 1), (0.499, 1), (0.5, 0), (1, 0)]))
+
+    # Ramp Up: 2 points - simple linear rise
+    presets.append(("Ramp_Up", 2, [(0, 0), (1, 1)]))
+
+    # Ramp Down: 2 points - simple linear fall
+    presets.append(("Ramp_Down", 2, [(0, 1), (1, 0)]))
+
+    # Shark Fin: 3 points - fast attack, slow decay
+    presets.append(("Shark_Fin", 3, [(0, 0), (0.2, 1), (1, 0)]))
+
+    # Growl: 6 points - irregular wobble
+    presets.append(("Growl", 6, [(0, 0.1), (0.2, 0.8), (0.4, 0.2), (0.6, 0.9), (0.8, 0.3), (1, 0)]))
+
+    # Exponential Rise: 2 points (curve applied via segment)
+    presets.append(("Exp_Rise", 2, [(0, 0), (1, 1)]))
+
+    # Exponential Fall: 2 points (curve applied via segment)
+    presets.append(("Exp_Fall", 2, [(0, 1), (1, 0)]))
+
+    return presets
+
+
 def main():
-    presets = [
-        ("Sine_4pt", 4, generate_sine_points(4)),
-        ("Sine_8pt", 8, generate_sine_points(8)),
-        ("Sine_16pt", 16, generate_sine_points(16)),
-    ]
+    presets = generate_presets()
 
     print('<REAPER_PRESET_LIBRARY "JS: SideFX Modulator"')
     for name, num_pts, points in presets:
