@@ -53,6 +53,7 @@ local test_modules = {
     "unit.test_rack_recursive_luaunit",
     "unit.test_state_luaunit",
     "unit.test_track_detection_luaunit",
+    "unit.test_modulation_math_luaunit",
 }
 
 --------------------------------------------------------------------------------
