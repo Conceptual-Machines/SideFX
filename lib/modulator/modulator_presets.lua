@@ -431,17 +431,26 @@ function M.parse_preset_string(decoded_str)
     local num_points = tonumber(values[30]) or 2
 
     -- Points start at position 40 (index 40 in 1-based)
+    -- NOTE: The preset name is inserted at position 65 (1-based), shifting all
+    -- values at position 65+ by 1. We need to account for this when reading points.
+    -- Original positions (without name): Point i has x at 40+(i-1)*2, y at 40+(i-1)*2+1
+    -- After name insert at 65: any position >= 65 is shifted by 1
     local points = {}
     for i = 1, 16 do
-        local x_idx = 40 + (i - 1) * 2 - 1 + 1  -- Convert to 1-based
-        local y_idx = x_idx + 1
+        local orig_x = 40 + (i - 1) * 2
+        local orig_y = orig_x + 1
+
+        -- Shift by 1 if original position >= 65 (name insertion point)
+        local x_idx = orig_x >= 65 and (orig_x + 1) or orig_x
+        local y_idx = orig_y >= 65 and (orig_y + 1) or orig_y
+
         local x = tonumber(values[x_idx]) or 0.5
         local y = tonumber(values[y_idx]) or 0.5
         points[i] = {x = x, y = y}
     end
 
-    -- Curves start after position 72 (after the name which is at 65)
-    -- In the decoded string, name is at position 65, so curves are at 73+
+    -- Curves are at positions 73-87 (1-based) - they're set AFTER the name insert
+    -- in the generator, so they're at their final positions
     local curves = {}
     for i = 1, 15 do
         local curve_idx = 72 + i  -- 1-based: 73, 74, ... 87
