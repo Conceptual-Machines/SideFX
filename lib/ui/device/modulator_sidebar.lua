@@ -6,11 +6,13 @@ local M = {}
 local r = reaper
 local imgui = require('imgui')
 local state_module = require('lib.core.state')
+local config = require('lib.core.config')
 local PARAM = require('lib.modulator.modulator_constants')
-local param_indices = require('lib.modulator.param_indices')
 local drawing = require('lib.ui.common.drawing')
 local modulator_module = require('lib.modulator.modulator')
 local curve_editor = require('lib.ui.common.curve_editor')
+local modulator_presets = require('lib.modulator.modulator_presets')
+local modulator_bake = require('lib.modulator.modulator_bake')
 
 -- Modulator types
 local MODULATOR_TYPES = {
@@ -147,30 +149,38 @@ end
 -- Helper: Draw preset dropdown, save button, and UI icon
 local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor_key, cfg, state, opts)
     local interacted = false
-    local preset_idx, num_presets = r.TrackFX_GetPresetIndex(
-        state.track.pointer,
-        expanded_modulator.pointer
-    )
-
     local mod_guid = expanded_modulator:get_guid()
-    num_presets = num_presets or 0
 
-    -- Cache preset names if presets exist and not already cached
-    if num_presets > 0 and not state.cached_preset_names[mod_guid] then
+    -- Cache preset names and sources by reading from .rpl files (non-destructive)
+    if not state.cached_preset_names[mod_guid] then
+        local names, sources = modulator_presets.get_preset_names()
         state.cached_preset_names[mod_guid] = {}
-        local original_idx = preset_idx
-        for i = 0, num_presets - 1 do
-            r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
-            local name = expanded_modulator:get_preset() or ("Preset " .. (i + 1))
-            state.cached_preset_names[mod_guid][i] = name
-        end
-        if original_idx >= 0 then
-            r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, original_idx)
+        state.cached_preset_sources = state.cached_preset_sources or {}
+        state.cached_preset_sources[mod_guid] = {}
+        for i, name in ipairs(names) do
+            state.cached_preset_names[mod_guid][i - 1] = name  -- 0-indexed
+            state.cached_preset_sources[mod_guid][i - 1] = sources[i]
         end
     end
 
     local cached_names = state.cached_preset_names[mod_guid] or {}
-    local current_preset_name = (num_presets > 0 and cached_names[preset_idx]) or "—"
+    local cached_sources = (state.cached_preset_sources and state.cached_preset_sources[mod_guid]) or {}
+
+    -- Get current preset name from REAPER's index, or use our tracked name after save/select
+    state.current_preset_name = state.current_preset_name or {}
+    local current_preset_name
+    local preset_idx = r.TrackFX_GetPresetIndex(state.track.pointer, expanded_modulator.pointer)
+
+    if state.current_preset_name[mod_guid] then
+        -- Use our tracked name (set after save or select)
+        current_preset_name = state.current_preset_name[mod_guid]
+    elseif preset_idx >= 0 and cached_names[preset_idx] then
+        -- Use REAPER's index to look up name
+        current_preset_name = cached_names[preset_idx]
+    else
+        -- Fallback to first preset name
+        current_preset_name = cached_names[0] or "Sine"
+    end
 
     -- Use table for preset row: Preset (stretch) | Save (fixed) | UI (fixed)
     local table_flags = r.ImGui_TableFlags_SizingFixedFit()
@@ -185,11 +195,36 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
         -- Column 1: Preset dropdown
         ctx:table_set_column_index(0)
         ctx:set_next_item_width(-1)
+        -- Count presets from our cache (more reliable than REAPER's count after .ini deletion)
+        local cache_count = 0
+        for _ in pairs(cached_names) do cache_count = cache_count + 1 end
         if ctx:begin_combo("##preset_" .. guid, current_preset_name) then
-            for i = 0, num_presets - 1 do
+            local shown_user_header = false
+            for i = 0, cache_count - 1 do
                 local preset_name = cached_names[i] or ("Preset " .. (i + 1))
-                if ctx:selectable(preset_name, i == preset_idx) then
-                    r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
+                local source = cached_sources[i] or "factory"
+
+                -- Show "User Presets" header before first user preset
+                if source == "user" and not shown_user_header then
+                    ctx:separator()
+                    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_Text(), 0x888888FF)
+                    ctx:text("User Presets")
+                    r.ImGui_PopStyleColor(ctx.ctx)
+                    ctx:separator()
+                    shown_user_header = true
+                end
+
+                local is_selected = (preset_name == current_preset_name)
+                if ctx:selectable(preset_name .. "##preset_item_" .. i, is_selected) then
+                    -- Load preset directly from .rpl file (bypasses REAPER's potentially stale index)
+                    local loaded = modulator_presets.load_preset_by_name(
+                        state.track.pointer,
+                        expanded_modulator.pointer,
+                        preset_name
+                    )
+                    if loaded then
+                        state.current_preset_name[mod_guid] = preset_name
+                    end
                     interacted = true
                 end
             end
@@ -209,10 +244,13 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
             ctx:push_font(opts.icon_font, 14)
         end
         if ctx:button(save_icon .. "##save_" .. guid, icon_btn_size, 0) then
-            -- Open REAPER's save preset dialog
-            r.TrackFX_SetPreset(state.track.pointer, expanded_modulator.pointer, "+")
-            -- Clear cache to reload presets after save
-            state.cached_preset_names[mod_guid] = nil
+            -- Open save preset popup, pre-fill with current preset name
+            state.save_preset_popup = state.save_preset_popup or {}
+            state.save_preset_popup[mod_guid] = {
+                open = true,
+                name = current_preset_name or "",
+                modulator = expanded_modulator
+            }
             interacted = true
         end
         if opts.icon_font then
@@ -589,24 +627,28 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
 end
 
 -- Helper: Draw existing parameter links
-local function draw_existing_links(ctx, guid, fx, existing_links, state)
+local function draw_existing_links(ctx, guid, fx, existing_links, state, expanded_modulator, opts)
     local interacted = false
 
     if #existing_links > 0 then
         state.link_bipolar = state.link_bipolar or {}
+        state.link_disabled = state.link_disabled or {}
+        state.link_saved_scale = state.link_saved_scale or {}
 
         -- Visual separator before linked params
         ctx:separator()
         ctx:spacing()
 
         -- Use table for consistent column alignment
+        -- Columns: Name | U/B | Depth | Disable | Bake | Remove
         local table_flags = r.ImGui_TableFlags_SizingFixedFit()
-        if ctx:begin_table("links_" .. guid, 4, table_flags) then
-            -- Setup columns: Name (fixed), U/B (fixed), Depth (stretch), X (fixed)
-            r.ImGui_TableSetupColumn(ctx.ctx, "Name", r.ImGui_TableColumnFlags_WidthFixed(), 60)
+        if ctx:begin_table("links_" .. guid, 6, table_flags) then
+            r.ImGui_TableSetupColumn(ctx.ctx, "Name", r.ImGui_TableColumnFlags_WidthFixed(), 55)
             r.ImGui_TableSetupColumn(ctx.ctx, "Mode", r.ImGui_TableColumnFlags_WidthFixed(), 42)
             r.ImGui_TableSetupColumn(ctx.ctx, "Depth", r.ImGui_TableColumnFlags_WidthStretch(), 1)
-            r.ImGui_TableSetupColumn(ctx.ctx, "Del", r.ImGui_TableColumnFlags_WidthFixed(), 20)
+            r.ImGui_TableSetupColumn(ctx.ctx, "Dis", r.ImGui_TableColumnFlags_WidthFixed(), 18)
+            r.ImGui_TableSetupColumn(ctx.ctx, "Bake", r.ImGui_TableColumnFlags_WidthFixed(), 18)
+            r.ImGui_TableSetupColumn(ctx.ctx, "Del", r.ImGui_TableColumnFlags_WidthFixed(), 18)
 
             for i, link in ipairs(existing_links) do
                 local link_key = guid .. "_" .. link.param_idx
@@ -614,19 +656,36 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
                 local plink_prefix = string.format("param.%d.plink.", link.param_idx)
                 local actual_depth = link.scale
 
+                -- Check if link is disabled (scale ~= 0 or we have saved scale)
+                local is_disabled = state.link_disabled[link_key] or false
+                -- Also detect if scale is 0 but we don't have it tracked
+                if math.abs(actual_depth) < 0.001 and state.link_saved_scale[link_key] then
+                    is_disabled = true
+                    state.link_disabled[link_key] = true
+                end
+
                 ctx:table_next_row()
+
+                -- Grey out disabled links
+                if is_disabled then
+                    ctx:push_style_color(imgui.Col.Text(), 0x666666FF)
+                end
 
                 -- Column 1: Parameter name
                 ctx:table_set_column_index(0)
-                ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)
-                local short_name = link.param_name:sub(1, 8)
-                if #link.param_name > 8 then short_name = short_name .. ".." end
+                if not is_disabled then
+                    ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)
+                end
+                local short_name = link.param_name:sub(1, 7)
+                if #link.param_name > 7 then short_name = short_name .. ".." end
                 ctx:text(short_name)
-                ctx:pop_style_color()
+                if not is_disabled then
+                    ctx:pop_style_color()
+                end
 
                 -- Column 2: Uni/Bi buttons
                 ctx:table_set_column_index(1)
-                if not is_bipolar then
+                if not is_bipolar and not is_disabled then
                     ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                 end
                 if ctx:button("U##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
@@ -636,7 +695,7 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
                         interacted = true
                     end
                 end
-                if not is_bipolar then
+                if not is_bipolar and not is_disabled then
                     ctx:pop_style_color()
                 end
                 if ctx:is_item_hovered() then
@@ -645,7 +704,7 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
 
                 ctx:same_line(0, 0)
 
-                if is_bipolar then
+                if is_bipolar and not is_disabled then
                     ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                 end
                 if ctx:button("B##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
@@ -655,7 +714,7 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
                         interacted = true
                     end
                 end
-                if is_bipolar then
+                if is_bipolar and not is_disabled then
                     ctx:pop_style_color()
                 end
                 if ctx:is_item_hovered() then
@@ -665,9 +724,12 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
                 -- Column 3: Depth slider
                 ctx:table_set_column_index(2)
                 ctx:set_next_item_width(-1)
-                local depth_pct = actual_depth * 100
-                local changed, new_depth_pct = ctx:slider_double("##depth_" .. link.param_idx .. "_" .. guid, depth_pct, -100, 100, "%.0f%%")
-                if changed then
+                local display_depth = is_disabled and (state.link_saved_scale[link_key] or 0) * 100 or actual_depth * 100
+                if is_disabled then
+                    r.ImGui_BeginDisabled(ctx.ctx)
+                end
+                local changed, new_depth_pct = ctx:slider_double("##depth_" .. link.param_idx .. "_" .. guid, display_depth, -100, 100, "%.0f%%")
+                if changed and not is_disabled then
                     local new_depth = new_depth_pct / 100
                     if is_bipolar then
                         fx:set_named_config_param(plink_prefix .. "offset", "-0.5")
@@ -675,12 +737,59 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
                     fx:set_named_config_param(plink_prefix .. "scale", tostring(new_depth))
                     interacted = true
                 end
+                if is_disabled then
+                    r.ImGui_EndDisabled(ctx.ctx)
+                end
                 if ctx:is_item_hovered() then
                     ctx:set_tooltip("Modulation depth")
                 end
 
-                -- Column 4: Remove button
+                -- Column 4: Disable/Enable toggle button
                 ctx:table_set_column_index(3)
+                local disable_icon = is_disabled and ">" or "||"
+                if is_disabled then
+                    ctx:push_style_color(imgui.Col.Button(), 0x444444FF)
+                end
+                if ctx:button(disable_icon .. "##dis_" .. i .. "_" .. guid, 18, 0) then
+                    if is_disabled then
+                        -- Re-enable: restore saved scale
+                        local saved = state.link_saved_scale[link_key] or 0.5
+                        fx:set_named_config_param(plink_prefix .. "scale", tostring(saved))
+                        state.link_disabled[link_key] = false
+                    else
+                        -- Disable: save current scale, set to 0
+                        state.link_saved_scale[link_key] = actual_depth
+                        fx:set_named_config_param(plink_prefix .. "scale", "0")
+                        state.link_disabled[link_key] = true
+                    end
+                    interacted = true
+                end
+                if is_disabled then
+                    ctx:pop_style_color()
+                end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip(is_disabled and "Enable link" or "Disable link")
+                end
+
+                -- Column 5: Bake button
+                ctx:table_set_column_index(4)
+                if ctx:button("B##bake_" .. i .. "_" .. guid, 18, 0) then
+                    -- Open bake modal for this specific link
+                    state.bake_modal = state.bake_modal or {}
+                    state.bake_modal[guid] = {
+                        open = true,
+                        link = link,
+                        modulator = expanded_modulator,
+                        fx = fx
+                    }
+                    interacted = true
+                end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip("Bake to automation")
+                end
+
+                -- Column 6: Remove button
+                ctx:table_set_column_index(5)
                 if ctx:button("X##rm_" .. i .. "_" .. guid, 18, 0) then
                     local lk = guid .. "_" .. link.param_idx
                     local restore_value = (state.link_baselines and state.link_baselines[lk]) or link.baseline or 0
@@ -688,18 +797,24 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state)
                         fx:set_param_normalized(link.param_idx, restore_value)
                         if state.link_baselines then state.link_baselines[lk] = nil end
                         if state.link_bipolar then state.link_bipolar[lk] = nil end
+                        if state.link_disabled then state.link_disabled[lk] = nil end
+                        if state.link_saved_scale then state.link_saved_scale[lk] = nil end
                         interacted = true
                     end
                 end
                 if ctx:is_item_hovered() then
                     ctx:set_tooltip("Remove link")
                 end
+
+                if is_disabled then
+                    ctx:pop_style_color()
+                end
             end
 
             ctx:end_table()
         end
     end
-    
+
     return interacted
 end
 
@@ -822,10 +937,264 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     
                     -- Show existing parameter links
                     ctx:spacing()
-                    if draw_existing_links(ctx, guid, fx, existing_links, state) then
+                    if draw_existing_links(ctx, guid, fx, existing_links, state, expanded_modulator, opts) then
                         interacted = true
                     end
+
+                    -- Bake All button (opens modal or uses default range)
+                    if #existing_links > 0 then
+                        ctx:spacing()
+                        ctx:separator()
+                        ctx:spacing()
+
+                        local can_bake = state.track ~= nil
+                        if not can_bake then
+                            r.ImGui_BeginDisabled(ctx.ctx)
+                        end
+                        if ctx:button("Bake All##bake_all_" .. guid, -1, 0) then
+                            if can_bake then
+                                -- Check config: show picker or use default?
+                                if config.get('bake_show_range_picker') then
+                                    -- Open bake modal for all links
+                                    state.bake_modal = state.bake_modal or {}
+                                    state.bake_modal[guid] = {
+                                        open = true,
+                                        link = nil,  -- nil = all links
+                                        links = existing_links,
+                                        modulator = expanded_modulator,
+                                        fx = fx
+                                    }
+                                else
+                                    -- Use default range directly
+                                    local bake_options = {
+                                        range_mode = config.get('bake_default_range_mode'),
+                                        disable_link = config.get('bake_disable_link_after')
+                                    }
+                                    local ok, result, msg = pcall(function()
+                                        return modulator_bake.bake_all_links(state.track, expanded_modulator, fx, existing_links, bake_options)
+                                    end)
+                                    if ok and result then
+                                        r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
+                                    elseif not ok then
+                                        r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
+                                    else
+                                        r.ShowConsoleMsg("SideFX: " .. tostring(msg or "No parameters to bake") .. "\n")
+                                    end
+                                end
+                                interacted = true
+                            end
+                        end
+                        if not can_bake then
+                            r.ImGui_EndDisabled(ctx.ctx)
+                        end
+                        if ctx:is_item_hovered() then
+                            ctx:set_tooltip("Bake all linked parameters to automation")
+                        end
+                    end
                 end
+            end
+        end
+    end
+
+    -- Draw save preset popup (regular popup, no grey background)
+    state.save_preset_popup = state.save_preset_popup or {}
+    for mod_guid, popup_state in pairs(state.save_preset_popup) do
+        if popup_state.open then
+            local popup_id = "Save Preset##save_preset_" .. mod_guid
+            if not popup_state.opened_frame then
+                r.ImGui_OpenPopup(ctx.ctx, popup_id)
+                popup_state.opened_frame = true
+            end
+
+            local popup_flags = r.ImGui_WindowFlags_AlwaysAutoResize() | r.ImGui_WindowFlags_NoMove()
+            local visible = r.ImGui_BeginPopup(ctx.ctx, popup_id, popup_flags)
+            local p_open = visible  -- For regular popups, visible means open
+            if visible then
+                ctx:text("Enter preset name:")
+                ctx:spacing()
+
+                ctx:set_next_item_width(200)
+                local changed, new_name = ctx:input_text("##preset_name_" .. mod_guid, popup_state.name or "")
+                if changed then
+                    popup_state.name = new_name
+                end
+
+                ctx:spacing()
+                ctx:separator()
+                ctx:spacing()
+
+                local can_save = popup_state.name and #popup_state.name > 0
+
+                if not can_save then
+                    r.ImGui_BeginDisabled(ctx.ctx)
+                end
+                if ctx:button("Save##save_" .. mod_guid, 80, 0) then
+                    -- Save the preset using our backend
+                    local mod = popup_state.modulator
+                    if mod and state.track then
+                        local should_save = true
+                        local preset_name = popup_state.name
+
+                        -- Check if preset already exists
+                        if modulator_presets.preset_exists(preset_name) then
+                            -- Ask user for confirmation (6 = Yes, 7 = No)
+                            local result = r.ShowMessageBox(
+                                "A preset named '" .. preset_name .. "' already exists.\n\nDo you want to overwrite it?",
+                                "SideFX - Preset Exists",
+                                4  -- MB_YESNO
+                            )
+                            if result == 6 then  -- Yes
+                                -- Delete old preset first
+                                modulator_presets.delete_preset(preset_name)
+                            else
+                                should_save = false
+                            end
+                        end
+
+                        if should_save then
+                            local success, err = modulator_presets.save_current_shape(
+                                state.track.pointer,
+                                mod.pointer,
+                                preset_name
+                            )
+                            if success then
+                                -- Refresh cache by re-reading from .rpl files (non-destructive)
+                                local names, sources = modulator_presets.get_preset_names()
+                                state.cached_preset_names[mod_guid] = {}
+                                state.cached_preset_sources = state.cached_preset_sources or {}
+                                state.cached_preset_sources[mod_guid] = {}
+                                for i, name in ipairs(names) do
+                                    state.cached_preset_names[mod_guid][i - 1] = name
+                                    state.cached_preset_sources[mod_guid][i - 1] = sources[i]
+                                end
+                                -- Update current preset name to the newly saved one
+                                state.current_preset_name = state.current_preset_name or {}
+                                state.current_preset_name[mod_guid] = preset_name
+                                r.ShowMessageBox("Preset saved: " .. preset_name, "SideFX", 0)
+                            else
+                                local debug_info = modulator_presets.debug_paths()
+                                r.ShowMessageBox("Failed to save preset.\n\n" .. (err or "Unknown error") .. "\n\nDebug:\n" .. debug_info, "SideFX", 0)
+                            end
+                        end
+                    else
+                        r.ShowMessageBox("No modulator or track selected", "SideFX", 0)
+                    end
+                    popup_state.open = false
+                    popup_state.opened_frame = nil
+                    r.ImGui_CloseCurrentPopup(ctx.ctx)
+                end
+                if not can_save then
+                    r.ImGui_EndDisabled(ctx.ctx)
+                end
+
+                ctx:same_line()
+                if ctx:button("Cancel##cancel_" .. mod_guid, 80, 0) then
+                    popup_state.open = false
+                    popup_state.opened_frame = nil
+                    r.ImGui_CloseCurrentPopup(ctx.ctx)
+                end
+
+                r.ImGui_EndPopup(ctx.ctx)
+            end
+
+            if not p_open then
+                popup_state.open = false
+                popup_state.opened_frame = nil
+            end
+        end
+    end
+
+    -- Draw bake modal popup
+    state.bake_modal = state.bake_modal or {}
+    for modal_guid, modal_state in pairs(state.bake_modal) do
+        if modal_state.open then
+            local popup_id = "Bake to Automation##bake_modal_" .. modal_guid
+            if not modal_state.opened_frame then
+                r.ImGui_OpenPopup(ctx.ctx, popup_id)
+                modal_state.opened_frame = true
+            end
+
+            local popup_flags = r.ImGui_WindowFlags_AlwaysAutoResize()
+            local visible = r.ImGui_BeginPopup(ctx.ctx, popup_id, popup_flags)
+            if visible then
+                local is_all_links = modal_state.link == nil
+                local title = is_all_links and "Bake All Parameters" or ("Bake: " .. (modal_state.link and modal_state.link.param_name or ""))
+                ctx:text(title)
+                ctx:separator()
+                ctx:spacing()
+
+                ctx:text("Select range:")
+                ctx:spacing()
+
+                -- Range mode buttons (one per line for clarity)
+                local default_range = config.get('bake_default_range_mode')
+                for mode_val = 1, 4 do
+                    local mode_label = modulator_bake.RANGE_MODE_LABELS[mode_val]
+                    if mode_label then
+                        local is_default = mode_val == default_range
+                        local btn_label = mode_label .. (is_default and " *" or "")
+
+                        if ctx:button(btn_label .. "##range_" .. mode_val, -1, 0) then
+                            -- Perform the bake
+                            local bake_options = {
+                                range_mode = mode_val,
+                                disable_link = config.get('bake_disable_link_after')
+                            }
+
+                            local ok, result, msg
+                            if is_all_links then
+                                ok, result, msg = pcall(function()
+                                    return modulator_bake.bake_all_links(
+                                        state.track,
+                                        modal_state.modulator,
+                                        modal_state.fx,
+                                        modal_state.links,
+                                        bake_options
+                                    )
+                                end)
+                            else
+                                ok, result, msg = pcall(function()
+                                    return modulator_bake.bake_to_automation(
+                                        state.track,
+                                        modal_state.modulator,
+                                        modal_state.fx,
+                                        modal_state.link.param_idx,
+                                        bake_options
+                                    )
+                                end)
+                            end
+
+                            if ok and result then
+                                r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
+                            elseif not ok then
+                                r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
+                            else
+                                r.ShowConsoleMsg("SideFX: " .. tostring(msg or "Bake failed") .. "\n")
+                            end
+
+                            modal_state.open = false
+                            modal_state.opened_frame = nil
+                            r.ImGui_CloseCurrentPopup(ctx.ctx)
+                            interacted = true
+                        end
+                    end
+                end
+
+                ctx:spacing()
+                ctx:separator()
+                ctx:spacing()
+
+                if ctx:button("Cancel##cancel_bake", -1, 0) then
+                    modal_state.open = false
+                    modal_state.opened_frame = nil
+                    r.ImGui_CloseCurrentPopup(ctx.ctx)
+                end
+
+                r.ImGui_EndPopup(ctx.ctx)
+            else
+                -- Popup was closed externally
+                modal_state.open = false
+                modal_state.opened_frame = nil
             end
         end
     end

@@ -9,6 +9,7 @@ local state_mod = require('lib.core.state')
 local modulator_mod = require('lib.modulator.modulator')
 local json = require('lib.utils.json')
 local fx_utils = require('lib.fx.fx_utils')
+local config = require('lib.core.config')
 
 -- Load RPP Parser library
 local rpp_parser_path = r.GetResourcePath() .. "/Scripts/ReaTeam Scripts/Development/RPP-Parser/Reateam_RPP-Parser.lua"
@@ -23,20 +24,23 @@ end
 
 local M = {}
 
--- Presets folder path (must be set via init before use)
-local presets_folder = nil
+--- Get the current presets folder from config
+-- @return string Presets folder path
+local function get_presets_folder()
+    return config.get_presets_folder()
+end
 
 --- Initialize the presets module.
 function M.init()
-    -- Save presets to [REAPER Resource Path]/presets/SideFX_Presets/
-    presets_folder = r.GetResourcePath() .. "/presets/SideFX_Presets/"
+    -- Config module handles the presets folder path
+    config.init()
 end
 
 --- Ensure the presets folder structure exists.
 function M.ensure_folder()
-    if not presets_folder then return end
-    r.RecursiveCreateDirectory(presets_folder, 0)
-    r.RecursiveCreateDirectory(presets_folder .. "chains/", 0)
+    local folder = get_presets_folder()
+    r.RecursiveCreateDirectory(folder, 0)
+    r.RecursiveCreateDirectory(folder .. "chains/", 0)
 end
 
 --- Collect SideFX metadata for the current track.
@@ -156,10 +160,10 @@ end
 function M.save_chain(preset_name)
     local state = state_mod.state
     if not state.track or not preset_name or preset_name == "" then return false end
-    if not presets_folder then return false end
 
     M.ensure_folder()
 
+    local presets_folder = get_presets_folder()
     local chain_path = presets_folder .. "chains/" .. preset_name .. ".RfxChain"
 
     -- Manually serialize FX chain using GetChunk
@@ -428,8 +432,8 @@ end
 function M.load_chain(preset_name)
     local state = state_mod.state
     if not state.track or not preset_name then return false end
-    if not presets_folder then return false end
 
+    local presets_folder = get_presets_folder()
     local chain_path = presets_folder .. "chains/" .. preset_name .. ".RfxChain"
     local metadata_path = presets_folder .. "chains/" .. preset_name .. ".sidefx.json"
 
@@ -489,9 +493,9 @@ function M.load_chain(preset_name)
 end
 
 --- Get the presets folder path.
--- @return string|nil Presets folder path or nil if not initialized
+-- @return string Presets folder path
 function M.get_folder()
-    return presets_folder
+    return get_presets_folder()
 end
 
 return M
