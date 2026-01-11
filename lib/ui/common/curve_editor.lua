@@ -7,6 +7,8 @@ local M = {}
 local r = reaper
 local imgui = require('imgui')
 local PARAM = require('lib.modulator.modulator_constants')
+local modulator_presets = require('lib.modulator.modulator_presets')
+local state_module = require('lib.core.state')
 
 -- Constants
 local MAX_POINTS = 16
@@ -589,7 +591,10 @@ end
 function M.draw_popup(ctx, modulator, state, popup_id, track)
     state = state or {}
     state.is_open = state.is_open or false
-    state.cached_preset_names = state.cached_preset_names or {}
+
+    -- Use global state for preset caching (shared with sidebar)
+    local global_state = state_module.state
+    global_state.cached_preset_names = global_state.cached_preset_names or {}
 
     -- Check if popup should be opened
     if state.open_requested then
@@ -628,34 +633,63 @@ function M.draw_popup(ctx, modulator, state, popup_id, track)
 
             -- Top bar: Preset dropdown + Save button
             if track then
-                local preset_idx, num_presets = r.TrackFX_GetPresetIndex(track.pointer, modulator.pointer)
-                num_presets = num_presets or 0
-
-                -- Cache preset names
                 local mod_guid = modulator:get_guid()
-                if not state.cached_preset_names[mod_guid] and num_presets > 0 then
-                    state.cached_preset_names[mod_guid] = {}
-                    local original_idx = preset_idx
-                    for i = 0, num_presets - 1 do
-                        r.TrackFX_SetPresetByIndex(track.pointer, modulator.pointer, i)
-                        local ok, name = pcall(function() return modulator:get_preset() end)
-                        state.cached_preset_names[mod_guid][i] = (ok and name) or ("Preset " .. (i + 1))
-                    end
-                    if original_idx >= 0 then
-                        r.TrackFX_SetPresetByIndex(track.pointer, modulator.pointer, original_idx)
+
+                -- Cache preset names and sources from .rpl files (non-destructive)
+                -- Use global state shared with sidebar
+                if not global_state.cached_preset_names[mod_guid] then
+                    local names, sources = modulator_presets.get_preset_names()
+                    global_state.cached_preset_names[mod_guid] = {}
+                    global_state.cached_preset_sources = global_state.cached_preset_sources or {}
+                    global_state.cached_preset_sources[mod_guid] = {}
+                    for i, name in ipairs(names) do
+                        global_state.cached_preset_names[mod_guid][i - 1] = name
+                        global_state.cached_preset_sources[mod_guid][i - 1] = sources[i]
                     end
                 end
 
-                local cached_names = state.cached_preset_names[mod_guid] or {}
-                local current_preset_name = cached_names[preset_idx] or (num_presets > 0 and "—" or "No Presets")
+                local cached_names = global_state.cached_preset_names[mod_guid] or {}
+                local cached_sources = (global_state.cached_preset_sources and global_state.cached_preset_sources[mod_guid]) or {}
+                local cache_count = 0
+                for _ in pairs(cached_names) do cache_count = cache_count + 1 end
+
+                -- Get current preset name from global state (shared with sidebar)
+                global_state.current_preset_name = global_state.current_preset_name or {}
+                local current_preset_name = global_state.current_preset_name[mod_guid]
+                if not current_preset_name then
+                    local preset_idx = r.TrackFX_GetPresetIndex(track.pointer, modulator.pointer)
+                    current_preset_name = cached_names[preset_idx] or cached_names[0] or "Sine"
+                    global_state.current_preset_name[mod_guid] = current_preset_name
+                end
 
                 -- Preset dropdown
                 r.ImGui_SetNextItemWidth(ctx.ctx, 200)
                 if r.ImGui_BeginCombo(ctx.ctx, "##preset", current_preset_name) then
-                    for i = 0, num_presets - 1 do
+                    local shown_user_header = false
+                    for i = 0, cache_count - 1 do
                         local preset_name = cached_names[i] or ("Preset " .. (i + 1))
-                        if r.ImGui_Selectable(ctx.ctx, preset_name, i == preset_idx) then
-                            r.TrackFX_SetPresetByIndex(track.pointer, modulator.pointer, i)
+                        local source = cached_sources[i] or "factory"
+
+                        -- Show "User Presets" header before first user preset
+                        if source == "user" and not shown_user_header then
+                            r.ImGui_Separator(ctx.ctx)
+                            r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_Text(), 0x888888FF)
+                            r.ImGui_Text(ctx.ctx, "User Presets")
+                            r.ImGui_PopStyleColor(ctx.ctx)
+                            r.ImGui_Separator(ctx.ctx)
+                            shown_user_header = true
+                        end
+
+                        if r.ImGui_Selectable(ctx.ctx, preset_name .. "##preset_" .. i, preset_name == current_preset_name) then
+                            -- Load preset directly from .rpl file
+                            local loaded = modulator_presets.load_preset_by_name(
+                                track.pointer,
+                                modulator.pointer,
+                                preset_name
+                            )
+                            if loaded then
+                                global_state.current_preset_name[mod_guid] = preset_name
+                            end
                             interacted = true
                         end
                     end
@@ -667,12 +701,15 @@ function M.draw_popup(ctx, modulator, state, popup_id, track)
 
                 r.ImGui_SameLine(ctx.ctx)
 
-                -- Save preset button
+                -- Save preset button - opens our save popup (shared with sidebar)
                 if r.ImGui_Button(ctx.ctx, "Save##preset_save", 40, 0) then
-                    -- Open REAPER's save preset dialog
-                    r.TrackFX_SetPreset(track.pointer, modulator.pointer, "+")
-                    -- Clear cache to reload presets
-                    state.cached_preset_names[mod_guid] = nil
+                    global_state.save_preset_popup = global_state.save_preset_popup or {}
+                    global_state.save_preset_popup[mod_guid] = {
+                        open = true,
+                        name = current_preset_name or "",
+                        modulator = modulator,
+                        track = track
+                    }
                     interacted = true
                 end
                 if r.ImGui_IsItemHovered(ctx.ctx) then

@@ -148,30 +148,38 @@ end
 -- Helper: Draw preset dropdown, save button, and UI icon
 local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor_key, cfg, state, opts)
     local interacted = false
-    local preset_idx, num_presets = r.TrackFX_GetPresetIndex(
-        state.track.pointer,
-        expanded_modulator.pointer
-    )
-
     local mod_guid = expanded_modulator:get_guid()
-    num_presets = num_presets or 0
 
-    -- Cache preset names if presets exist and not already cached
-    if num_presets > 0 and not state.cached_preset_names[mod_guid] then
+    -- Cache preset names and sources by reading from .rpl files (non-destructive)
+    if not state.cached_preset_names[mod_guid] then
+        local names, sources = modulator_presets.get_preset_names()
         state.cached_preset_names[mod_guid] = {}
-        local original_idx = preset_idx
-        for i = 0, num_presets - 1 do
-            r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
-            local name = expanded_modulator:get_preset() or ("Preset " .. (i + 1))
-            state.cached_preset_names[mod_guid][i] = name
-        end
-        if original_idx >= 0 then
-            r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, original_idx)
+        state.cached_preset_sources = state.cached_preset_sources or {}
+        state.cached_preset_sources[mod_guid] = {}
+        for i, name in ipairs(names) do
+            state.cached_preset_names[mod_guid][i - 1] = name  -- 0-indexed
+            state.cached_preset_sources[mod_guid][i - 1] = sources[i]
         end
     end
 
     local cached_names = state.cached_preset_names[mod_guid] or {}
-    local current_preset_name = (num_presets > 0 and cached_names[preset_idx]) or "—"
+    local cached_sources = (state.cached_preset_sources and state.cached_preset_sources[mod_guid]) or {}
+
+    -- Get current preset name from REAPER's index, or use our tracked name after save/select
+    state.current_preset_name = state.current_preset_name or {}
+    local current_preset_name
+    local preset_idx = r.TrackFX_GetPresetIndex(state.track.pointer, expanded_modulator.pointer)
+
+    if state.current_preset_name[mod_guid] then
+        -- Use our tracked name (set after save or select)
+        current_preset_name = state.current_preset_name[mod_guid]
+    elseif preset_idx >= 0 and cached_names[preset_idx] then
+        -- Use REAPER's index to look up name
+        current_preset_name = cached_names[preset_idx]
+    else
+        -- Fallback to first preset name
+        current_preset_name = cached_names[0] or "Sine"
+    end
 
     -- Use table for preset row: Preset (stretch) | Save (fixed) | UI (fixed)
     local table_flags = r.ImGui_TableFlags_SizingFixedFit()
@@ -186,11 +194,36 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
         -- Column 1: Preset dropdown
         ctx:table_set_column_index(0)
         ctx:set_next_item_width(-1)
+        -- Count presets from our cache (more reliable than REAPER's count after .ini deletion)
+        local cache_count = 0
+        for _ in pairs(cached_names) do cache_count = cache_count + 1 end
         if ctx:begin_combo("##preset_" .. guid, current_preset_name) then
-            for i = 0, num_presets - 1 do
+            local shown_user_header = false
+            for i = 0, cache_count - 1 do
                 local preset_name = cached_names[i] or ("Preset " .. (i + 1))
-                if ctx:selectable(preset_name, i == preset_idx) then
-                    r.TrackFX_SetPresetByIndex(state.track.pointer, expanded_modulator.pointer, i)
+                local source = cached_sources[i] or "factory"
+
+                -- Show "User Presets" header before first user preset
+                if source == "user" and not shown_user_header then
+                    ctx:separator()
+                    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_Text(), 0x888888FF)
+                    ctx:text("User Presets")
+                    r.ImGui_PopStyleColor(ctx.ctx)
+                    ctx:separator()
+                    shown_user_header = true
+                end
+
+                local is_selected = (preset_name == current_preset_name)
+                if ctx:selectable(preset_name .. "##preset_item_" .. i, is_selected) then
+                    -- Load preset directly from .rpl file (bypasses REAPER's potentially stale index)
+                    local loaded = modulator_presets.load_preset_by_name(
+                        state.track.pointer,
+                        expanded_modulator.pointer,
+                        preset_name
+                    )
+                    if loaded then
+                        state.current_preset_name[mod_guid] = preset_name
+                    end
                     interacted = true
                 end
             end
@@ -210,11 +243,11 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
             ctx:push_font(opts.icon_font, 14)
         end
         if ctx:button(save_icon .. "##save_" .. guid, icon_btn_size, 0) then
-            -- Open save preset popup
+            -- Open save preset popup, pre-fill with current preset name
             state.save_preset_popup = state.save_preset_popup or {}
             state.save_preset_popup[mod_guid] = {
                 open = true,
-                name = "",
+                name = current_preset_name or "",
                 modulator = expanded_modulator
             }
             interacted = true
@@ -834,7 +867,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
         end
     end
 
-    -- Draw save preset popup (modal dialog)
+    -- Draw save preset popup (regular popup, no grey background)
     state.save_preset_popup = state.save_preset_popup or {}
     for mod_guid, popup_state in pairs(state.save_preset_popup) do
         if popup_state.open then
@@ -844,8 +877,9 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                 popup_state.opened_frame = true
             end
 
-            local popup_flags = r.ImGui_WindowFlags_AlwaysAutoResize()
-            local visible, p_open = r.ImGui_BeginPopupModal(ctx.ctx, popup_id, true, popup_flags)
+            local popup_flags = r.ImGui_WindowFlags_AlwaysAutoResize() | r.ImGui_WindowFlags_NoMove()
+            local visible = r.ImGui_BeginPopup(ctx.ctx, popup_id, popup_flags)
+            local p_open = visible  -- For regular popups, visible means open
             if visible then
                 ctx:text("Enter preset name:")
                 ctx:spacing()
@@ -865,22 +899,53 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                 if not can_save then
                     r.ImGui_BeginDisabled(ctx.ctx)
                 end
-                if ctx:button("Save", 80, 0) then
+                if ctx:button("Save##save_" .. mod_guid, 80, 0) then
                     -- Save the preset using our backend
                     local mod = popup_state.modulator
                     if mod and state.track then
-                        local success, err = modulator_presets.save_current_shape(
-                            state.track.pointer,
-                            mod.pointer,
-                            popup_state.name
-                        )
-                        if success then
-                            -- Clear preset cache to reload
-                            state.cached_preset_names[mod_guid] = nil
-                            r.ShowMessageBox("Preset saved: " .. popup_state.name, "SideFX", 0)
-                        else
-                            local debug_info = modulator_presets.debug_paths()
-                            r.ShowMessageBox("Failed to save preset.\n\n" .. (err or "Unknown error") .. "\n\nDebug:\n" .. debug_info, "SideFX", 0)
+                        local should_save = true
+                        local preset_name = popup_state.name
+
+                        -- Check if preset already exists
+                        if modulator_presets.preset_exists(preset_name) then
+                            -- Ask user for confirmation (6 = Yes, 7 = No)
+                            local result = r.ShowMessageBox(
+                                "A preset named '" .. preset_name .. "' already exists.\n\nDo you want to overwrite it?",
+                                "SideFX - Preset Exists",
+                                4  -- MB_YESNO
+                            )
+                            if result == 6 then  -- Yes
+                                -- Delete old preset first
+                                modulator_presets.delete_preset(preset_name)
+                            else
+                                should_save = false
+                            end
+                        end
+
+                        if should_save then
+                            local success, err = modulator_presets.save_current_shape(
+                                state.track.pointer,
+                                mod.pointer,
+                                preset_name
+                            )
+                            if success then
+                                -- Refresh cache by re-reading from .rpl files (non-destructive)
+                                local names, sources = modulator_presets.get_preset_names()
+                                state.cached_preset_names[mod_guid] = {}
+                                state.cached_preset_sources = state.cached_preset_sources or {}
+                                state.cached_preset_sources[mod_guid] = {}
+                                for i, name in ipairs(names) do
+                                    state.cached_preset_names[mod_guid][i - 1] = name
+                                    state.cached_preset_sources[mod_guid][i - 1] = sources[i]
+                                end
+                                -- Update current preset name to the newly saved one
+                                state.current_preset_name = state.current_preset_name or {}
+                                state.current_preset_name[mod_guid] = preset_name
+                                r.ShowMessageBox("Preset saved: " .. preset_name, "SideFX", 0)
+                            else
+                                local debug_info = modulator_presets.debug_paths()
+                                r.ShowMessageBox("Failed to save preset.\n\n" .. (err or "Unknown error") .. "\n\nDebug:\n" .. debug_info, "SideFX", 0)
+                            end
                         end
                     else
                         r.ShowMessageBox("No modulator or track selected", "SideFX", 0)
@@ -894,7 +959,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                 end
 
                 ctx:same_line()
-                if ctx:button("Cancel", 80, 0) then
+                if ctx:button("Cancel##cancel_" .. mod_guid, 80, 0) then
                     popup_state.open = false
                     popup_state.opened_frame = nil
                     r.ImGui_CloseCurrentPopup(ctx.ctx)
