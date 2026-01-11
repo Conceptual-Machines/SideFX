@@ -178,6 +178,56 @@ function M.check_fx_list_validity()
     return false
 end
 
+--- Process any pending modulator additions.
+-- Called at the start of each frame, before rendering.
+-- Modulator additions are deferred to avoid stale pointer issues during render.
+function M.process_pending_modulator_adds()
+    if not state.pending_modulator_add or #state.pending_modulator_add == 0 then
+        return
+    end
+
+    local track = state.track
+    if not track then
+        state.pending_modulator_add = nil
+        return
+    end
+
+    -- Copy and clear pending list FIRST to prevent re-entrancy issues
+    local pending_list = state.pending_modulator_add
+    state.pending_modulator_add = nil
+
+    -- Process all pending additions (wrapped in pcall for safety)
+    local ok, err = pcall(function()
+        local modulator_module = require('lib.modulator.modulator')
+
+        for _, pending in ipairs(pending_list) do
+            -- Find container by GUID (safe - returns nil if not found)
+            local container = track:find_fx_by_guid(pending.container_guid)
+            if container then
+                local new_mod = modulator_module.add_modulator_to_device(container, pending.modulator_type, track)
+                if new_mod then
+                    -- Store selection for after refresh (safely get GUID)
+                    local ok_guid, new_mod_guid = pcall(function() return new_mod:get_guid() end)
+                    if ok_guid and new_mod_guid then
+                        state.pending_mod_selection = state.pending_mod_selection or {}
+                        state.pending_mod_selection[pending.state_guid] = {
+                            container_guid = pending.container_guid,
+                            mod_guid = new_mod_guid
+                        }
+                    end
+                end
+            end
+        end
+    end)
+
+    if not ok then
+        reaper.ShowConsoleMsg("SideFX: Error adding modulator: " .. tostring(err) .. "\n")
+    end
+
+    -- Always refresh FX list after attempting additions
+    M.refresh_fx_list()
+end
+
 --- Clear multi-selection.
 function M.clear_multi_select()
     state.multi_select = {}

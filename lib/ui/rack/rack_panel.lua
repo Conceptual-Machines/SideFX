@@ -71,20 +71,25 @@ local function draw_chain_fx_button(ctx, fx, fx_index, is_first, colors)
         ctx:same_line()
     end
 
-    -- Compact FX button
-    local fx_name = fx:get_name():sub(1, 12)
-    local enabled = fx:get_enabled()
+    -- Compact FX button (safely get properties)
+    local ok_name, full_name = pcall(function() return fx:get_name() end)
+    if not ok_name or not full_name then return false end
+
+    local fx_name = full_name:sub(1, 12)
+    local ok_enabled, enabled = pcall(function() return fx:get_enabled() end)
+    if not ok_enabled then enabled = true end
+
     local btn_color = enabled and 0x3A4A5AFF or 0x2A2A35FF
 
     ctx:push_style_color(r.ImGui_Col_Button(), btn_color)
     if ctx:small_button(fx_name .. "##fx_" .. fx_index) then
-        fx:show(3)  -- Open native UI
+        pcall(function() fx:show(3) end)  -- Open native UI
         interacted = true
     end
     ctx:pop_style_color()
 
     if ctx:is_item_hovered() then
-        ctx:set_tooltip(fx:get_name())
+        ctx:set_tooltip(full_name)
     end
 
     return interacted
@@ -241,8 +246,13 @@ function M.draw(ctx, container, chains, opts)
 
     if not container then return false end
 
-    local guid = container:get_guid()
-    local rack_name = container:get_name()
+    -- Safely get container properties (may fail if stale)
+    local ok_guid, guid = pcall(function() return container:get_guid() end)
+    if not ok_guid or not guid then return false end
+
+    local ok_name, rack_name = pcall(function() return container:get_name() end)
+    if not ok_name or not rack_name then rack_name = "Rack" end
+
     -- Strip "Container" prefix for cleaner display
     rack_name = rack_name:gsub("^Container", ""):gsub("^%s*", "")
     if rack_name == "" then rack_name = "Rack" end
@@ -349,8 +359,13 @@ function M.draw_collapsed(ctx, container, chain_count, opts)
 
     if not container then return false end
 
-    local guid = container:get_guid()
-    local rack_name = container:get_name():gsub("^Container", ""):gsub("^%s*", "")
+    -- Safely get container properties (may fail if stale)
+    local ok_guid, guid = pcall(function() return container:get_guid() end)
+    if not ok_guid or not guid then return false end
+
+    local ok_name, rack_name = pcall(function() return container:get_name() end)
+    if not ok_name or not rack_name then rack_name = "Rack" end
+    rack_name = rack_name:gsub("^Container", ""):gsub("^%s*", "")
     if rack_name == "" then rack_name = "Rack" end
 
     local collapsed_width = 160

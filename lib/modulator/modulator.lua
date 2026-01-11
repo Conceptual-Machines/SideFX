@@ -379,30 +379,37 @@ function M.add_modulator_to_device(device_container, modulator_type, track)
         return nil
     end
 
-    -- Refind modulator after move (pointer changed)
+    -- Refind BOTH modulator and container after move (pointers changed)
     local moved_modulator = track:find_fx_by_guid(mod_guid)
+    local final_container = track:find_fx_by_guid(container_guid)
 
-    if moved_modulator then
+    if moved_modulator and final_container then
         -- Name the modulator with hierarchical convention
-        local device_path_str = naming.extract_path_from_name(fresh_container:get_name())
-        if device_path_str then
-            -- Count existing modulators in this device to get next index
-            local modulator_count = 0
-            for child in fresh_container:iter_container_children() do
-                if fx_utils.is_modulator_fx(child) then
-                    modulator_count = modulator_count + 1
+        local ok_name, container_name = pcall(function() return final_container:get_name() end)
+        if ok_name and container_name then
+            local device_path_str = naming.extract_path_from_name(container_name)
+            if device_path_str then
+                -- Count existing modulators in this device to get next index
+                local modulator_count = 0
+                local ok_iter, iter = pcall(function() return final_container:iter_container_children() end)
+                if ok_iter and iter then
+                    for child in iter do
+                        if fx_utils.is_modulator_fx(child) then
+                            modulator_count = modulator_count + 1
+                        end
+                    end
                 end
-            end
 
-            -- Build modulator name using general hierarchical function
-            local mod_name = naming.build_hierarchical_name(device_path_str, "modulator", modulator_count, "SideFX Modulator")
-            moved_modulator:set_named_config_param("renamed_name", mod_name)
+                -- Build modulator name using general hierarchical function
+                local mod_name = naming.build_hierarchical_name(device_path_str, "modulator", modulator_count, "SideFX Modulator")
+                pcall(function() moved_modulator:set_named_config_param("renamed_name", mod_name) end)
+            end
         end
 
         -- Initialize default parameter values
         -- Set LFO Mode to Loop (0) by default
         local PARAM = require('lib.modulator.modulator_constants')
-        moved_modulator:set_param(PARAM.PARAM_LFO_MODE, 0)
+        pcall(function() moved_modulator:set_param(PARAM.PARAM_LFO_MODE, 0) end)
 
         -- Select first preset (Sine) by default
         if moved_modulator.pointer >= 0 then

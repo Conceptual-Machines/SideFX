@@ -277,6 +277,10 @@ function M.create_callbacks(opts)
                     state_module.load_display_names()
                 end
             else
+                -- Process any pending modulator additions (deferred from previous frame)
+                -- Must happen BEFORE check_fx_list_validity to avoid double refresh
+                state_module.process_pending_modulator_adds()
+
                 -- Check for pending FX list refresh (deferred from previous frame)
                 state_module.check_fx_list_validity()
 

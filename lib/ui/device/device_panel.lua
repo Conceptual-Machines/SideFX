@@ -464,6 +464,11 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
             end
         end
 
+        -- CRITICAL: If FX list was invalidated by header operations (e.g., delete), bail out
+        if state.fx_list_invalid then
+            return  -- Early return from with_table callback
+        end
+
         -- Separator row between header and content
         r.ImGui_TableNextRow(ctx.ctx)
         r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
@@ -482,6 +487,12 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
         if draw_modulator_column(ctx, fx, container, guid, state_guid, cfg, opts) then
             interacted = true
+        end
+
+        -- CRITICAL: If FX list was invalidated (e.g., modulator added), bail out immediately
+        -- to avoid accessing stale FX references in the rest of this callback
+        if state.fx_list_invalid then
+            return  -- Early return from with_table callback
         end
 
         -- Content Column 2: Device params or collapsed view
@@ -729,26 +740,33 @@ local function draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, 
     -- Begin child for panel content (hide scrollbars)
     local window_flags = imgui.WindowFlags.NoScrollbar()
     if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0, window_flags) then
+        -- Wrap ALL content in pcall to ensure end_child is ALWAYS called
+        -- This prevents ImGui state corruption ("Missing EndChild" errors)
+        local ok, err = pcall(function()
+            -- Draw collapsed body and return early if collapsed
+            if is_panel_collapsed then
+                -- For collapsed, still draw a simple header + body
+                local header_interacted = draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors, enabled, is_device_collapsed)
+                if header_interacted then interacted = true end
 
-        -- Draw collapsed body and return early if collapsed
-        if is_panel_collapsed then
-            -- For collapsed, still draw a simple header + body
-            local header_interacted = draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_guid, guid, name, device_id, drag_guid, opts, colors, enabled, is_device_collapsed)
-            if header_interacted then interacted = true end
+                local collapsed_interacted = draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opts, colors)
+                if collapsed_interacted then interacted = true end
+                return
+            end
 
-            local collapsed_interacted = draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opts, colors)
-            if collapsed_interacted then interacted = true end
-            ctx:end_child()  -- end panel
-            return interacted
+            -- Draw expanded panel with 3-column layout (no top header)
+            -- Device header will be drawn inside column 2
+            if draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, name, device_id, drag_guid, enabled, opts, colors, panel_collapsed) then
+                interacted = true
+            end
+        end)
+
+        ctx:end_child()  -- ALWAYS end panel, even on error
+
+        if not ok then
+            -- Log error but don't propagate - we've already cleaned up ImGui state
+            r.ShowConsoleMsg("SideFX panel error: " .. tostring(err) .. "\n")
         end
-
-        -- Draw expanded panel with 3-column layout (no top header)
-        -- Device header will be drawn inside column 2
-        if draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, name, device_id, drag_guid, enabled, opts, colors, panel_collapsed) then
-            interacted = true
-        end
-
-        ctx:end_child()  -- end panel
     end
 
     return interacted
@@ -767,6 +785,9 @@ function M.draw(ctx, fx, opts)
     opts = opts or {}
     local cfg = M.config
     local colors = M.colors
+
+    -- Skip rendering if FX list is already invalid (stale data from previous operations)
+    if state.fx_list_invalid then return false end
 
     -- Validate FX before rendering
     if not validate_fx_for_rendering(fx) then return false end

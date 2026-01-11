@@ -132,24 +132,36 @@ end
 -- @param fx ReaWrap rack FX
 -- @param avail_height number Available height
 function M.draw_rack_item(ctx, fx, avail_height, callbacks)
+    -- Check if FX list is invalid - bail out early
+    if state.fx_list_invalid then return end
+
     -- Draw rack using helper function (top-level rack, explicitly not nested)
     local rack_data = draw_rack_panel(ctx, fx, avail_height, false, callbacks)
 
-    -- Draw selected chain column if expanded
-    local rack_guid = fx:get_guid()
-    draw_selected_chain_column_if_expanded(ctx, rack_data, rack_guid)
+    -- Draw selected chain column if expanded (safely get GUID)
+    local ok_guid, rack_guid = pcall(function() return fx:get_guid() end)
+    if ok_guid and rack_guid then
+        draw_selected_chain_column_if_expanded(ctx, rack_data, rack_guid)
+    end
 end
 
 --- Draw an unknown container item
 -- @param ctx ImGui context
 -- @param fx ReaWrap container FX
 function M.draw_container_item(ctx, fx)
-    local guid = fx:get_guid()
+    -- Check if FX list is invalid - bail out early
+    if state.fx_list_invalid then return end
+
+    -- Safely get GUID (may fail if stale)
+    local ok_guid, guid = pcall(function() return fx:get_guid() end)
+    if not ok_guid or not guid then return end
+
     ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
     if ctx:begin_child("container_" .. guid, 180, 100, imgui.ChildFlags.Border()) then
-        ctx:text(get_fx_display_name(fx):sub(1, 15))
+        local ok_name, display_name = pcall(function() return get_fx_display_name(fx) end)
+        ctx:text((ok_name and display_name or "Container"):sub(1, 15))
         if ctx:small_button("Open") then
-            fx:show(3)
+            pcall(function() fx:show(3) end)
         end
         ctx:end_child()
     end
@@ -163,9 +175,22 @@ end
 -- @param avail_height number Available height
 -- @param callbacks table Callback functions
 function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
-    local guid = fx:get_guid()
+    -- Check if FX list is invalid - bail out early to avoid stale pointer errors
+    if state.fx_list_invalid then return end
+
+    -- Safely get GUID (may fail if FX was deleted/moved)
+    local ok_guid, guid = pcall(function() return fx:get_guid() end)
+    if not ok_guid or not guid then return end
+
     local utility = item.utility
     local container = item.container
+
+    -- Safely get container name (may fail if container is stale)
+    local container_name = nil
+    if container then
+        local ok_name, name = pcall(function() return container:get_name() end)
+        if ok_name then container_name = name end
+    end
 
     if device_panel then
         -- Use full device panel
@@ -173,7 +198,7 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
             avail_height = avail_height - 10,
             utility = utility,  -- Paired SideFX_Utility for gain/pan
             container = container,  -- Pass container reference
-            container_name = container and container:get_name() or nil,
+            container_name = container_name,
             missing_utility = item.missing_utility,  -- Flag for warning icon
             icon_font = icon_font,
             track = state.track,

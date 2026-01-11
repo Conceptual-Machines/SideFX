@@ -106,27 +106,21 @@ local function draw_modulator_grid(ctx, guid, modulators, expanded_slot_idx, slo
                 else
                     -- Empty slot - show + button
                     if ctx:button("+##" .. slot_id, slot_width, slot_height) then
-                        -- Show modulator type dropdown (simplified for now - just add Bezier LFO)
+                        -- CRITICAL: Don't add modulator immediately - it changes FX indices mid-render!
+                        -- Instead, defer the addition to next frame to avoid stale pointer errors.
                         local track = opts.track or state.track
                         if track and container then
-                            -- Store container GUID before adding (GUIDs are stable)
-                            local container_guid = container:get_guid()
-
-                            local new_mod = modulator_module.add_modulator_to_device(container, MODULATOR_TYPES[1], track)
-                            if new_mod then
-                                -- Store new mod slot selection before refreshing
-                                -- (the refresh will invalidate current FX references)
-                                local new_mod_guid = new_mod:get_guid()
-
-                                -- Mark state to select this modulator after refresh
-                                state.pending_mod_selection = state.pending_mod_selection or {}
-                                state.pending_mod_selection[state_guid] = {
+                            -- Store container GUID (stable across FX changes)
+                            local ok_guid, container_guid = pcall(function() return container:get_guid() end)
+                            if ok_guid and container_guid then
+                                -- Queue the modulator addition for next frame
+                                state.pending_modulator_add = state.pending_modulator_add or {}
+                                table.insert(state.pending_modulator_add, {
                                     container_guid = container_guid,
-                                    mod_guid = new_mod_guid
-                                }
-
-                                -- Defer refresh to next frame to avoid stale pointer issues
-                                -- The interacted flag signals that FX list needs refresh
+                                    modulator_type = MODULATOR_TYPES[1],
+                                    state_guid = state_guid,  -- For selecting after add
+                                })
+                                -- Invalidate FX list to bail out of current render
                                 state_module.invalidate_fx_list()
                             end
                         end
@@ -852,8 +846,11 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
         local container_guid = pending.container_guid
         local mod_guid = pending.mod_guid
 
-        -- Only process if this is the right container
-        if container and container:get_guid() == container_guid then
+        -- Only process if this is the right container (safely get GUID)
+        local ok_container_guid, current_guid = pcall(function()
+            return container and container:get_guid()
+        end)
+        if ok_container_guid and current_guid == container_guid then
             local modulators = get_device_modulators(container)
             for idx, mod in ipairs(modulators) do
                 local ok_guid, m_guid = pcall(function() return mod:get_guid() end)
