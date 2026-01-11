@@ -7,6 +7,7 @@
 local r = reaper
 local state_mod = require('lib.core.state')
 local config = require('lib.core.config')
+local modulator_bake = require('lib.modulator.modulator_bake')
 
 local M = {}
 
@@ -103,26 +104,43 @@ function M.draw(ctx)
 
     ctx:spacing()
 
-    -- Gain Staging Section
-    ctx:text("Gain Staging")
+    -- Bake Settings Section
+    ctx:text("Bake Settings")
     ctx:separator()
 
-    -- Default target level
-    local target_db = config.get('gain_target_db')
-    ctx:text(string.format("Default Target Level: %.1f dB", target_db))
-    local changed, new_target = ctx:slider_double("##gain_target", target_db, -24.0, 0.0, "%.1f dB")
-    if changed then
-        config.set('gain_target_db', new_target)
+    -- Disable link after bake
+    local disable_after = config.get('bake_disable_link_after')
+    if ctx:checkbox("Disable Link After Bake", disable_after) then
+        config.set('bake_disable_link_after', not disable_after)
         state_mod.load_config()
     end
 
-    -- Tolerance
-    local tolerance_db = config.get('gain_tolerance_db')
-    ctx:text(string.format("Tolerance: %.1f dB", tolerance_db))
-    local changed_tol, new_tol = ctx:slider_double("##gain_tolerance", tolerance_db, 0.5, 3.0, "%.1f dB")
-    if changed_tol then
-        config.set('gain_tolerance_db', new_tol)
+    -- Show range picker modal
+    local show_picker = config.get('bake_show_range_picker')
+    if ctx:checkbox("Show Range Picker", show_picker) then
+        config.set('bake_show_range_picker', not show_picker)
         state_mod.load_config()
+    end
+
+    -- Default range mode
+    ctx:text("Default Range:")
+    ctx:same_line()
+    local current_mode = config.get('bake_default_range_mode')
+    local current_label = modulator_bake.RANGE_MODE_LABELS[current_mode] or "Track Items"
+
+    ctx:set_next_item_width(150)
+    if r.ImGui_BeginCombo(ctx.ctx, "##bake_range_mode", current_label) then
+        for mode_val, label in pairs(modulator_bake.RANGE_MODE_LABELS) do
+            local is_selected = (mode_val == current_mode)
+            if r.ImGui_Selectable(ctx.ctx, label, is_selected) then
+                config.set('bake_default_range_mode', mode_val)
+                state_mod.load_config()
+            end
+            if is_selected then
+                r.ImGui_SetItemDefaultFocus(ctx.ctx)
+            end
+        end
+        r.ImGui_EndCombo(ctx.ctx)
     end
 
     ctx:spacing()
