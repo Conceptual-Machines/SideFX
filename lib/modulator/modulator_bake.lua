@@ -1,0 +1,316 @@
+--- Modulator Bake
+-- Convert LFO modulation to automation envelopes
+-- @module modulator.modulator_bake
+-- @author SideFX
+-- @license MIT
+
+local r = reaper
+local PARAM = require('lib.modulator.modulator_constants')
+local curve_editor = require('lib.ui.common.curve_editor')
+local state_module = require('lib.core.state')
+
+local M = {}
+
+-- Default bake options
+M.DEFAULT_OPTIONS = {
+    resolution = 32,        -- Points per cycle
+    num_cycles = nil,       -- Number of cycles to bake (nil = calculate from num_bars)
+    num_bars = 4,           -- Number of bars to bake (used if num_cycles is nil)
+    start_time = 0,         -- Start time in seconds (0 = project start)
+    use_edit_cursor = false, -- If true, start from edit cursor instead of start_time
+    disable_link = false,   -- Set link scale to 0 after bake (keeps link but disables it)
+    remove_link = false,    -- Remove parameter link after bake
+    remove_modulator = false, -- Remove modulator after bake
+}
+
+-- Sync rate divisors (beats per cycle)
+-- Index matches PARAM_SYNC_RATE normalized value * 17
+local SYNC_RATE_BEATS = {
+    [0] = 32,    -- 8 bars
+    [1] = 16,    -- 4 bars
+    [2] = 8,     -- 2 bars
+    [3] = 4,     -- 1 bar
+    [4] = 2,     -- 1/2
+    [5] = 1,     -- 1/4
+    [6] = 2/3,   -- 1/4T (triplet)
+    [7] = 1.5,   -- 1/4. (dotted)
+    [8] = 0.5,   -- 1/8
+    [9] = 1/3,   -- 1/8T
+    [10] = 0.75, -- 1/8.
+    [11] = 0.25, -- 1/16
+    [12] = 1/6,  -- 1/16T
+    [13] = 0.375,-- 1/16.
+    [14] = 0.125,-- 1/32
+    [15] = 1/12, -- 1/32T
+    [16] = 0.1875,-- 1/32.
+    [17] = 0.0625,-- 1/64
+}
+
+--------------------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------------------
+
+--- Get the cycle duration of a modulator in seconds
+-- @param modulator TrackFX The modulator FX object
+-- @return number Duration in seconds
+function M.get_cycle_duration(modulator)
+    -- Check tempo mode (0=Free, 1=Sync)
+    local ok_mode, tempo_mode = pcall(function()
+        return modulator:get_param(PARAM.PARAM_TEMPO_MODE)
+    end)
+    local is_sync = ok_mode and tempo_mode >= 0.5
+
+    if is_sync then
+        -- Sync mode: calculate from sync rate and project tempo
+        local ok_rate, sync_rate_norm = pcall(function()
+            return modulator:get_param_normalized(PARAM.PARAM_SYNC_RATE)
+        end)
+        local sync_idx = ok_rate and math.floor(sync_rate_norm * 17 + 0.5) or 5
+        local beats_per_cycle = SYNC_RATE_BEATS[sync_idx] or 1
+
+        -- Get project tempo
+        local bpm = r.Master_GetTempo()
+        local seconds_per_beat = 60 / bpm
+
+        return beats_per_cycle * seconds_per_beat
+    else
+        -- Free mode: 1 / rate_hz
+        local ok_rate, rate_hz = pcall(function()
+            return modulator:get_param(PARAM.PARAM_RATE_HZ)
+        end)
+        rate_hz = ok_rate and rate_hz or 1
+        if rate_hz < 0.01 then rate_hz = 0.01 end
+
+        return 1 / rate_hz
+    end
+end
+
+--- Sample the LFO curve at specified resolution
+-- @param modulator TrackFX The modulator FX object
+-- @param resolution number Number of sample points
+-- @return table Array of {t, value} where t is 0-1 and value is 0-1
+function M.sample_lfo_curve(modulator, resolution, phase_offset)
+    phase_offset = phase_offset or 0
+
+    -- Read curve data from modulator
+    local points = curve_editor.read_points_from_fx(modulator)
+    local num_points = #points
+    local segment_curves = curve_editor.read_segment_curves_from_fx(modulator, num_points)
+    local global_curve = curve_editor.read_global_curve_from_fx(modulator)
+
+    local samples = {}
+    for i = 0, resolution do
+        local t = i / resolution
+        -- Apply phase offset, wrap values > 1.0 but keep 1.0 as 1.0 (don't wrap to 0)
+        local phase_t = t + phase_offset
+        if phase_t > 1.0 then
+            phase_t = phase_t - 1.0
+        end
+        local value = curve_editor.eval_curve(points, phase_t, segment_curves, global_curve)
+        samples[i + 1] = { t = t, value = value }
+    end
+
+    return samples
+end
+
+--- Calculate the final parameter value from LFO output
+-- @param lfo_output number LFO output value (0-1)
+-- @param link_info table Link information {baseline, scale, offset}
+-- @return number Final parameter value (0-1 normalized)
+function M.calculate_param_value(lfo_output, link_info)
+    local baseline = link_info.baseline or 0.5
+    local scale = link_info.scale or 1.0
+    local offset = link_info.offset or 0
+
+    -- REAPER plink formula: baseline + (source - offset) * scale
+    -- For unipolar (offset=0): baseline + lfo * scale → baseline to baseline+scale
+    -- For bipolar (offset=0.5): baseline + (lfo - 0.5) * scale → baseline ± scale/2
+    local final = baseline + (lfo_output - offset) * scale
+
+    -- Clamp to 0-1
+    return math.max(0, math.min(1, final))
+end
+
+--- Get link information for a parameter
+-- @param target_fx TrackFX The target FX
+-- @param param_idx number The parameter index
+-- @return table|nil Link info or nil if not linked
+function M.get_link_info(target_fx, param_idx)
+    -- ReaWrap get_param_link_info returns nil if no active link,
+    -- or a table with: active (bool), effect, param, scale, offset, baseline
+    local link_info = target_fx:get_param_link_info(param_idx)
+    if not link_info then
+        return nil
+    end
+
+    -- Use values from ReaWrap, with fallback defaults
+    -- If baseline is 0, try to get from current param value
+    local baseline = link_info.baseline
+    if baseline == 0 then
+        local ok, current = pcall(function()
+            return target_fx:get_param_normalized(param_idx)
+        end)
+        if ok and current then
+            baseline = current
+        end
+    end
+
+    return {
+        baseline = baseline or 0.5,
+        scale = link_info.scale or 1.0,
+        offset = link_info.offset or 0,
+        effect = link_info.effect,
+        param = link_info.param,
+    }
+end
+
+--------------------------------------------------------------------------------
+-- Main Bake Function
+--------------------------------------------------------------------------------
+
+--- Bake modulation to automation envelope
+-- @param track Track The track object (ReaWrap)
+-- @param modulator TrackFX The modulator FX
+-- @param target_fx TrackFX The target FX being modulated
+-- @param param_idx number The parameter index on target_fx
+-- @param options table|nil Bake options (uses defaults if nil)
+-- @return boolean, string Success and message
+function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
+    options = options or {}
+    local resolution = options.resolution or M.DEFAULT_OPTIONS.resolution
+
+    -- Get link information
+    local link_info = M.get_link_info(target_fx, param_idx)
+    if not link_info then
+        return false, "Parameter is not linked to a modulator"
+    end
+
+
+    -- Get cycle duration
+    local cycle_duration = M.get_cycle_duration(modulator)
+
+    -- Calculate number of cycles
+    local num_cycles = options.num_cycles
+    if not num_cycles then
+        -- Calculate from num_bars
+        local num_bars = options.num_bars or M.DEFAULT_OPTIONS.num_bars
+        local bpm = r.Master_GetTempo()
+        local _, beats_per_bar = r.GetProjectTimeSignature2(0)
+        beats_per_bar = beats_per_bar or 4
+        local bar_duration = (60 / bpm) * beats_per_bar
+        local total_bar_duration = bar_duration * num_bars
+        num_cycles = math.ceil(total_bar_duration / cycle_duration)
+    end
+
+    local total_duration = cycle_duration * num_cycles
+
+    -- Determine start time
+    local start_time = options.start_time or M.DEFAULT_OPTIONS.start_time
+    local use_edit_cursor = options.use_edit_cursor
+    if use_edit_cursor == nil then
+        use_edit_cursor = M.DEFAULT_OPTIONS.use_edit_cursor
+    end
+    if use_edit_cursor then
+        start_time = r.GetCursorPosition()
+    end
+    local end_time = start_time + total_duration
+
+    -- Get phase offset from modulator
+    local ok_phase, phase = pcall(function()
+        return modulator:get_param_normalized(PARAM.PARAM_PHASE)
+    end)
+    local phase_offset = (ok_phase and phase) or 0
+
+    -- Sample the LFO curve (with phase offset applied)
+    local samples = M.sample_lfo_curve(modulator, resolution, phase_offset)
+
+    -- Get or create automation envelope
+    -- GetFXEnvelope needs track-level FX index
+    local fx_idx = target_fx.pointer
+    local envelope = r.GetFXEnvelope(track.pointer, fx_idx, param_idx, true)
+    if not envelope then
+        return false, "Could not create automation envelope"
+    end
+
+    -- Begin undo block
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+
+    -- Clear existing points in range
+    r.DeleteEnvelopePointRange(envelope, start_time - 0.001, end_time + 0.001)
+
+    -- Insert new points
+    for cycle = 0, num_cycles - 1 do
+        local cycle_start = start_time + cycle * cycle_duration
+        for _, sample in ipairs(samples) do
+            local time = cycle_start + sample.t * cycle_duration
+            local value = M.calculate_param_value(sample.value, link_info)
+
+            -- shape: 0=linear, 1=square, 2=slow start/end, 3=fast start, 4=fast end, 5=bezier
+            r.InsertEnvelopePointEx(envelope, -1, time, value, 0, 0, false, true)
+        end
+    end
+
+    -- Sort points after batch insert
+    r.Envelope_SortPoints(envelope)
+
+    -- Optionally disable parameter link (set scale to 0)
+    if options.disable_link then
+        local plink_prefix = string.format("param.%d.plink.", param_idx)
+        target_fx:set_named_config_param(plink_prefix .. "scale", "0")
+    end
+
+    -- Optionally remove parameter link entirely
+    if options.remove_link then
+        target_fx:remove_param_link(param_idx)
+        -- Restore baseline value
+        target_fx:set_param_normalized(param_idx, link_info.baseline)
+    end
+
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("Bake LFO to Automation", -1)
+
+    return true, string.format("Baked %d points over %.2f seconds (%d cycles)", #samples * num_cycles, total_duration, num_cycles)
+end
+
+--- Bake all provided links to automation
+-- @param track Track The track object
+-- @param modulator TrackFX The modulator FX
+-- @param target_fx TrackFX The target FX (device being modulated)
+-- @param links table Array of link info from get_existing_param_links
+-- @param options table|nil Bake options
+-- @return boolean, string Success and message
+function M.bake_all_links(track, modulator, target_fx, links, options)
+    if not track or not modulator or not target_fx then
+        return false, "Invalid track, modulator, or target"
+    end
+
+    if not links or #links == 0 then
+        return false, "No links provided"
+    end
+
+    local baked_count = 0
+    local errors = {}
+
+    for _, link in ipairs(links) do
+        local success, msg = M.bake_to_automation(track, modulator, target_fx, link.param_idx, options)
+        if success then
+            baked_count = baked_count + 1
+        else
+            table.insert(errors, msg)
+        end
+    end
+
+    if baked_count == 0 then
+        return false, "Failed to bake: " .. (errors[1] or "unknown error")
+    end
+
+    local msg = string.format("Baked %d parameter(s)", baked_count)
+    if #errors > 0 then
+        msg = msg .. string.format(" (%d errors)", #errors)
+    end
+
+    return true, msg
+end
+
+return M

@@ -12,6 +12,7 @@ local drawing = require('lib.ui.common.drawing')
 local modulator_module = require('lib.modulator.modulator')
 local curve_editor = require('lib.ui.common.curve_editor')
 local modulator_presets = require('lib.modulator.modulator_presets')
+local modulator_bake = require('lib.modulator.modulator_bake')
 
 -- Modulator types
 local MODULATOR_TYPES = {
@@ -861,6 +862,60 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     ctx:spacing()
                     if draw_existing_links(ctx, guid, fx, existing_links, state) then
                         interacted = true
+                    end
+
+                    -- Bake section
+                    ctx:spacing()
+                    ctx:separator()
+                    ctx:spacing()
+
+                    -- Disable link checkbox
+                    state.bake_disable_link = state.bake_disable_link or {}
+                    local disable_key = guid
+                    if state.bake_disable_link[disable_key] == nil then
+                        state.bake_disable_link[disable_key] = true  -- Default to checked
+                    end
+                    local changed, new_disable = r.ImGui_Checkbox(ctx.ctx, "Disable link after bake##disable_" .. guid, state.bake_disable_link[disable_key])
+                    if changed then
+                        state.bake_disable_link[disable_key] = new_disable
+                        interacted = true
+                    end
+                    if ctx:is_item_hovered() then
+                        ctx:set_tooltip("Set modulation depth to 0 after baking (automation takes over)")
+                    end
+
+                    -- Bake All button
+                    local can_bake = #existing_links > 0 and state.track
+                    if not can_bake then
+                        r.ImGui_BeginDisabled(ctx.ctx)
+                    end
+                    if ctx:button("Bake All##bake_" .. guid, -1, 0) then
+                        if can_bake then
+                            local bake_options = {
+                                disable_link = state.bake_disable_link[disable_key]
+                            }
+                            local ok, result, msg = pcall(function()
+                                return modulator_bake.bake_all_links(state.track, expanded_modulator, fx, existing_links, bake_options)
+                            end)
+                            if ok and result then
+                                r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
+                            elseif not ok then
+                                r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
+                            else
+                                r.ShowConsoleMsg("SideFX: " .. tostring(msg or "No parameters to bake") .. "\n")
+                            end
+                            interacted = true
+                        end
+                    end
+                    if not can_bake then
+                        r.ImGui_EndDisabled(ctx.ctx)
+                    end
+                    if ctx:is_item_hovered() then
+                        if can_bake then
+                            ctx:set_tooltip("Bake LFO to automation (4 bars from project start)")
+                        else
+                            ctx:set_tooltip("Link a parameter first")
+                        end
                     end
                 end
             end
