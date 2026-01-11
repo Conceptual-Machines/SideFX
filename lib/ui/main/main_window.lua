@@ -277,6 +277,9 @@ function M.create_callbacks(opts)
                     state_module.load_display_names()
                 end
             else
+                -- Check for pending FX list refresh (deferred from previous frame)
+                state_module.check_fx_list_validity()
+
                 -- Check for external FX changes (e.g. user deleted FX in REAPER)
                 check_fx_changes()
             end

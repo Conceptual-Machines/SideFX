@@ -160,6 +160,24 @@ function M.refresh_fx_list()
     end
 end
 
+--- Mark FX list as needing refresh (deferred to next frame).
+-- Use this when adding/removing FX during render to avoid stale pointer issues.
+function M.invalidate_fx_list()
+    state.fx_list_invalid = true
+end
+
+--- Check if FX list is invalid and refresh if so.
+-- Call this at the start of each frame.
+-- @return boolean True if list was refreshed
+function M.check_fx_list_validity()
+    if state.fx_list_invalid then
+        state.fx_list_invalid = false
+        M.refresh_fx_list()
+        return true
+    end
+    return false
+end
+
 --- Clear multi-selection.
 function M.clear_multi_select()
     state.multi_select = {}
