@@ -11,3 +11,10 @@
 *.log
 
 presets/
+
+# Claude Code
+.claude/
+skills/
+
+# Python
+__pycache__/
