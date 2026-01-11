@@ -774,14 +774,33 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                 -- Column 5: Bake button
                 ctx:table_set_column_index(4)
                 if ctx:button("B##bake_" .. i .. "_" .. guid, 18, 0) then
-                    -- Open bake modal for this specific link
-                    state.bake_modal = state.bake_modal or {}
-                    state.bake_modal[guid] = {
-                        open = true,
-                        link = link,
-                        modulator = expanded_modulator,
-                        fx = fx
-                    }
+                    -- Check config: show picker or use default?
+                    if config.get('bake_show_range_picker') then
+                        -- Open bake modal for this specific link
+                        state.bake_modal = state.bake_modal or {}
+                        state.bake_modal[guid] = {
+                            open = true,
+                            link = link,
+                            modulator = expanded_modulator,
+                            fx = fx
+                        }
+                    else
+                        -- Use default range directly
+                        local bake_options = {
+                            range_mode = config.get('bake_default_range_mode'),
+                            disable_link = config.get('bake_disable_link_after')
+                        }
+                        local ok, result, msg = pcall(function()
+                            return modulator_bake.bake_to_automation(state.track, expanded_modulator, fx, link.param_idx, bake_options)
+                        end)
+                        if ok and result then
+                            r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
+                        elseif not ok then
+                            r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
+                        else
+                            r.ShowConsoleMsg("SideFX: " .. tostring(msg or "No automation created") .. "\n")
+                        end
+                    end
                     interacted = true
                 end
                 if ctx:is_item_hovered() then
