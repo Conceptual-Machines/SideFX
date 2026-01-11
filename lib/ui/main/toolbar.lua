@@ -6,6 +6,7 @@
 
 local imgui = require('imgui')
 local constants = require('lib.core.constants')
+local config = require('lib.core.config')
 
 local M = {}
 
@@ -63,14 +64,15 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         end
         if ctx:is_item_hovered() then ctx:set_tooltip("Click to add rack at end\nOr drag to drop anywhere") end
 
-        ctx:same_line()
-        ctx:text("|")
-        ctx:same_line()
-
-        -- Track name
-        ctx:push_style_color(imgui.Col.Text(), 0xAADDFFFF)
-        ctx:text(state.track_name)
-        ctx:pop_style_color()
+        -- Track name (if enabled)
+        if config.get('show_track_name') then
+            ctx:same_line()
+            ctx:text("|")
+            ctx:same_line()
+            ctx:push_style_color(imgui.Col.Text(), 0xAADDFFFF)
+            ctx:text(state.track_name)
+            ctx:pop_style_color()
+        end
 
         -- Breadcrumb trail (for navigating into containers)
         if #state.expanded_path > 0 then

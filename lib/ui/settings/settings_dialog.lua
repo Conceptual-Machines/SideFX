@@ -63,25 +63,6 @@ function M.draw(ctx)
         state_mod.load_config()
     end
 
-    -- Icon Font Size
-    ctx:text("Icon Font Size:")
-    ctx:same_line()
-    local icon_size = config.get('icon_font_size')
-    if ctx:radio_button("Small##icon_size", icon_size == 0) then
-        config.set('icon_font_size', 0)
-        state_mod.load_config()
-    end
-    ctx:same_line()
-    if ctx:radio_button("Medium##icon_size", icon_size == 1) then
-        config.set('icon_font_size', 1)
-        state_mod.load_config()
-    end
-    ctx:same_line()
-    if ctx:radio_button("Large##icon_size", icon_size == 2) then
-        config.set('icon_font_size', 2)
-        state_mod.load_config()
-    end
-
     ctx:spacing()
 
     -- Behavior Section
