@@ -590,7 +590,7 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
             local vol_db = -60 + vol_norm * 72
             local vol_format = (math.abs(vol_db) < 0.1) and "0" or (vol_db > 0 and string.format("+%.0f", vol_db) or string.format("%.0f", vol_db))
             ctx:set_next_item_width(-1)
-            local vol_changed, new_vol_db = ctx:slider_double("##vol_" .. chain_idx, vol_db, -60, 12, vol_format)
+            local vol_changed, new_vol_db = drawing.slider_double_fine(ctx, "##vol_" .. chain_idx, vol_db, -60, 12, vol_format)
             if vol_changed then
                 -- Fixed: Convert back using correct range
                 local new_norm = (new_vol_db + 60) / 72
@@ -684,7 +684,7 @@ function M.draw_collapsed_fader_control(ctx, mixer, rack_guid, state)
     ctx:push_style_color(imgui.Col.FrameBgActive(), 0x00000000)
     ctx:push_style_color(imgui.Col.SliderGrab(), 0xAAAAAAFF)
     ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
-    local gain_changed, new_gain_db = ctx:v_slider_double("##master_gain_v", fader_w, fader_h, gain_db, -24, 12, "")
+    local gain_changed, new_gain_db = drawing.v_slider_double_fine(ctx, "##master_gain_v", fader_w, fader_h, gain_db, -24, 12, "")
     if gain_changed then
         pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
     end
@@ -738,7 +738,7 @@ function M.draw_master_controls_table(ctx, mixer)
             local gain_db = -24 + gain_norm * 36
             local gain_format = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.1f", gain_db) or string.format("%.1f", gain_db))
             ctx:set_next_item_width(-1)
-            local gain_changed, new_gain_db = ctx:slider_double("##master_gain", gain_db, -24, 12, gain_format)
+            local gain_changed, new_gain_db = drawing.slider_double_fine(ctx, "##master_gain", gain_db, -24, 12, gain_format)
             if gain_changed then
                 pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
             end

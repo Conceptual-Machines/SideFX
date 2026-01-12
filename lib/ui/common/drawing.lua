@@ -210,6 +210,73 @@ function M.draw_fader(ctx, label, value, min_val, max_val, width, height, format
 end
 
 --------------------------------------------------------------------------------
+-- Fine Control Slider Functions (Shift key for precision)
+--------------------------------------------------------------------------------
+
+--- Check if Shift key is held
+-- @param ctx ImGui context (raw or wrapper)
+-- @return boolean True if Shift is held
+function M.is_shift_held(ctx)
+    local raw_ctx = ctx.ctx or ctx
+    local mods = r.ImGui_GetKeyMods(raw_ctx)
+    return (mods & r.ImGui_Mod_Shift()) ~= 0
+end
+
+--- Horizontal slider with Shift for fine control
+-- @param ctx ImGui context wrapper
+-- @param label string Slider label
+-- @param value number Current value
+-- @param min number Minimum value
+-- @param max number Maximum value
+-- @param format string Display format (optional)
+-- @param fine_factor number Fine control multiplier (default 0.1)
+-- @return boolean changed, number new_value
+function M.slider_double_fine(ctx, label, value, min, max, format, fine_factor)
+    fine_factor = fine_factor or 0.1
+    local shift_held = M.is_shift_held(ctx)
+
+    local changed, new_value = ctx:slider_double(label, value, min, max, format)
+
+    if changed and shift_held then
+        -- Apply fine control: reduce the delta
+        local delta = new_value - value
+        new_value = value + delta * fine_factor
+        -- Clamp to range
+        new_value = math.max(min, math.min(max, new_value))
+    end
+
+    return changed, new_value
+end
+
+--- Vertical slider with Shift for fine control
+-- @param ctx ImGui context wrapper
+-- @param label string Slider label
+-- @param width number Slider width
+-- @param height number Slider height
+-- @param value number Current value
+-- @param min number Minimum value
+-- @param max number Maximum value
+-- @param format string Display format (optional)
+-- @param fine_factor number Fine control multiplier (default 0.1)
+-- @return boolean changed, number new_value
+function M.v_slider_double_fine(ctx, label, width, height, value, min, max, format, fine_factor)
+    fine_factor = fine_factor or 0.1
+    local shift_held = M.is_shift_held(ctx)
+
+    local changed, new_value = ctx:v_slider_double(label, width, height, value, min, max, format)
+
+    if changed and shift_held then
+        -- Apply fine control: reduce the delta
+        local delta = new_value - value
+        new_value = value + delta * fine_factor
+        -- Clamp to range
+        new_value = math.max(min, math.min(max, new_value))
+    end
+
+    return changed, new_value
+end
+
+--------------------------------------------------------------------------------
 -- Meter and Fader Drawing Functions
 --------------------------------------------------------------------------------
 

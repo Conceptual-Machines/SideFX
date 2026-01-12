@@ -114,6 +114,7 @@ end
 local function draw_gain_fader_control(ctx, utility, gain_val)
     local r = reaper
     local imgui = require('imgui')
+    local drawing = require('lib.ui.common.drawing')
     local state_module = require('lib.core.state')
     local interacted = false
 
@@ -218,7 +219,7 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     ctx:push_style_color(imgui.Col.FrameBgActive(), 0x00000000)
     ctx:push_style_color(imgui.Col.SliderGrab(), 0xAAAAAAFF)
     ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
-    local gain_changed, new_gain_db = ctx:v_slider_double("##gain_fader_v", fader_w, fader_h, gain_db, -24, 24, "")
+    local gain_changed, new_gain_db = drawing.v_slider_double_fine(ctx, "##gain_fader_v", fader_w, fader_h, gain_db, -24, 24, "")
     if gain_changed then
         local new_norm = (new_gain_db + 24) / 48
         pcall(function() utility:set_param_normalized(0, new_norm) end)

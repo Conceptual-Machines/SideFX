@@ -350,7 +350,7 @@ local function draw_rate_controls(ctx, guid, expanded_modulator)
             if ok_rate then
                 local rate_hz = 0.01 + rate_norm * 9.99
                 ctx:set_next_item_width(-1)
-                local changed, new_rate = ctx:slider_double("##rate_" .. guid, rate_hz, 0.01, 10, "%.1f Hz")
+                local changed, new_rate = drawing.slider_double_fine(ctx, "##rate_" .. guid, rate_hz, 0.01, 10, "%.1f Hz")
                 if changed then
                     local norm_val = (new_rate - 0.01) / 9.99
                     expanded_modulator:set_param_normalized(1, norm_val)
@@ -574,7 +574,7 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
             local ok_thresh, audio_thresh = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD) end)
             if ok_thresh then
                 ctx:set_next_item_width(150)
-                local changed, new_thresh = ctx:slider_double("Threshold##thresh_" .. guid, audio_thresh, 0, 1, "%.2f")
+                local changed, new_thresh = drawing.slider_double_fine(ctx, "Threshold##thresh_" .. guid, audio_thresh, 0, 1, "%.2f")
                 if changed then
                     expanded_modulator:set_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD, new_thresh)
                     interacted = true
@@ -591,7 +591,7 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
             if ok_atk then
                 local atk_val = attack_ms * 1999 + 1
                 ctx:set_next_item_width(150)
-                local changed, new_atk_val = ctx:slider_double("Attack##atk_" .. guid, atk_val, 1, 2000, "%.0f ms")
+                local changed, new_atk_val = drawing.slider_double_fine(ctx, "Attack##atk_" .. guid, atk_val, 1, 2000, "%.0f ms")
                 if changed then
                     expanded_modulator:set_param_normalized(PARAM.PARAM_ATTACK, (new_atk_val - 1) / 1999)
                     interacted = true
@@ -602,7 +602,7 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
             if ok_rel then
                 local rel_val = release_ms * 4999 + 1
                 ctx:set_next_item_width(150)
-                local changed, new_rel_val = ctx:slider_double("Release##rel_" .. guid, rel_val, 1, 5000, "%.0f ms")
+                local changed, new_rel_val = drawing.slider_double_fine(ctx, "Release##rel_" .. guid, rel_val, 1, 5000, "%.0f ms")
                 if changed then
                     expanded_modulator:set_param_normalized(PARAM.PARAM_RELEASE, (new_rel_val - 1) / 4999)
                     interacted = true
@@ -723,7 +723,7 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                 if is_disabled then
                     r.ImGui_BeginDisabled(ctx.ctx)
                 end
-                local changed, new_depth_pct = ctx:slider_double("##depth_" .. link.param_idx .. "_" .. guid, display_depth, -100, 100, "%.0f%%")
+                local changed, new_depth_pct = drawing.slider_double_fine(ctx, "##depth_" .. link.param_idx .. "_" .. guid, display_depth, -100, 100, "%.0f%%")
                 if changed and not is_disabled then
                     local new_depth = new_depth_pct / 100
                     if is_bipolar then
