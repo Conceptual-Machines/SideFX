@@ -107,30 +107,47 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
             if unit_info then
                 slider_format = unit_info.format
                 slider_mult = unit_info.display_mult
-                -- If using plugin format, show empty and overlay plugin value
+                -- If using plugin format, hide slider text and overlay plugin value
                 if unit_info.use_plugin_format then
-                    slider_format = " "
+                    slider_format = "##"
                 end
             elseif is_percentage then
                 slider_format = "%.1f%%"
                 slider_mult = 100
             else
-                -- Non-percentage: use space format, overlay plugin's value
-                slider_format = " "
+                -- Non-percentage: hide slider text, overlay plugin's value
+                slider_format = "##"
                 slider_mult = 1
             end
 
             changed, new_val = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, slider_format, nil, slider_mult)
 
             -- Overlay plugin's formatted value on slider (for plugin format or auto-detected non-percentage)
+            -- When modulated with use_plugin_format units (dB, Hz, etc), don't overlay - we can't compute baseline value
+            -- When modulated with auto-detect, show baseline as percentage
             local should_overlay = (unit_info and unit_info.use_plugin_format) or (not unit_info and not is_percentage)
             if should_overlay and ok_fmt and param_formatted then
-                local text_w = r.ImGui_CalcTextSize(ctx.ctx, param_formatted)
-                local text_x = slider_x + (slider_w - text_w) / 2
-                local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
-                local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
-                local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-                r.ImGui_DrawList_AddText(draw_list, text_x, text_y, 0xFFFFFFFF, param_formatted)
+                local overlay_text = nil
+                if link then
+                    -- Modulated: only show overlay for non-plugin-format units
+                    if not (unit_info and unit_info.use_plugin_format) then
+                        local baseline = link.baseline or 0
+                        overlay_text = string.format("%.1f%%", baseline * 100)
+                    end
+                    -- For plugin format units (dB, Hz, etc), don't overlay - slider position shows baseline
+                else
+                    -- Not modulated: show plugin's formatted value
+                    overlay_text = param_formatted
+                end
+
+                if overlay_text then
+                    local text_w = r.ImGui_CalcTextSize(ctx.ctx, overlay_text)
+                    local text_x = slider_x + (slider_w - text_w) / 2
+                    local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
+                    local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
+                    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                    r.ImGui_DrawList_AddText(draw_list, text_x, text_y, 0xFFFFFFFF, overlay_text)
+                end
             end
         end
 

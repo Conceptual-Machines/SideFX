@@ -520,7 +520,7 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         opts.mod_links = mod_links
         opts.state = state  -- Pass state so params can update link_baselines
         opts.fx_guid = guid  -- Pass guid for building link keys
-        opts.plugin_name = name  -- Pass plugin name for unit override lookups
+        -- opts.plugin_name is set in M.draw before this function is called
 
         if device_column.draw(ctx, is_device_collapsed, params_column, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts, name, fx_naming, draw_sidebar_column, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, colors) then
             interacted = true
@@ -820,6 +820,19 @@ function M.draw(ctx, fx, opts)
 
     -- Extract FX display info
     local name, device_id = extract_fx_display_info(fx, container)
+
+    -- Get full plugin name for unit override lookups (different from display name)
+    -- First try to get the original plugin name stored when device was created
+    local full_name = state_module.get_fx_original_name(guid)
+    if not full_name then
+        -- Fall back to current FX name (may be renamed like "D1_FX: ...")
+        local ok_full_name
+        ok_full_name, full_name = pcall(function() return fx:get_name() end)
+        if not ok_full_name then full_name = name end
+    end
+
+    -- Set plugin name in opts for unit override lookups in nested functions
+    opts.plugin_name = full_name
 
     -- Get enabled state from container (or FX if no container)
     local enabled = false

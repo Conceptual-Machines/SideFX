@@ -81,6 +81,10 @@ M.state = {
     -- Parameter unit overrides (keyed by plugin full_name, then param_idx)
     -- nil or "auto" = auto-detect, otherwise specific unit ID
     param_unit_overrides = {},  -- {[plugin_full_name] = {[param_idx] = "dB", ...}}
+
+    -- Original plugin names (keyed by FX GUID)
+    -- Used to look up the original name when FX has been renamed
+    fx_original_names = {},  -- {[fx_guid] = "VST3i: Serum 2 (Xfer Records)"}
     
     -- User configuration
     config = {
@@ -702,7 +706,15 @@ function M.load_param_unit_overrides()
     if json_str and json_str ~= "" then
         local parsed = json.decode(json_str)
         if parsed and type(parsed) == "table" then
-            state.param_unit_overrides = parsed
+            -- Convert string keys back to numbers (JSON serializes numeric keys as strings)
+            state.param_unit_overrides = {}
+            for plugin_name, overrides in pairs(parsed) do
+                state.param_unit_overrides[plugin_name] = {}
+                for param_idx_str, unit_id in pairs(overrides) do
+                    local param_idx = tonumber(param_idx_str) or param_idx_str
+                    state.param_unit_overrides[plugin_name][param_idx] = unit_id
+                end
+            end
         end
     end
 end
@@ -725,6 +737,7 @@ function M.get_param_unit_override(plugin_name, param_idx)
     -- Try with stripped prefixes
     local naming = require('lib.utils.naming')
     local clean_name = naming.strip_sidefx_prefixes(plugin_name)
+
     if clean_name ~= plugin_name and state.param_unit_overrides[clean_name] then
         local override = state.param_unit_overrides[clean_name][param_idx]
         if override then return override end
@@ -752,6 +765,9 @@ function M.set_param_unit_override(plugin_name, param_idx, unit_id)
     if unit_id == "auto" then unit_id = nil end
 
     -- Initialize plugin table if needed
+    if not state.param_unit_overrides then
+        state.param_unit_overrides = {}
+    end
     if not state.param_unit_overrides[plugin_name] then
         state.param_unit_overrides[plugin_name] = {}
     end
@@ -766,6 +782,30 @@ function M.set_param_unit_override(plugin_name, param_idx, unit_id)
 
     -- Save immediately
     M.save_param_unit_overrides()
+end
+
+--------------------------------------------------------------------------------
+-- FX Original Name Storage
+--------------------------------------------------------------------------------
+
+--- Store the original plugin name for an FX by GUID
+-- @param fx_guid string The FX GUID
+-- @param original_name string The original plugin name (e.g., "VST3i: Serum 2 (Xfer Records)")
+function M.set_fx_original_name(fx_guid, original_name)
+    if not fx_guid or not original_name then return end
+    if not state.fx_original_names then
+        state.fx_original_names = {}
+    end
+    state.fx_original_names[fx_guid] = original_name
+end
+
+--- Get the original plugin name for an FX by GUID
+-- @param fx_guid string The FX GUID
+-- @return string|nil The original plugin name or nil
+function M.get_fx_original_name(fx_guid)
+    if not fx_guid then return nil end
+    if not state.fx_original_names then return nil end
+    return state.fx_original_names[fx_guid]
 end
 
 --- Get maximum visible parameters (capped at 128)
