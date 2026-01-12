@@ -245,10 +245,14 @@ function M.slider_double_fine(ctx, label, value, min, max, format, fine_factor)
         new_value = math.max(min, math.min(max, new_value))
     end
 
-    -- Show value tooltip when Shift is held and hovering
-    if shift_held and r.ImGui_IsItemHovered(ctx.ctx) then
+    -- Show value tooltip when hovering
+    if r.ImGui_IsItemHovered(ctx.ctx) then
         local display_format = (format and format ~= "") and format or "%.3f"
-        ctx:set_tooltip(string.format(display_format, changed and new_value or value))
+        local tooltip = string.format(display_format, changed and new_value or value)
+        if shift_held then
+            tooltip = tooltip .. " (fine)"
+        end
+        ctx:set_tooltip(tooltip)
     end
 
     return changed, new_value
@@ -279,10 +283,14 @@ function M.v_slider_double_fine(ctx, label, width, height, value, min, max, form
         new_value = math.max(min, math.min(max, new_value))
     end
 
-    -- Show value tooltip when Shift is held and hovering
-    if shift_held and r.ImGui_IsItemHovered(ctx.ctx) then
+    -- Show value tooltip when hovering
+    if r.ImGui_IsItemHovered(ctx.ctx) then
         local display_format = (format and format ~= "") and format or "%.3f"
-        ctx:set_tooltip(string.format(display_format, changed and new_value or value))
+        local tooltip = string.format(display_format, changed and new_value or value)
+        if shift_held then
+            tooltip = tooltip .. " (fine)"
+        end
+        ctx:set_tooltip(tooltip)
     end
 
     return changed, new_value
