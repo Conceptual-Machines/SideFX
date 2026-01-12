@@ -213,20 +213,17 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     r.ImGui_DrawList_AddRect(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
 
     -- Invisible slider for fader interaction
+    -- Features: Shift+drag for fine control, Ctrl/Cmd+click to reset to 0dB, double-click for text input
     r.ImGui_SetCursorScreenPos(ctx.ctx, fader_x, screen_y)
     ctx:push_style_color(imgui.Col.FrameBg(), 0x00000000)
     ctx:push_style_color(imgui.Col.FrameBgHovered(), 0x00000000)
     ctx:push_style_color(imgui.Col.FrameBgActive(), 0x00000000)
     ctx:push_style_color(imgui.Col.SliderGrab(), 0xAAAAAAFF)
     ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
-    local gain_changed, new_gain_db = drawing.v_slider_double_fine(ctx, "##gain_fader_v", fader_w, fader_h, gain_db, -24, 24, "")
+    local gain_changed, new_gain_db = drawing.v_slider_double_fine(ctx, "##gain_fader_v", fader_w, fader_h, gain_db, -24, 24, "", nil, nil, 0)
     if gain_changed then
         local new_norm = (new_gain_db + 24) / 48
         pcall(function() utility:set_param_normalized(0, new_norm) end)
-        interacted = true
-    end
-    if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-        pcall(function() utility:set_param_normalized(0, 0.5) end)
         interacted = true
     end
     ctx:pop_style_color(5)

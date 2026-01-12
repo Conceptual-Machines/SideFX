@@ -222,7 +222,11 @@ function M.is_shift_held(ctx)
     return (mods & r.ImGui_Mod_Shift()) ~= 0
 end
 
---- Horizontal slider with Shift for fine control and value display
+--- Horizontal slider with fine control and double-click reset
+-- Features:
+--   - Shift+drag for fine control (10% sensitivity)
+--   - Double-click to reset to default value
+--   - Ctrl/Cmd+click uses ImGui's built-in text input mode
 -- @param ctx ImGui context wrapper
 -- @param label string Slider label
 -- @param value number Current value
@@ -231,45 +235,52 @@ end
 -- @param format string Display format (optional)
 -- @param fine_factor number Fine control multiplier (default 0.1)
 -- @param display_mult number Multiplier for display value (e.g., 100 for percentage)
+-- @param default_value number Default value for double-click reset (optional)
 -- @return boolean changed, number new_value
-function M.slider_double_fine(ctx, label, value, min, max, format, fine_factor, display_mult)
+function M.slider_double_fine(ctx, label, value, min, max, format, fine_factor, display_mult, default_value)
     fine_factor = fine_factor or 0.1
     display_mult = display_mult or 1
     local shift_held = M.is_shift_held(ctx)
+
+    local changed = false
+    local new_value = value
 
     -- If we have a display multiplier, scale the slider range for display
     local display_value = value * display_mult
     local display_min = min * display_mult
     local display_max = max * display_mult
 
-    local changed, new_display_value = ctx:slider_double(label, display_value, display_min, display_max, format)
+    local slider_changed, new_display_value = ctx:slider_double(label, display_value, display_min, display_max, format)
 
-    -- Convert back to actual value
-    local new_value = new_display_value / display_mult
+    local is_hovered = r.ImGui_IsItemHovered(ctx.ctx)
+    local mouse_double_clicked = r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0)
 
-    if changed and shift_held then
-        -- Apply fine control: reduce the delta
-        local delta = new_value - value
-        new_value = value + delta * fine_factor
+    -- Check for double-click to reset to default
+    if is_hovered and mouse_double_clicked and default_value ~= nil then
+        new_value = default_value
+        changed = true
+    -- Normal slider change
+    elseif slider_changed then
+        new_value = new_display_value / display_mult
+
+        if shift_held then
+            -- Apply fine control: reduce the delta
+            local delta = new_value - value
+            new_value = value + delta * fine_factor
+        end
         -- Clamp to range
         new_value = math.max(min, math.min(max, new_value))
-    end
-
-    -- Show value tooltip when hovering (with fine indicator)
-    if r.ImGui_IsItemHovered(ctx.ctx) then
-        local display_format = (format and format ~= "") and format or "%.3f"
-        local tooltip_value = (changed and new_value or value) * display_mult
-        local tooltip = string.format(display_format, tooltip_value)
-        if shift_held then
-            tooltip = tooltip .. " (fine)"
-        end
-        ctx:set_tooltip(tooltip)
+        changed = true
     end
 
     return changed, new_value
 end
 
---- Vertical slider with Shift for fine control and value display
+--- Vertical slider with fine control and double-click reset
+-- Features:
+--   - Shift+drag for fine control (10% sensitivity)
+--   - Double-click to reset to default value
+--   - Ctrl/Cmd+click uses ImGui's built-in text input mode
 -- @param ctx ImGui context wrapper
 -- @param label string Slider label
 -- @param width number Slider width
@@ -280,39 +291,42 @@ end
 -- @param format string Display format (optional)
 -- @param fine_factor number Fine control multiplier (default 0.1)
 -- @param display_mult number Multiplier for display value (e.g., 100 for percentage)
+-- @param default_value number Default value for double-click reset (optional)
 -- @return boolean changed, number new_value
-function M.v_slider_double_fine(ctx, label, width, height, value, min, max, format, fine_factor, display_mult)
+function M.v_slider_double_fine(ctx, label, width, height, value, min, max, format, fine_factor, display_mult, default_value)
     fine_factor = fine_factor or 0.1
     display_mult = display_mult or 1
     local shift_held = M.is_shift_held(ctx)
+
+    local changed = false
+    local new_value = value
 
     -- If we have a display multiplier, scale the slider range for display
     local display_value = value * display_mult
     local display_min = min * display_mult
     local display_max = max * display_mult
 
-    local changed, new_display_value = ctx:v_slider_double(label, width, height, display_value, display_min, display_max, format)
+    local slider_changed, new_display_value = ctx:v_slider_double(label, width, height, display_value, display_min, display_max, format)
 
-    -- Convert back to actual value
-    local new_value = new_display_value / display_mult
+    local is_hovered = r.ImGui_IsItemHovered(ctx.ctx)
+    local mouse_double_clicked = r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0)
 
-    if changed and shift_held then
-        -- Apply fine control: reduce the delta
-        local delta = new_value - value
-        new_value = value + delta * fine_factor
+    -- Check for double-click to reset to default
+    if is_hovered and mouse_double_clicked and default_value ~= nil then
+        new_value = default_value
+        changed = true
+    -- Normal slider change
+    elseif slider_changed then
+        new_value = new_display_value / display_mult
+
+        if shift_held then
+            -- Apply fine control: reduce the delta
+            local delta = new_value - value
+            new_value = value + delta * fine_factor
+        end
         -- Clamp to range
         new_value = math.max(min, math.min(max, new_value))
-    end
-
-    -- Show value tooltip when hovering (with fine indicator)
-    if r.ImGui_IsItemHovered(ctx.ctx) then
-        local display_format = (format and format ~= "") and format or "%.3f"
-        local tooltip_value = (changed and new_value or value) * display_mult
-        local tooltip = string.format(display_format, tooltip_value)
-        if shift_held then
-            tooltip = tooltip .. " (fine)"
-        end
-        ctx:set_tooltip(tooltip)
+        changed = true
     end
 
     return changed, new_value

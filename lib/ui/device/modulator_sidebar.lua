@@ -346,18 +346,16 @@ local function draw_rate_controls(ctx, guid, expanded_modulator)
         -- Rate slider/dropdown - fill remaining width
         if tempo_mode < 0.5 then
             -- Free mode - show Hz slider
+            -- Features: Shift+drag for fine control, Ctrl/Cmd+click to reset to 1Hz, double-click for text input
             local ok_rate, rate_norm = pcall(function() return expanded_modulator:get_param_normalized(1) end)
             if ok_rate then
                 local rate_hz = 0.01 + rate_norm * 9.99
                 ctx:set_next_item_width(-1)
-                local changed, new_rate = drawing.slider_double_fine(ctx, "##rate_" .. guid, rate_hz, 0.01, 10, "%.1f Hz")
+                local changed, new_rate = drawing.slider_double_fine(ctx, "##rate_" .. guid, rate_hz, 0.01, 10, "%.2f Hz", nil, nil, 1.0)
                 if changed then
                     local norm_val = (new_rate - 0.01) / 9.99
                     expanded_modulator:set_param_normalized(1, norm_val)
                     interacted = true
-                end
-                if ctx:is_item_hovered() then
-                    ctx:set_tooltip("Rate (Hz)")
                 end
             end
         else
