@@ -264,14 +264,14 @@ function M.draw(ctx, state)
                     r.ShowConsoleMsg(string.format("SideFX: Limited to %d parameters (maximum allowed).\n", max_params))
                 end
                 
-                -- Store in state (keyed by plugin full name)
-                if not state.param_selections then
-                    state.param_selections = {}
+                -- Store in state module directly (keyed by plugin full name)
+                local state_mod = require('lib.core.state')
+                if not state_mod.state.param_selections then
+                    state_mod.state.param_selections = {}
                 end
-                state.param_selections[dialog_state.plugin_full_name] = selected_list
+                state_mod.state.param_selections[dialog_state.plugin_full_name] = selected_list
 
                 -- Persist to ExtState
-                local state_mod = require('lib.core.state')
                 state_mod.save_param_selections()
             end
 
