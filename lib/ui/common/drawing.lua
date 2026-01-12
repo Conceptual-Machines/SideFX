@@ -222,7 +222,7 @@ function M.is_shift_held(ctx)
     return (mods & r.ImGui_Mod_Shift()) ~= 0
 end
 
---- Horizontal slider with Shift for fine control
+--- Horizontal slider with Shift for fine control and value display
 -- @param ctx ImGui context wrapper
 -- @param label string Slider label
 -- @param value number Current value
@@ -245,10 +245,16 @@ function M.slider_double_fine(ctx, label, value, min, max, format, fine_factor)
         new_value = math.max(min, math.min(max, new_value))
     end
 
+    -- Show value tooltip when Shift is held and hovering
+    if shift_held and r.ImGui_IsItemHovered(ctx.ctx) then
+        local display_format = (format and format ~= "") and format or "%.3f"
+        ctx:set_tooltip(string.format(display_format, changed and new_value or value))
+    end
+
     return changed, new_value
 end
 
---- Vertical slider with Shift for fine control
+--- Vertical slider with Shift for fine control and value display
 -- @param ctx ImGui context wrapper
 -- @param label string Slider label
 -- @param width number Slider width
@@ -271,6 +277,12 @@ function M.v_slider_double_fine(ctx, label, width, height, value, min, max, form
         new_value = value + delta * fine_factor
         -- Clamp to range
         new_value = math.max(min, math.min(max, new_value))
+    end
+
+    -- Show value tooltip when Shift is held and hovering
+    if shift_held and r.ImGui_IsItemHovered(ctx.ctx) then
+        local display_format = (format and format ~= "") and format or "%.3f"
+        ctx:set_tooltip(string.format(display_format, changed and new_value or value))
     end
 
     return changed, new_value
