@@ -391,7 +391,7 @@ end
 
 --- Draw expanded panel content (2-column table: modulators | device_wrapper)
 -- Device wrapper contains nested 2-column table: device_content | gain_pan
-local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, name, device_id, drag_guid, enabled, opts, colors, panel_collapsed)
+local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, name, device_id, drag_guid, enabled, opts, colors, panel_collapsed, is_selected)
     local r = reaper
     local interacted = false
 
@@ -429,6 +429,11 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
 
         -- === ROW 1: HEADER ===
         r.ImGui_TableNextRow(ctx.ctx)
+
+        -- Set header row background color when selected (subtle highlight)
+        if is_selected then
+            r.ImGui_TableSetBgColor(ctx.ctx, r.ImGui_TableBgTarget_RowBg0(), 0x3A3A4AFF)
+        end
 
         -- Header Column 1: Modulator collapse button + "Modulators" label
         r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
@@ -539,21 +544,25 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
 end
 
 --- Draw panel frame (background + border)
-local function draw_panel_frame(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg, is_selected)
+local function draw_panel_background(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg)
     local r = reaper
-
-    -- Draw panel background (filled rectangle)
+    -- Draw panel background (filled rectangle, square corners)
     r.ImGui_DrawList_AddRectFilled(draw_list,
         cursor_x, cursor_y,
         cursor_x + panel_width, cursor_y + panel_height,
-        colors.panel_bg, cfg.border_radius)
+        colors.panel_bg, 0)  -- 0 = square corners
+end
 
-    -- Draw panel border (highlighted when selected)
-    local border_color = is_selected and 0x5588BBAA or colors.panel_border
-    r.ImGui_DrawList_AddRect(draw_list,
-        cursor_x, cursor_y,
-        cursor_x + panel_width, cursor_y + panel_height,
-        border_color, cfg.border_radius, 0, 1)
+local function draw_panel_border(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg, is_selected)
+    local r = reaper
+    -- Always draw ONLY top and bottom lines (no side borders)
+    -- No highlight - selection indicated by header background change
+    local border_color = colors.panel_border
+    local thickness = 1
+    -- Top line
+    r.ImGui_DrawList_AddLine(draw_list, cursor_x, cursor_y, cursor_x + panel_width, cursor_y, border_color, thickness)
+    -- Bottom line
+    r.ImGui_DrawList_AddLine(draw_list, cursor_x, cursor_y + panel_height, cursor_x + panel_width, cursor_y + panel_height, border_color, thickness)
 end
 
 --- Calculate panel dimensions based on collapsed state
@@ -571,8 +580,7 @@ local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg,
         num_columns = 0
         params_per_column = 0
     else
-        -- Expanded: full panel with 2-column layout (modulators | device_wrapper)
-        -- Device wrapper contains nested 2-column table (device_content | gain_pan)
+        -- Expanded: use full available height to align with chain
         panel_height = avail_height
 
         -- Calculate how many params fit per column based on available height
@@ -735,10 +743,10 @@ local function draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, 
     local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
     local interacted = false
 
-    -- Draw panel frame (background + border) - border color changes when selected
-    draw_panel_frame(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg, opts.is_selected)
+    -- Draw panel background first
+    draw_panel_background(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg)
 
-    -- Begin child for panel content (no child border - panel frame handles it)
+    -- Begin child for panel content (no child border - we draw it manually)
     local window_flags = imgui.WindowFlags.NoScrollbar()
     if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0, window_flags) then
         -- Click-to-select: detect clicks on panel background
@@ -763,7 +771,7 @@ local function draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, 
 
             -- Draw expanded panel with 3-column layout (no top header)
             -- Device header will be drawn inside column 2
-            if draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, name, device_id, drag_guid, enabled, opts, colors, panel_collapsed) then
+            if draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, name, device_id, drag_guid, enabled, opts, colors, panel_collapsed, opts.is_selected) then
                 interacted = true
             end
         end)
@@ -775,6 +783,9 @@ local function draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, 
             r.ShowConsoleMsg("SideFX panel error: " .. tostring(err) .. "\n")
         end
     end
+
+    -- Draw border AFTER content so it's on top
+    draw_panel_border(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg, opts.is_selected)
 
     return interacted
 end

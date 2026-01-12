@@ -314,7 +314,7 @@ function M.draw(ctx, selected_chain, rack_h, opts)
 
                 -- Chain contents - auto-resize to fit devices
                 ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
-                local chain_content_flags = 81  -- Border (1) + AutoResizeX (16) + AlwaysAutoResize (64)
+                local chain_content_flags = 80  -- AutoResizeX (16) + AlwaysAutoResize (64) - no border
                 if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, chain_content_flags) then
                     -- Inner pcall for chain contents
                     local ok_inner, err_inner = pcall(function()
@@ -333,21 +333,26 @@ function M.draw(ctx, selected_chain, rack_h, opts)
                                 if is_rack_container(dev) then
                                     draw_nested_rack_in_chain(ctx, dev, chain_content_h, draw_rack_panel, M.draw, state, opts)
                                 else
+                                    -- Check if this device is selected (3rd item in path)
+                                    local ok_dev_guid, dev_guid = pcall(function() return dev:get_guid() end)
+                                    local dev_is_selected = ok_dev_guid and dev_guid and (state.expanded_path[3] == dev_guid)
+
                                     draw_device_in_chain(ctx, dev, chain_content_h, selected_chain, {
-                                        avail_height = chain_content_h - 20,
+                                        avail_height = chain_content_h,  -- No padding, natural gap from layout
                                         utility = get_device_utility(dev),
                                         container = dev,
                                         icon_font = icon_font,
                                         track = state.track,
                                         refresh_fx_list = refresh_fx_list,
+                                        is_selected = dev_is_selected,
                                         on_delete = function()
                                             dev:delete()
                                             refresh_fx_list()
                                         end,
                                         on_rename = function(fx)
                                             -- Rename the container (dev), not the main FX
-                                            local dev_guid = dev:get_guid()
-                                            state.renaming_fx = dev_guid
+                                            local dev_guid_inner = dev:get_guid()
+                                            state.renaming_fx = dev_guid_inner
                                             state.rename_text = get_fx_display_name(dev)
                                         end,
                                         on_plugin_drop = function(plugin_name, insert_before_idx)
