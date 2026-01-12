@@ -24,9 +24,10 @@ local M = {}
 --   - on_toggle_enabled: (fx) -> nil
 --   - on_rename: (guid, display_name) -> nil
 --   - on_remove_from_container: (fx, depth) -> nil
---   - on_dissolve_container: (fx, depth) -> nil
 --   - on_delete: (fx, depth) -> nil
 --   - on_add_to_container: (fx_list) -> nil
+--   - on_convert_to_rack: (fx, depth) -> nil (optional, for D-containers)
+--   - on_convert_to_devices: (fx, depth) -> nil (optional, for C-containers)
 --   - get_multi_select_count: () -> number
 --   - get_multi_selected_fx: () -> table
 --   - clear_multi_select: () -> nil
@@ -43,6 +44,16 @@ function M.draw(ctx, fx, guid, menu_id, enabled, is_container, depth, get_fx_dis
             callbacks.on_rename(guid, get_fx_display_name(fx))
         end
         ctx:separator()
+
+        -- Check container type for special options
+        local fx_name = ""
+        if is_container then
+            local ok, name = pcall(function() return fx:get_name() end)
+            if ok and name then fx_name = name end
+        end
+        local is_device_container = fx_name:match("^D%d+")
+        local is_chain_container = fx_name:match("^R%d+_C%d+")
+
         -- Remove from container option (only if inside a container)
         local parent = fx:get_parent_container()
         if parent then
@@ -51,13 +62,27 @@ function M.draw(ctx, fx, guid, menu_id, enabled, is_container, depth, get_fx_dis
             end
             ctx:separator()
         end
-        -- Dissolve container option (only for containers)
-        if is_container then
-            if ctx:menu_item("Dissolve Container") then
-                callbacks.on_dissolve_container(fx, depth)
+
+        -- Device-specific options (D-containers)
+        if is_device_container then
+            if callbacks.on_convert_to_rack then
+                if ctx:menu_item("Convert to Rack") then
+                    callbacks.on_convert_to_rack(fx, depth)
+                end
             end
             ctx:separator()
         end
+
+        -- Chain-specific options (C-containers)
+        if is_chain_container then
+            if callbacks.on_convert_to_devices then
+                if ctx:menu_item("Convert to Devices") then
+                    callbacks.on_convert_to_devices(fx, depth)
+                end
+            end
+            ctx:separator()
+        end
+
         if ctx:menu_item("Delete") then
             callbacks.on_delete(fx, depth)
         end
@@ -95,8 +120,9 @@ end
 --   - state: State table (for renaming)
 --   - collapse_from_depth: (depth) -> nil
 --   - refresh_fx_list: () -> nil
---   - dissolve_container: (fx) -> nil
 --   - add_to_new_container: (fx_list) -> nil
+--   - convert_to_rack: (fx) -> nil (optional)
+--   - convert_to_devices: (fx) -> nil (optional)
 --   - get_multi_select_count: () -> number
 --   - get_multi_selected_fx: () -> table
 --   - clear_multi_select: () -> nil
@@ -113,11 +139,6 @@ function M.draw_with_sidefx_callbacks(ctx, fx, guid, i, enabled, is_container, d
             callbacks.collapse_from_depth(depth)
             callbacks.refresh_fx_list()
         end,
-        on_dissolve_container = function(fx, depth)
-            callbacks.dissolve_container(fx)
-            callbacks.collapse_from_depth(depth)
-            callbacks.refresh_fx_list()
-        end,
         on_delete = function(fx, depth)
             fx:delete()
             callbacks.collapse_from_depth(depth)
@@ -126,6 +147,16 @@ function M.draw_with_sidefx_callbacks(ctx, fx, guid, i, enabled, is_container, d
         on_add_to_container = function(fx_list)
             callbacks.add_to_new_container(fx_list)
         end,
+        on_convert_to_rack = callbacks.convert_to_rack and function(fx, depth)
+            callbacks.convert_to_rack(fx)
+            callbacks.collapse_from_depth(depth)
+            callbacks.refresh_fx_list()
+        end or nil,
+        on_convert_to_devices = callbacks.convert_to_devices and function(fx, depth)
+            callbacks.convert_to_devices(fx)
+            callbacks.collapse_from_depth(depth)
+            callbacks.refresh_fx_list()
+        end or nil,
         get_multi_select_count = callbacks.get_multi_select_count,
         get_multi_selected_fx = callbacks.get_multi_selected_fx,
         clear_multi_select = callbacks.clear_multi_select,

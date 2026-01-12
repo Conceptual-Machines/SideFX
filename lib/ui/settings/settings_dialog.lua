@@ -7,6 +7,7 @@
 local r = reaper
 local state_mod = require('lib.core.state')
 local config = require('lib.core.config')
+local modulator_bake = require('lib.modulator.modulator_bake')
 
 local M = {}
 
@@ -62,22 +63,24 @@ function M.draw(ctx)
         state_mod.load_config()
     end
 
-    -- Icon Font Size
-    ctx:text("Icon Font Size:")
-    ctx:same_line()
-    local icon_size = config.get('icon_font_size')
-    if ctx:radio_button("Small##icon_size", icon_size == 0) then
-        config.set('icon_font_size', 0)
+    -- Show/Hide Mix Control
+    local show_mix = config.get('show_mix_control')
+    if ctx:checkbox("Show Mix Control", show_mix) then
+        config.set('show_mix_control', not show_mix)
         state_mod.load_config()
     end
-    ctx:same_line()
-    if ctx:radio_button("Medium##icon_size", icon_size == 1) then
-        config.set('icon_font_size', 1)
+
+    -- Show/Hide Delta Control
+    local show_delta = config.get('show_delta_control')
+    if ctx:checkbox("Show Delta Control", show_delta) then
+        config.set('show_delta_control', not show_delta)
         state_mod.load_config()
     end
-    ctx:same_line()
-    if ctx:radio_button("Large##icon_size", icon_size == 2) then
-        config.set('icon_font_size', 2)
+
+    -- Show/Hide Phase Controls
+    local show_phase = config.get('show_phase_controls')
+    if ctx:checkbox("Show Phase Controls", show_phase) then
+        config.set('show_phase_controls', not show_phase)
         state_mod.load_config()
     end
 
@@ -103,26 +106,43 @@ function M.draw(ctx)
 
     ctx:spacing()
 
-    -- Gain Staging Section
-    ctx:text("Gain Staging")
+    -- Bake Settings Section
+    ctx:text("Bake Settings")
     ctx:separator()
 
-    -- Default target level
-    local target_db = config.get('gain_target_db')
-    ctx:text(string.format("Default Target Level: %.1f dB", target_db))
-    local changed, new_target = ctx:slider_double("##gain_target", target_db, -24.0, 0.0, "%.1f dB")
-    if changed then
-        config.set('gain_target_db', new_target)
+    -- Disable link after bake
+    local disable_after = config.get('bake_disable_link_after')
+    if ctx:checkbox("Disable Link After Bake", disable_after) then
+        config.set('bake_disable_link_after', not disable_after)
         state_mod.load_config()
     end
 
-    -- Tolerance
-    local tolerance_db = config.get('gain_tolerance_db')
-    ctx:text(string.format("Tolerance: %.1f dB", tolerance_db))
-    local changed_tol, new_tol = ctx:slider_double("##gain_tolerance", tolerance_db, 0.5, 3.0, "%.1f dB")
-    if changed_tol then
-        config.set('gain_tolerance_db', new_tol)
+    -- Show range picker modal
+    local show_picker = config.get('bake_show_range_picker')
+    if ctx:checkbox("Show Range Picker", show_picker) then
+        config.set('bake_show_range_picker', not show_picker)
         state_mod.load_config()
+    end
+
+    -- Default range mode
+    ctx:text("Default Range:")
+    ctx:same_line()
+    local current_mode = config.get('bake_default_range_mode')
+    local current_label = modulator_bake.RANGE_MODE_LABELS[current_mode] or "Track Items"
+
+    ctx:set_next_item_width(150)
+    if r.ImGui_BeginCombo(ctx.ctx, "##bake_range_mode", current_label) then
+        for mode_val, label in pairs(modulator_bake.RANGE_MODE_LABELS) do
+            local is_selected = (mode_val == current_mode)
+            if r.ImGui_Selectable(ctx.ctx, label, is_selected) then
+                config.set('bake_default_range_mode', mode_val)
+                state_mod.load_config()
+            end
+            if is_selected then
+                r.ImGui_SetItemDefaultFocus(ctx.ctx)
+            end
+        end
+        r.ImGui_EndCombo(ctx.ctx)
     end
 
     ctx:spacing()
@@ -146,21 +166,30 @@ function M.draw(ctx)
     ctx:text(display_path)
     r.ImGui_PopStyleColor(ctx.ctx)
 
-    -- Browse button
-    if ctx:button("Browse...##presets_folder", 80, 0) then
-        local retval, folder = r.JS_Dialog_BrowseForFolder("Select Presets Folder", presets_folder)
-        if retval == 1 and folder and folder ~= "" then
-            config.set('presets_folder', folder)
+    -- Browse button (requires JS extension)
+    local has_js = r.JS_Dialog_BrowseForFolder ~= nil
+    if has_js then
+        if ctx:button("Browse...##presets_folder", 80, 0) then
+            local retval, folder = r.JS_Dialog_BrowseForFolder("Select Presets Folder", presets_folder)
+            if retval == 1 and folder and folder ~= "" then
+                config.set('presets_folder', folder)
+            end
         end
+        ctx:same_line()
     end
-
-    ctx:same_line()
 
     -- Reset to default button (only show if custom path is set)
     if is_custom then
         if ctx:button("Reset##presets_folder", 50, 0) then
             config.reset('presets_folder')
         end
+    end
+
+    -- Show hint if JS extension not installed
+    if not has_js then
+        r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_Text(), 0x888888FF)
+        ctx:text("Install JS extension for folder browser")
+        r.ImGui_PopStyleColor(ctx.ctx)
     end
 
     ctx:spacing()

@@ -277,6 +277,13 @@ function M.create_callbacks(opts)
                     state_module.load_display_names()
                 end
             else
+                -- Process any pending modulator additions (deferred from previous frame)
+                -- Must happen BEFORE check_fx_list_validity to avoid double refresh
+                state_module.process_pending_modulator_adds()
+
+                -- Check for pending FX list refresh (deferred from previous frame)
+                state_module.check_fx_list_validity()
+
                 -- Check for external FX changes (e.g. user deleted FX in REAPER)
                 check_fx_changes()
             end
@@ -288,21 +295,24 @@ function M.create_callbacks(opts)
             -- Layout dimensions
             local browser_w = 260
             local avail_w, avail_h = ctx:get_content_region_avail()
+            local browser_visible = state.browser and state.browser.visible
 
-            -- Plugin Browser (fixed left)
-            ctx:push_style_color(imgui.Col.ChildBg(), 0x1E1E22FF)
-            if ctx:begin_child("Browser", browser_w, 0, imgui.ChildFlags.Border()) then
-                ctx:text("Plugins")
-                ctx:separator()
-                draw_plugin_browser(ctx, icon_font_ref)
-                ctx:end_child()
+            -- Plugin Browser (fixed left) - only if visible
+            if browser_visible then
+                ctx:push_style_color(imgui.Col.ChildBg(), 0x1E1E22FF)
+                if ctx:begin_child("Browser", browser_w, 0, imgui.ChildFlags.Border()) then
+                    ctx:text("Plugins")
+                    ctx:separator()
+                    draw_plugin_browser(ctx, icon_font_ref)
+                    ctx:end_child()
+                end
+                ctx:pop_style_color()
+
+                ctx:same_line()
             end
-            ctx:pop_style_color()
-
-            ctx:same_line()
 
             -- Calculate remaining width for device chain
-            local chain_w = avail_w - browser_w - 20
+            local chain_w = browser_visible and (avail_w - browser_w - 20) or (avail_w - 10)
 
             -- Device Chain (horizontal scroll, center area)
             ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1EFF)

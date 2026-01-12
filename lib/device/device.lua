@@ -49,6 +49,11 @@ function M.add_plugin_to_track(plugin, position)
         return nil
     end
 
+    -- Don't wrap mixer in containers (it should only be added by rack creation)
+    if name_lower:find("sidefx_mixer") or name_lower:find("sidefx chain mixer") then
+        return nil
+    end
+
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
 
@@ -78,6 +83,13 @@ function M.add_plugin_to_track(plugin, position)
             local fx_inside = fx_utils.get_device_main_fx(container)
 
             if fx_inside then
+                -- Store the original plugin name by GUID for later lookup
+                local fx_guid = fx_inside:get_guid()
+                if fx_guid then
+                    local state_mod = require('lib.core.state')
+                    state_mod.set_fx_original_name(fx_guid, plugin.full_name)
+                end
+
                 -- Set wet/dry to 100% by default
                 local wet_idx = fx_inside:get_param_from_ident(":wet")
                 if wet_idx >= 0 then

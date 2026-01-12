@@ -6,17 +6,19 @@ Final tasks before v1.0 release. No gain staging in this release.
 ## Tasks
 
 ### 1. Settings Dialog Updates
-- [ ] Remove gain staging section from settings
-- [ ] Add Bake Settings section:
+- [x] Remove gain staging section from settings
+- [x] Add Bake Settings section:
   - Disable link after bake (checkbox, default: true)
   - Default range mode (dropdown: Project/Track/Time Selection/Selected Items)
   - Show range picker modal (checkbox, default: true)
 
 ### 2. UI Improvements
-- [ ] Shift-key fine tuning for all slider controls
+- [x] Shift-key fine tuning for all slider controls
   - Hold Shift for finer adjustment (0.1x or 0.01x multiplier)
-- [ ] Display parameter values on controls
+- [x] Display parameter values on controls
   - Show current value tooltip or inline text
+- [x] Smart unit detection for parameters (auto-detect dB, Hz, ms, etc.)
+- [x] User-configurable unit overrides in parameter selector
 
 ### 3. Testing
 - [ ] Manual testing of all core features:

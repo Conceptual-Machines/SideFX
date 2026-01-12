@@ -85,45 +85,54 @@ local function create_rack_container(rack_idx, position)
         return nil
     end
 
-        -- Rename the rack
-        rack:set_named_config_param("renamed_name", rack_name)
+    -- Rename the rack
+    rack:set_named_config_param("renamed_name", rack_name)
 
-        -- Set up for parallel routing (64 channels for up to 32 stereo chains)
-        rack:set_container_channels(64)
+    -- Set up for parallel routing (64 channels for up to 32 stereo chains)
+    rack:set_container_channels(64)
 
-        -- Add the mixer JSFX at track level, then move into rack
-        local mixer_fx = state.track:add_fx_by_name(M.MIXER_JSFX, false, -1)
-        if mixer_fx and mixer_fx.pointer >= 0 then
-            -- Move mixer into rack
-            rack:add_fx_to_container(mixer_fx, 0)
+    -- Add the mixer JSFX at track level, then move into rack
+    local mixer_fx = state.track:add_fx_by_name(M.MIXER_JSFX, false, -1)
+    if mixer_fx and mixer_fx.pointer >= 0 then
+        -- Move mixer into rack
+        rack:add_fx_to_container(mixer_fx, 0)
 
-            -- Rename mixer
-            local mixer_inside = nil
-            for child in rack:iter_container_children() do
-                local ok, name = pcall(function() return child:get_name() end)
-                if ok and name and ((name:find("SideFX") and name:find("Mixer")) or name:match("^_R%d+_M$")) then
-                    mixer_inside = child
-                    break
-                end
+        -- Rename mixer
+        local mixer_inside = nil
+        for child in rack:iter_container_children() do
+            local ok, name = pcall(function() return child:get_name() end)
+            if ok and name and ((name:find("SideFX") and name:find("Mixer")) or name:match("^_R%d+_M$")) then
+                mixer_inside = child
+                break
             end
-            if mixer_inside then
-                mixer_inside:set_named_config_param("renamed_name", naming.build_mixer_name(rack_idx))
+        end
+        if mixer_inside then
+            mixer_inside:set_named_config_param("renamed_name", naming.build_mixer_name(rack_idx))
 
-                -- Initialize master and chain params
-                local master_0db_norm = (0 + 24) / 36  -- 0.667
-                local pan_center_norm = 0.5
-                local vol_0db_norm = (0 + 60) / 72  -- 0.833
+            -- Initialize master and chain params
+            local master_0db_norm = (0 + 24) / 36  -- 0.667
+            local pan_center_norm = 0.5
+            local vol_0db_norm = (0 + 60) / 72  -- 0.833
 
-                pcall(function() mixer_inside:set_param_normalized(0, master_0db_norm) end)
-                pcall(function() mixer_inside:set_param_normalized(1, pan_center_norm) end)
+            pcall(function() mixer_inside:set_param_normalized(0, master_0db_norm) end)
+            pcall(function() mixer_inside:set_param_normalized(1, pan_center_norm) end)
 
-                for i = 1, 16 do
-                    pcall(function() mixer_inside:set_param_normalized(1 + i, vol_0db_norm) end)
-                    pcall(function() mixer_inside:set_param_normalized(17 + i, pan_center_norm) end)
-                end
+            for i = 1, 16 do
+                pcall(function() mixer_inside:set_param_normalized(1 + i, vol_0db_norm) end)
+                pcall(function() mixer_inside:set_param_normalized(17 + i, pan_center_norm) end)
             end
         else
-            r.ShowConsoleMsg("SideFX: Could not add mixer JSFX. Make sure SideFX_Mixer.jsfx is installed.\n")
+            -- Mixer was added but move failed - clean up and fail
+            r.ShowConsoleMsg("SideFX: Failed to move mixer into rack container. Cleaning up...\n")
+            -- Delete the orphaned mixer and rack
+            mixer_fx = state.track:find_fx_by_guid(mixer_fx:get_guid())
+            if mixer_fx then mixer_fx:delete() end
+            rack:delete()
+            return nil
+        end
+    else
+        r.ShowConsoleMsg("SideFX: Could not add mixer JSFX. Make sure SideFX_Mixer.jsfx is installed.\n")
+        rack:delete()  -- Clean up the empty rack
         return nil
     end
 

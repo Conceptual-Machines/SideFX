@@ -25,6 +25,17 @@ function M.scan_plugins()
     state.browser.scanned = true
 end
 
+--- Force rescan of all plugins.
+-- Resets the scanned flag and rescans the plugin list.
+function M.rescan_plugins()
+    local state = state_mod.state
+    state.browser.scanned = false
+    state.browser.plugins = {}
+    state.browser.filtered = {}
+    M.scan_plugins()
+    M.filter_plugins()  -- Re-apply current filter
+end
+
 --- Filter plugins based on current search and filter settings.
 -- Uses state.browser.search and state.browser.filter to filter.
 -- Results are stored in state.browser.filtered.

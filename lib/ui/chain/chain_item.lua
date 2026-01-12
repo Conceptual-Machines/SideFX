@@ -42,7 +42,8 @@ end
 -- @param guid string FX GUID
 -- @param avail_height number Available height
 -- @param utility ReaWrap utility FX (optional)
-local function draw_fallback_device_panel(ctx, fx, guid, avail_height, utility)
+-- @param on_select function Optional callback when panel is clicked
+local function draw_fallback_device_panel(ctx, fx, guid, avail_height, utility, on_select)
     local name = get_fx_display_name(fx)
     local enabled = fx:get_enabled()
     local total_params = fx:get_num_params()
@@ -58,6 +59,11 @@ local function draw_fallback_device_panel(ctx, fx, guid, avail_height, utility)
 
     ctx:push_style_color(imgui.Col.ChildBg(), enabled and 0x2A2A2AFF or 0x1A1A1AFF)
     if ctx:begin_child("fx_" .. guid, panel_w, panel_h, imgui.ChildFlags.Border()) then
+        -- Click-to-select: detect clicks on panel background
+        if on_select and r.ImGui_IsWindowHovered(ctx.ctx, r.ImGui_HoveredFlags_ChildWindows())
+           and r.ImGui_IsMouseClicked(ctx.ctx, 0) then
+            on_select()
+        end
         ctx:text(name:sub(1, 35))
         ctx:separator()
 
@@ -132,24 +138,36 @@ end
 -- @param fx ReaWrap rack FX
 -- @param avail_height number Available height
 function M.draw_rack_item(ctx, fx, avail_height, callbacks)
+    -- Check if FX list is invalid - bail out early
+    if state.fx_list_invalid then return end
+
     -- Draw rack using helper function (top-level rack, explicitly not nested)
     local rack_data = draw_rack_panel(ctx, fx, avail_height, false, callbacks)
 
-    -- Draw selected chain column if expanded
-    local rack_guid = fx:get_guid()
-    draw_selected_chain_column_if_expanded(ctx, rack_data, rack_guid)
+    -- Draw selected chain column if expanded (safely get GUID)
+    local ok_guid, rack_guid = pcall(function() return fx:get_guid() end)
+    if ok_guid and rack_guid then
+        draw_selected_chain_column_if_expanded(ctx, rack_data, rack_guid)
+    end
 end
 
 --- Draw an unknown container item
 -- @param ctx ImGui context
 -- @param fx ReaWrap container FX
 function M.draw_container_item(ctx, fx)
-    local guid = fx:get_guid()
+    -- Check if FX list is invalid - bail out early
+    if state.fx_list_invalid then return end
+
+    -- Safely get GUID (may fail if stale)
+    local ok_guid, guid = pcall(function() return fx:get_guid() end)
+    if not ok_guid or not guid then return end
+
     ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
     if ctx:begin_child("container_" .. guid, 180, 100, imgui.ChildFlags.Border()) then
-        ctx:text(get_fx_display_name(fx):sub(1, 15))
+        local ok_name, display_name = pcall(function() return get_fx_display_name(fx) end)
+        ctx:text((ok_name and display_name or "Container"):sub(1, 15))
         if ctx:small_button("Open") then
-            fx:show(3)
+            pcall(function() fx:show(3) end)
         end
         ctx:end_child()
     end
@@ -163,26 +181,54 @@ end
 -- @param avail_height number Available height
 -- @param callbacks table Callback functions
 function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
-    local guid = fx:get_guid()
+    -- Check if FX list is invalid - bail out early to avoid stale pointer errors
+    if state.fx_list_invalid then return end
+
+    -- Safely get GUID (may fail if FX was deleted/moved)
+    local ok_guid, guid = pcall(function() return fx:get_guid() end)
+    if not ok_guid or not guid then return end
+
     local utility = item.utility
     local container = item.container
 
+    -- Safely get container name (may fail if container is stale)
+    local container_name = nil
+    if container then
+        local ok_name, name = pcall(function() return container:get_name() end)
+        if ok_name then container_name = name end
+    end
+
+    -- Use the container guid if available, otherwise the fx guid
+    local device_guid = container and container:get_guid() or guid
+
+    -- Check if this device is selected (standalone device = single item in path)
+    local is_selected = (#state.expanded_path == 1 and state.expanded_path[1] == device_guid)
+
+    ctx:begin_group()
     if device_panel then
         -- Use full device panel
         device_panel.draw(ctx, fx, {
             avail_height = avail_height - 10,
             utility = utility,  -- Paired SideFX_Utility for gain/pan
             container = container,  -- Pass container reference
-            container_name = container and container:get_name() or nil,
+            container_name = container_name,
             missing_utility = item.missing_utility,  -- Flag for warning icon
             icon_font = icon_font,
             track = state.track,
             refresh_fx_list = refresh_fx_list,
+            is_selected = is_selected,  -- For border highlighting
+            on_select = function()
+                -- Click-to-select for standalone devices
+                local state_module = require('lib.core.state')
+                if state.expanded_path[1] ~= device_guid then
+                    state_module.select_standalone_device(device_guid)
+                end
+            end,
             on_delete = function(fx_to_delete)
                 -- Set flag FIRST to stop all rendering immediately
                 local state_module = require('lib.core.state')
                 state_module.state.deletion_pending = true
-                
+
                 if container then
                     -- Delete the whole D-container
                     container:delete()
@@ -213,9 +259,15 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
             end,
         })
     else
-        -- Fallback UI
-        draw_fallback_device_panel(ctx, fx, guid, avail_height, utility)
+        -- Fallback UI with on_select callback
+        draw_fallback_device_panel(ctx, fx, guid, avail_height, utility, function()
+            local state_module = require('lib.core.state')
+            if state.expanded_path[1] ~= device_guid then
+                state_module.select_standalone_device(device_guid)
+            end
+        end)
     end
+    ctx:end_group()
 end
 
 return M

@@ -24,6 +24,9 @@ local defaults = {
     -- Display settings
     show_track_name = true,
     show_breadcrumbs = true,
+    show_mix_control = true,
+    show_delta_control = true,
+    show_phase_controls = true,
     icon_font_size = 1,  -- 0=Small, 1=Medium, 2=Large
     max_visible_params = 64,
 
@@ -74,8 +77,20 @@ function M.get_all()
     return result
 end
 
+--- Get the user's home directory (cross-platform)
+-- @return string Home directory path
+local function get_home_dir()
+    -- Try HOME (macOS/Linux) first, then USERPROFILE (Windows)
+    local home = os.getenv("HOME") or os.getenv("USERPROFILE")
+    if home then
+        return home
+    end
+    -- Fallback to REAPER resource path if no home found
+    return r.GetResourcePath()
+end
+
 --- Get the presets folder path
--- Returns configured path or default
+-- Returns configured path or default (user's Documents/SideFX_Presets)
 -- @return string Presets folder path (with trailing slash)
 function M.get_presets_folder()
     local folder = config.presets_folder
@@ -86,8 +101,10 @@ function M.get_presets_folder()
         end
         return folder
     end
-    -- Default path
-    return r.GetResourcePath() .. "/presets/SideFX_Presets/"
+    -- Default path in user's Documents folder
+    local home = get_home_dir()
+    local sep = package.config:sub(1, 1)  -- "/" on Unix, "\" on Windows
+    return home .. sep .. "Documents" .. sep .. "SideFX_Presets" .. sep
 end
 
 --------------------------------------------------------------------------------
@@ -176,7 +193,9 @@ end
 --- Get default presets folder path
 -- @return string Default presets folder path
 function M.get_default_presets_folder()
-    return r.GetResourcePath() .. "/presets/SideFX_Presets/"
+    local home = get_home_dir()
+    local sep = package.config:sub(1, 1)
+    return home .. sep .. "Documents" .. sep .. "SideFX_Presets" .. sep
 end
 
 return M

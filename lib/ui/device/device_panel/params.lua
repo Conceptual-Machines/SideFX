@@ -3,24 +3,28 @@ Parameters Column Module - Draws device parameter grid with sliders
 ]]
 
 local M = {}
+local drawing = require('lib.ui.common.drawing')
+local unit_detector = require('lib.utils.unit_detector')
+local state_module = require('lib.core.state')
 
 --- Draw a single parameter cell (label + slider + modulation overlay)
 -- @param ctx ImGui context
 -- @param fx The FX object
 -- @param param_idx Parameter index
--- @param opts Table with mod_links, state, fx_guid
+-- @param opts Table with mod_links, state, fx_guid, plugin_name
 local function draw_param_cell(ctx, fx, param_idx, opts)
     local r = reaper
     local imgui = require('imgui')
-    
+
     local mod_links = opts and opts.mod_links
     local state = opts and opts.state
     local fx_guid = opts and opts.fx_guid
+    local plugin_name = opts and opts.plugin_name
 
     -- Safely get param info (FX might have been deleted)
     local ok_name, param_name = pcall(function() return fx:get_param_name(param_idx) end)
     local ok_val, param_val = pcall(function() return fx:get_param_normalized(param_idx) end)
-    local ok_fmt, param_formatted = pcall(function() return fx:get_param_formatted(param_idx) end)
+    local ok_fmt, param_formatted = pcall(function() return fx:get_formatted_param_value(param_idx) end)
 
     local interacted = false
     if ok_name and ok_val then
@@ -72,7 +76,145 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
         
         -- Draw the slider with the BASELINE value if modulated, otherwise current value
         local display_val = link and base_val or param_val
-        local changed, new_val = ctx:slider_double("##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, "")
+
+        -- Check for user override first, otherwise auto-detect
+        local unit_override = plugin_name and state_module.get_param_unit_override(plugin_name, param_idx)
+        local unit_info = unit_override and unit_detector.get_unit_info(unit_override)
+        local is_percentage = ok_fmt and param_formatted and param_formatted:match("%%$")
+
+        local changed, new_val = false, display_val
+
+        -- Handle switch type: render as toggle
+        if unit_info and unit_info.is_switch then
+            local is_on = display_val >= 0.5
+            local toggled
+            toggled, is_on = ctx:checkbox("##switch_" .. param_name .. "_" .. param_idx, is_on)
+            if toggled then
+                new_val = is_on and 1.0 or 0.0
+                changed = true
+            end
+        -- Handle bipolar type: -50 to +50
+        elseif unit_info and unit_info.is_bipolar then
+            local bipolar_val = (display_val - 0.5) * 100  -- Convert 0-1 to -50 to +50
+            local slider_changed, new_bipolar = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, bipolar_val, -50, 50, "%+.0f", nil, 1)
+            if slider_changed then
+                new_val = (new_bipolar / 100) + 0.5  -- Convert back to 0-1
+                changed = true
+            end
+        else
+            -- Normal slider
+            local slider_format, slider_mult
+            if unit_info then
+                slider_format = unit_info.format
+                slider_mult = unit_info.display_mult
+                -- If using plugin format, hide slider text and overlay plugin value
+                if unit_info.use_plugin_format then
+                    slider_format = "##"
+                end
+            elseif is_percentage then
+                slider_format = "%.1f%%"
+                slider_mult = 100
+            else
+                -- Non-percentage: hide slider text, overlay plugin's value
+                slider_format = "##"
+                slider_mult = 1
+            end
+
+            -- When modulated, hide slider text (we'll overlay baseline for computable units)
+            if link then
+                slider_format = "##"
+            end
+
+            changed, new_val = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, slider_format, nil, slider_mult)
+
+            -- Overlay text on slider
+            -- When modulated: show cached baseline formatted value (static)
+            -- When not modulated: show plugin's current formatted value
+            local overlay_text = nil
+            if link then
+                -- Prefer cached baseline formatted value (static, doesn't change with modulation)
+                if link.baseline_formatted then
+                    overlay_text = link.baseline_formatted
+                else
+                    -- Fallback: compute from baseline if we have a computable unit
+                    local baseline = link.baseline or 0
+                    if unit_info and not unit_info.use_plugin_format then
+                        local display_mult = unit_info.display_mult or 1
+                        local fmt = unit_info.format or "%.1f"
+                        overlay_text = string.format(fmt, baseline * display_mult)
+                    else
+                        -- Last resort: show as percentage
+                        overlay_text = string.format("%.1f%%", baseline * 100)
+                    end
+                end
+            elseif ok_fmt and param_formatted then
+                -- Not modulated: show plugin's formatted value
+                overlay_text = param_formatted
+            end
+
+            if overlay_text then
+                local text_w = r.ImGui_CalcTextSize(ctx.ctx, overlay_text)
+                local text_x = slider_x + (slider_w - text_w) / 2
+                local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
+                local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
+                local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                r.ImGui_DrawList_AddText(draw_list, text_x, text_y, 0xFFFFFFFF, overlay_text)
+            end
+
+            -- Tooltip showing modulation range when hovering
+            -- TODO: Show range in actual units (Hz, dB, etc.) instead of percentage.
+            -- This requires caching formatted values for lower/upper bounds, which gets
+            -- complicated when bipolar mode changes. Need to either:
+            -- 1. Cache on-demand when tooltip is shown (temporarily set param, get format, restore)
+            -- 2. Invalidate cache properly when baseline/scale/bipolar changes
+            -- 3. Store formatted bounds when modulation link is created in modulator.lua
+            if link and r.ImGui_IsItemHovered(ctx.ctx) then
+                local baseline = link.baseline or 0
+                local scale = link.scale or 0.5
+                local tooltip
+
+                if link.is_bipolar then
+                    -- Bipolar: centered on baseline, ± half range
+                    local half_range = math.abs(scale) / 2
+                    local lower = math.max(0, baseline - half_range) * 100
+                    local upper = math.min(1, baseline + half_range) * 100
+                    tooltip = string.format("Mod range: %.0f%% <-> %.0f%% (center: %.0f%%)",
+                        lower, upper, baseline * 100)
+                else
+                    -- Unipolar: baseline to baseline+scale
+                    local lower = math.max(0, math.min(baseline, baseline + scale)) * 100
+                    local upper = math.min(1, math.max(baseline, baseline + scale)) * 100
+                    tooltip = string.format("Mod range: %.0f%% -> %.0f%%", lower, upper)
+                end
+                ctx:set_tooltip(tooltip)
+            end
+        end
+
+        -- Show unit next to slider (override or detected) - unless hide_label is set
+        local unit_to_show = nil
+        local hide_label = unit_info and unit_info.hide_label
+        if not hide_label then
+            if unit_override then
+                -- Show the overridden unit (skip certain types)
+                if unit_override ~= "percent" and unit_override ~= "linear" and unit_override ~= "linear100"
+                   and unit_override ~= "switch" and unit_override ~= "bipolar" and unit_override ~= "plugin" then
+                    unit_to_show = unit_override
+                end
+            elseif ok_fmt and param_formatted then
+                -- Show detected unit
+                local detected = unit_detector.detect_unit(param_formatted)
+                if detected and detected.unit ~= "percent" and detected.unit ~= "linear" and detected.unit ~= "linear100" then
+                    unit_to_show = detected.unit
+                end
+            end
+        end
+
+        if unit_to_show then
+            ctx:same_line()
+            ctx:push_style_color(imgui.Col.Text(), 0x88AACCFF)
+            ctx:text(unit_to_show)
+            ctx:pop_style_color()
+        end
         if changed then
             if link then
                 -- If modulated, update baseline in both REAPER and UI state
@@ -126,30 +268,10 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
                 indicator_x - 2, slider_y,
                 indicator_x + 2, slider_y + slider_h,
                 0xFFFFFFFF)  -- White indicator
-            
-            -- DEBUG: Show values as tooltip on hover
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                local tooltip = string.format("base=%.3f off=%.3f sc=%.3f\ncurrent=%.3f\nbipolar=%s", 
-                    baseline, offset, scale, param_val, link.is_bipolar and "yes" or "no")
-                ctx:set_tooltip(tooltip)
-            end
         end
 
         ctx:pop_style_var(1)
         ctx:pop_style_color(5)
-
-        -- Value label (centered below slider)
-        if ok_fmt then
-            ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
-            local val_text = param_formatted
-            local text_w = r.ImGui_CalcTextSize(ctx.ctx, val_text)
-            local avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
-            if avail_w > text_w then
-                r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (avail_w - text_w) / 2)
-            end
-            ctx:text(val_text)
-            ctx:pop_style_color()
-        end
     end
 
     return interacted

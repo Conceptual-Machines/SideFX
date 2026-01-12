@@ -4,6 +4,10 @@
 local M = {}
 local r = reaper
 
+-- Track when a slider is being dragged with fine control (Shift held)
+-- This is used by curve_editor to avoid Shift key conflicts
+M.slider_fine_active = false
+
 --- Draw a UI icon (spanner/wrench emoji button)
 -- @param ctx ImGui context
 -- @param label string Label for the button
@@ -205,6 +209,160 @@ function M.draw_fader(ctx, label, value, min_val, max_val, width, height, format
 
     r.ImGui_PopStyleVar(ctx.ctx)
     r.ImGui_PopStyleColor(ctx.ctx, 5)
+
+    return changed, new_value
+end
+
+--------------------------------------------------------------------------------
+-- Fine Control Slider Functions (Shift key for precision)
+--------------------------------------------------------------------------------
+
+--- Check if Shift key is held
+-- @param ctx ImGui context (raw or wrapper) - not used, kept for API compatibility
+-- @return boolean True if Shift is held
+function M.is_shift_held(ctx)
+    -- Use REAPER's GetMouseState which returns modifier keys in the bitmask
+    -- Bit 8 (value 8) = Shift key held
+    local mouse_state = r.JS_Mouse_GetState and r.JS_Mouse_GetState(0) or 0
+    if (mouse_state & 8) ~= 0 then
+        return true
+    end
+    -- Fallback to ImGui detection
+    local raw_ctx = ctx.ctx or ctx
+    local left_shift = r.ImGui_IsKeyDown(raw_ctx, r.ImGui_Key_LeftShift())
+    local right_shift = r.ImGui_IsKeyDown(raw_ctx, r.ImGui_Key_RightShift())
+    return left_shift or right_shift
+end
+
+--- Horizontal slider with fine control and double-click reset
+-- Features:
+--   - Shift+drag for fine control (10% sensitivity)
+--   - Double-click to reset to default value
+--   - Ctrl/Cmd+click uses ImGui's built-in text input mode
+-- @param ctx ImGui context wrapper
+-- @param label string Slider label
+-- @param value number Current value
+-- @param min number Minimum value
+-- @param max number Maximum value
+-- @param format string Display format (optional)
+-- @param fine_factor number Fine control multiplier (default 0.1)
+-- @param display_mult number Multiplier for display value (e.g., 100 for percentage)
+-- @param default_value number Default value for double-click reset (optional)
+-- @return boolean changed, number new_value
+function M.slider_double_fine(ctx, label, value, min, max, format, fine_factor, display_mult, default_value)
+    fine_factor = fine_factor or 0.1
+    display_mult = display_mult or 1
+    local shift_held = M.is_shift_held(ctx)
+
+    local changed = false
+    local new_value = value
+
+    -- If we have a display multiplier, scale the slider range for display
+    local display_value = value * display_mult
+    local display_min = min * display_mult
+    local display_max = max * display_mult
+
+    -- Use raw ImGui API with NoRoundToFormat flag for better precision
+    local raw_ctx = ctx.ctx or ctx
+    local flags = r.ImGui_SliderFlags_NoRoundToFormat()
+    local slider_changed, new_display_value = r.ImGui_SliderDouble(raw_ctx, label, display_value, display_min, display_max, format or "%.3f", flags)
+
+    -- Track if this slider is actively being dragged with Shift (for curve_editor conflict avoidance)
+    local is_active = r.ImGui_IsItemActive(raw_ctx)
+    if is_active and shift_held then
+        M.slider_fine_active = true
+    elseif not is_active then
+        -- Only clear when no slider is active (will be set again if another slider is active)
+        M.slider_fine_active = false
+    end
+
+    local is_hovered = r.ImGui_IsItemHovered(raw_ctx)
+    local mouse_double_clicked = r.ImGui_IsMouseDoubleClicked(raw_ctx, 0)
+
+    -- Check for double-click to reset to default
+    if is_hovered and mouse_double_clicked and default_value ~= nil then
+        new_value = default_value
+        changed = true
+    -- Normal slider change with optional fine control
+    elseif slider_changed then
+        new_value = new_display_value / display_mult
+
+        if shift_held then
+            -- Apply fine control: reduce the delta
+            local delta = new_value - value
+            new_value = value + delta * fine_factor
+        end
+        -- Clamp to range
+        new_value = math.max(min, math.min(max, new_value))
+        changed = true
+    end
+
+    return changed, new_value
+end
+
+--- Vertical slider with fine control and double-click reset
+-- Features:
+--   - Shift+drag for fine control (10% sensitivity)
+--   - Double-click to reset to default value
+--   - Ctrl/Cmd+click uses ImGui's built-in text input mode
+-- @param ctx ImGui context wrapper
+-- @param label string Slider label
+-- @param width number Slider width
+-- @param height number Slider height
+-- @param value number Current value
+-- @param min number Minimum value
+-- @param max number Maximum value
+-- @param format string Display format (optional)
+-- @param fine_factor number Fine control multiplier (default 0.1)
+-- @param display_mult number Multiplier for display value (e.g., 100 for percentage)
+-- @param default_value number Default value for double-click reset (optional)
+-- @return boolean changed, number new_value
+function M.v_slider_double_fine(ctx, label, width, height, value, min, max, format, fine_factor, display_mult, default_value)
+    fine_factor = fine_factor or 0.1
+    display_mult = display_mult or 1
+    local shift_held = M.is_shift_held(ctx)
+
+    local changed = false
+    local new_value = value
+
+    -- If we have a display multiplier, scale the slider range for display
+    local display_value = value * display_mult
+    local display_min = min * display_mult
+    local display_max = max * display_mult
+
+    -- Use raw ImGui API with NoRoundToFormat flag for better precision
+    local raw_ctx = ctx.ctx or ctx
+    local flags = r.ImGui_SliderFlags_NoRoundToFormat()
+    local slider_changed, new_display_value = r.ImGui_VSliderDouble(raw_ctx, label, width, height, display_value, display_min, display_max, format or "%.3f", flags)
+
+    -- Track if this slider is actively being dragged with Shift (for curve_editor conflict avoidance)
+    local is_active = r.ImGui_IsItemActive(raw_ctx)
+    if is_active and shift_held then
+        M.slider_fine_active = true
+    elseif not is_active then
+        M.slider_fine_active = false
+    end
+
+    local is_hovered = r.ImGui_IsItemHovered(raw_ctx)
+    local mouse_double_clicked = r.ImGui_IsMouseDoubleClicked(raw_ctx, 0)
+
+    -- Check for double-click to reset to default
+    if is_hovered and mouse_double_clicked and default_value ~= nil then
+        new_value = default_value
+        changed = true
+    -- Normal slider change with optional fine control
+    elseif slider_changed then
+        new_value = new_display_value / display_mult
+
+        if shift_held then
+            -- Apply fine control: reduce the delta
+            local delta = new_value - value
+            new_value = value + delta * fine_factor
+        end
+        -- Clamp to range
+        new_value = math.max(min, math.min(max, new_value))
+        changed = true
+    end
 
     return changed, new_value
 end

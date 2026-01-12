@@ -29,12 +29,15 @@ local function draw_device_separator(ctx, is_first)
     ctx:same_line()
 end
 
---- Draw chain column header with name and identifier
+--- Draw chain column header with name
 -- @param ctx ImGui context
 -- @param chain_name string Display name of chain
--- @param chain_id string|nil Chain identifier (e.g., "R1_C1")
 -- @param default_font ImGui font handle (optional)
-local function draw_chain_header(ctx, chain_name, chain_id, default_font)
+-- @param chain TrackFX Chain container object
+-- @param chain_guid string Chain GUID
+-- @param state table State object
+-- @param on_refresh function Refresh callback
+local function draw_chain_header(ctx, chain_name, default_font, chain, chain_guid, state, on_refresh)
     ctx:table_next_row(0, 20)  -- Smaller row height (20px)
     ctx:table_set_column_index(0)
     if default_font then
@@ -42,14 +45,61 @@ local function draw_chain_header(ctx, chain_name, chain_id, default_font)
     end
     ctx:text_colored(0xAAAAAAFF, "Chain:")
     ctx:same_line()
-    ctx:text(chain_name)
-    if chain_id then
-        ctx:same_line()
-        ctx:text_colored(0x888888FF, " [" .. chain_id .. "]")
+    -- Use selectable for right-click menu support (transparent background)
+    ctx:push_style_color(imgui.Col.Header(), 0x00000000)
+    ctx:push_style_color(imgui.Col.HeaderHovered(), 0x00000000)
+    ctx:push_style_color(imgui.Col.HeaderActive(), 0x00000000)
+    if ctx:selectable(chain_name .. "##chain_header_" .. chain_guid, false) then
+        -- Single click - select chain
+        if chain and chain_guid then
+            local ok_parent, parent_rack = pcall(function() return chain:get_parent_container() end)
+            if ok_parent and parent_rack then
+                local ok_rack_guid, rack_guid = pcall(function() return parent_rack:get_guid() end)
+                if ok_rack_guid and rack_guid then
+                    local state_module = require('lib.core.state')
+                    state_module.select_chain(rack_guid, chain_guid)
+                end
+            end
+        end
     end
+    ctx:pop_style_color(3)
     if default_font then
         ctx:pop_font()
     end
+
+    -- Right-click context menu on chain header
+    if chain and chain_guid and ctx:begin_popup_context_item("chain_header_menu_" .. chain_guid) then
+        if ctx:menu_item("Rename") then
+            local state_module = require('lib.core.state')
+            state_module.state.renaming_fx = chain_guid
+            state_module.state.rename_text = state.display_names[chain_guid] or chain_name
+        end
+        ctx:separator()
+
+        -- Convert to Devices option
+        local chain_full_name = chain:get_name() or ""
+        if chain_full_name:match("^R%d+_C%d+") then
+            if ctx:menu_item("Convert to Devices") then
+                local container_module = require('lib.device.container')
+                local result = container_module.convert_chain_to_devices(chain)
+                if result then
+                    local state_mod = require('lib.core.state')
+                    state_mod.invalidate_fx_list()
+                end
+                if on_refresh then on_refresh() end
+            end
+            ctx:separator()
+        end
+
+        if ctx:menu_item("Delete") then
+            chain:delete()
+            local state_mod = require('lib.core.state')
+            state_mod.invalidate_fx_list()
+            if on_refresh then on_refresh() end
+        end
+        ctx:end_popup()
+    end
+
     ctx:separator()
 end
 
@@ -133,11 +183,14 @@ end
 -- @param device_panel module Device panel module (optional)
 -- @param get_device_main_fx function (container) -> TrackFX|nil
 -- @param get_device_utility function (container) -> TrackFX|nil
-local function draw_device_in_chain(ctx, dev, chain_content_h, selected_chain, callbacks, device_panel, get_device_main_fx, get_device_utility)
+local function draw_device_in_chain(ctx, dev, chain_content_h, selected_chain, callbacks, device_panel, get_device_main_fx, get_device_utility, state)
     local dev_main_fx = get_device_main_fx(dev)
     local dev_utility = get_device_utility(dev)
     local dev_name = fx_utils.get_device_display_name(dev)
     local dev_enabled = dev:get_enabled()
+
+    -- Get device GUID for selection
+    local ok_dev_guid, dev_guid = pcall(function() return dev:get_guid() end)
 
     if dev_main_fx and device_panel then
         device_panel.draw(ctx, dev_main_fx, callbacks)
@@ -145,10 +198,27 @@ local function draw_device_in_chain(ctx, dev, chain_content_h, selected_chain, c
         -- Fallback: simple button
         local btn_color = dev_enabled and 0x3A5A4AFF or 0x2A2A35FF
         ctx:push_style_color(imgui.Col.Button(), btn_color)
-        if ctx:button(dev_name:sub(1, 20) .. "##dev_fallback_" .. dev:get_guid(), 120, chain_content_h - 20) then
+        if ctx:button(dev_name:sub(1, 20) .. "##dev_fallback_" .. (ok_dev_guid and dev_guid or "unknown"), 120, chain_content_h - 20) then
             dev:show(3)
         end
         ctx:pop_style_color()
+    end
+
+    -- Click-to-select for device (check if last item was clicked)
+    if ok_dev_guid and dev_guid and reaper.ImGui_IsItemClicked(ctx.ctx, 0) then
+        -- Get chain and rack GUIDs
+        local ok_chain_guid, chain_guid = pcall(function() return selected_chain:get_guid() end)
+        local ok_parent, parent_rack = pcall(function() return selected_chain:get_parent_container() end)
+        if ok_chain_guid and chain_guid and ok_parent and parent_rack then
+            local ok_rack_guid, rack_guid = pcall(function() return parent_rack:get_guid() end)
+            if ok_rack_guid and rack_guid then
+                local state_module = require('lib.core.state')
+                -- Select device if not already selected
+                if state.expanded_path[3] ~= dev_guid then
+                    state_module.select_device(rack_guid, chain_guid, dev_guid)
+                end
+            end
+        end
     end
 end
 
@@ -175,6 +245,13 @@ end
 -- @param state table State table
 -- @param opts table Options for chain_column.draw
 local function draw_nested_rack_in_chain(ctx, dev, chain_content_h, draw_rack_panel, draw_chain_column_fn, state, opts)
+    -- Safety check: draw_rack_panel must be provided
+    if not draw_rack_panel then
+        -- Draw placeholder for nested rack when draw_rack_panel is not available
+        ctx:text("[Nested Rack]")
+        return
+    end
+
     local rack_data = draw_rack_panel(ctx, dev, chain_content_h - 20, true)
 
     -- If a chain in this nested rack is selected, show its chain column
@@ -229,26 +306,27 @@ function M.draw(ctx, selected_chain, rack_h, opts)
     end
 
     local selected_chain_guid = selected_chain:get_guid()
-    -- Get chain name and identifier separately
+    -- Get chain name for display
     local chain_name_full = fx_utils.get_chain_label_name(selected_chain)
     local fx_naming = require('lib.fx.fx_naming')
     local chain_name = fx_naming.get_short_path(chain_name_full)
 
-    local chain_id = nil
-    local ok_name, raw_name = pcall(function() return selected_chain:get_name() end)
-    if ok_name and raw_name then
-        local chain_id_full = raw_name:match("^(R%d+_C%d+)") or raw_name:match("R%d+_C%d+")
-        if chain_id_full then
-            chain_id = fx_naming.get_short_path(chain_id_full)
-        end
-    end
-
     -- Get devices from chain
     local devices = {}
+    local seen_guids = {}  -- Track GUIDs to detect duplicates
     for child in selected_chain:iter_container_children() do
         local ok, child_name = pcall(function() return child:get_name() end)
+        local ok_guid, child_guid = pcall(function() return child:get_guid() end)
         if ok and child_name then
-            table.insert(devices, child)
+            -- Skip duplicates (same GUID)
+            if ok_guid and child_guid then
+                if not seen_guids[child_guid] then
+                    seen_guids[child_guid] = true
+                    table.insert(devices, child)
+                end
+            else
+                table.insert(devices, child)
+            end
         end
     end
 
@@ -262,80 +340,124 @@ function M.draw(ctx, selected_chain, rack_h, opts)
     -- Add padding around content, especially on the right
     ctx:push_style_var(imgui.StyleVar.WindowPadding(), 12, 8)
 
-    ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
+    -- Check if this chain is selected (second item in expanded_path)
+    local is_chain_selected = (#state.expanded_path >= 2 and state.expanded_path[2] == selected_chain_guid)
+
+    -- Use slightly lighter background when selected
+    local chain_bg = is_chain_selected and 0x2D2D3AFF or 0x252530FF
+    ctx:push_style_color(imgui.Col.ChildBg(), chain_bg)
+    -- Highlight border if selected
+    if is_chain_selected then
+        ctx:push_style_color(reaper.ImGui_Col_Border(), 0x5588BBAA)  -- Subtle blue highlight
+    end
     local window_flags = imgui.WindowFlags.NoScrollbar()
     if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, 0, rack_h, wrapper_flags, window_flags) then
-        -- Use table layout so header width matches content width
-        local table_flags = imgui.TableFlags.SizingStretchSame()
-        if ctx:begin_table("chain_table_" .. selected_chain_guid, 1, table_flags) then
-            -- Draw header with chain name and identifier
-            draw_chain_header(ctx, chain_name, chain_id, default_font)
-
-            -- Row 2: Content
-            ctx:table_next_row()
-            ctx:table_set_column_index(0)
-
-            -- Chain contents - auto-resize to fit devices
-            ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
-            local chain_content_flags = 81  -- Border (1) + AutoResizeX (16) + AlwaysAutoResize (64)
-            if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, chain_content_flags) then
-
-                if #devices == 0 then
-                    -- Empty chain - show drop zone
-                    draw_empty_chain_content(ctx, chain_content_h, has_plugin_payload or has_rack_payload, selected_chain, add_device_to_chain, add_rack_to_chain)
-                else
-                    -- Draw each device or rack HORIZONTALLY with arrows
-                    ctx:begin_group()
-
-                    for k, dev in ipairs(devices) do
-                        -- Draw arrow separator between devices
-                        draw_device_separator(ctx, k == 1)
-
-                        -- Draw device or nested rack
-                        if is_rack_container(dev) then
-                            draw_nested_rack_in_chain(ctx, dev, chain_content_h, draw_rack_panel, M.draw, state, opts)
-                        else
-                            draw_device_in_chain(ctx, dev, chain_content_h, selected_chain, {
-                                avail_height = chain_content_h - 20,
-                                utility = get_device_utility(dev),
-                                container = dev,
-                                icon_font = icon_font,
-                                track = state.track,
-                                refresh_fx_list = refresh_fx_list,
-                                on_delete = function()
-                                    dev:delete()
-                                    refresh_fx_list()
-                                end,
-                                on_rename = function(fx)
-                                    -- Rename the container (dev), not the main FX
-                                    local dev_guid = dev:get_guid()
-                                    state.renaming_fx = dev_guid
-                                    state.rename_text = get_fx_display_name(dev)
-                                end,
-                                on_plugin_drop = function(plugin_name, insert_before_idx)
-                                    local plugin = { full_name = plugin_name, name = plugin_name }
-                                    add_device_to_chain(selected_chain, plugin)
-                                end,
-                            }, device_panel, get_device_main_fx, get_device_utility)
-                        end
-                    end
-
-                    -- Draw add button at end of chain
-                    draw_chain_add_button(ctx, chain_content_h, has_plugin_payload or has_rack_payload, selected_chain, add_device_to_chain, add_rack_to_chain)
-
-                    ctx:end_group()
+        -- Click on chain background to select it (deselects device if one was selected)
+        -- Don't trigger if clicking on a widget (button, slider, etc.)
+        if reaper.ImGui_IsWindowHovered(ctx.ctx, reaper.ImGui_HoveredFlags_ChildWindows())
+           and reaper.ImGui_IsMouseClicked(ctx.ctx, 0)
+           and not reaper.ImGui_IsAnyItemHovered(ctx.ctx) then
+            -- Get the parent rack to build the selection path
+            local ok_parent, parent_rack = pcall(function() return selected_chain:get_parent_container() end)
+            if ok_parent and parent_rack then
+                local ok_rack_guid, rack_guid = pcall(function() return parent_rack:get_guid() end)
+                if ok_rack_guid and rack_guid then
+                    local state_module = require('lib.core.state')
+                    -- Always select chain level (removes device from path if selected)
+                    state_module.select_chain(rack_guid, selected_chain_guid)
                 end
-
-                ctx:end_child()
             end
-            ctx:pop_style_color()
-
-            ctx:end_table()
         end
 
-        ctx:end_child()
+        -- Wrap in pcall to ensure end_child is always called
+        local ok, err = pcall(function()
+            -- Use table layout so header width matches content width
+            local table_flags = imgui.TableFlags.SizingStretchSame()
+            if ctx:begin_table("chain_table_" .. selected_chain_guid, 1, table_flags) then
+                -- Draw header with chain name (with context menu support)
+                draw_chain_header(ctx, chain_name, default_font, selected_chain, selected_chain_guid, state, refresh_fx_list)
+
+                -- Row 2: Content
+                ctx:table_next_row()
+                ctx:table_set_column_index(0)
+
+                -- Chain contents - auto-resize to fit devices
+                ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
+                local chain_content_flags = 80  -- AutoResizeX (16) + AlwaysAutoResize (64) - no border
+                if ctx:begin_child("chain_contents_" .. selected_chain_guid, 0, chain_content_h, chain_content_flags) then
+                    -- Inner pcall for chain contents
+                    local ok_inner, err_inner = pcall(function()
+                        if #devices == 0 then
+                            -- Empty chain - show drop zone
+                            draw_empty_chain_content(ctx, chain_content_h, has_plugin_payload or has_rack_payload, selected_chain, add_device_to_chain, add_rack_to_chain)
+                        else
+                            -- Draw each device or rack HORIZONTALLY with arrows
+                            ctx:begin_group()
+
+                            for k, dev in ipairs(devices) do
+                                -- Draw arrow separator between devices
+                                draw_device_separator(ctx, k == 1)
+
+                                -- Draw device or nested rack
+                                if is_rack_container(dev) then
+                                    draw_nested_rack_in_chain(ctx, dev, chain_content_h, draw_rack_panel, M.draw, state, opts)
+                                else
+                                    -- Check if this device is selected (3rd item in path)
+                                    local ok_dev_guid, dev_guid = pcall(function() return dev:get_guid() end)
+                                    local dev_is_selected = ok_dev_guid and dev_guid and (state.expanded_path[3] == dev_guid)
+
+                                    draw_device_in_chain(ctx, dev, chain_content_h, selected_chain, {
+                                        avail_height = chain_content_h,  -- No padding, natural gap from layout
+                                        utility = get_device_utility(dev),
+                                        container = dev,
+                                        icon_font = icon_font,
+                                        track = state.track,
+                                        refresh_fx_list = refresh_fx_list,
+                                        is_selected = dev_is_selected,
+                                        on_delete = function()
+                                            dev:delete()
+                                            refresh_fx_list()
+                                        end,
+                                        on_rename = function(fx)
+                                            -- Rename the container (dev), not the main FX
+                                            local dev_guid_inner = dev:get_guid()
+                                            state.renaming_fx = dev_guid_inner
+                                            state.rename_text = get_fx_display_name(dev)
+                                        end,
+                                        on_plugin_drop = function(plugin_name, insert_before_idx)
+                                            local plugin = { full_name = plugin_name, name = plugin_name }
+                                            add_device_to_chain(selected_chain, plugin)
+                                        end,
+                                    }, device_panel, get_device_main_fx, get_device_utility, state)
+                                end
+                            end
+
+                            -- Draw add button at end of chain
+                            draw_chain_add_button(ctx, chain_content_h, has_plugin_payload or has_rack_payload, selected_chain, add_device_to_chain, add_rack_to_chain)
+
+                            ctx:end_group()
+                        end
+                    end)
+                    ctx:end_child()  -- Always end chain_contents child
+                    if not ok_inner then
+                        reaper.ShowConsoleMsg("SideFX chain contents error: " .. tostring(err_inner) .. "\n")
+                    end
+                end
+                ctx:pop_style_color()
+
+                ctx:end_table()
+            end
+        end)
+        ctx:end_child()  -- Always end chain_wrapper child
+        if not ok then
+            reaper.ShowConsoleMsg("SideFX chain column error: " .. tostring(err) .. "\n")
+        end
     end
-    ctx:pop_style_color()
+    -- Pop border color if it was pushed
+    if is_chain_selected then
+        ctx:pop_style_color()
+    end
+    ctx:pop_style_color()  -- ChildBg
     ctx:pop_style_var()
 end
 

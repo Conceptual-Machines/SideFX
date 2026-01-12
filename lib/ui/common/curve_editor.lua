@@ -364,8 +364,10 @@ function M.draw(ctx, modulator, width, height, state, skip_capture_button, item_
     local norm_my = 1.0 - (mouse_y - area_y) / area_h
     
     -- Modifier keys (check early for hover logic)
-    local shift = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Key_LeftShift()) or 
-                  r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Key_RightShift())
+    -- Only consider Shift for curve bending when mouse is actually in the curve area
+    local shift_key_down = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Key_LeftShift()) or
+                           r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Key_RightShift())
+    local shift = shift_key_down and mouse_in_area
     local ctrl = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Key_LeftCtrl()) or 
                  r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Key_RightCtrl())
     

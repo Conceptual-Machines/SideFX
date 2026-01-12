@@ -45,8 +45,10 @@ end
 -- Helper function to draw the modulator slot grid (4x2 grid)
 local function draw_modulator_grid(ctx, guid, modulators, expanded_slot_idx, slot_width, slot_height, state, state_guid, container, opts)
     local interacted = false
-    
-    ctx:dummy(8, 1)  -- Left padding
+
+    -- Add padding around the grid
+    ctx:spacing()
+    ctx:indent(8)  -- Left padding
 
     -- Use basic table - let button sizes control column width
     if ctx:begin_table("mod_grid_" .. guid, 4) then
@@ -106,29 +108,22 @@ local function draw_modulator_grid(ctx, guid, modulators, expanded_slot_idx, slo
                 else
                     -- Empty slot - show + button
                     if ctx:button("+##" .. slot_id, slot_width, slot_height) then
-                        -- Show modulator type dropdown (simplified for now - just add Bezier LFO)
+                        -- CRITICAL: Don't add modulator immediately - it changes FX indices mid-render!
+                        -- Instead, defer the addition to next frame to avoid stale pointer errors.
                         local track = opts.track or state.track
                         if track and container then
-                            local new_mod = modulator_module.add_modulator_to_device(container, MODULATOR_TYPES[1], track)
-                            if new_mod then
-                                -- Refresh container pointer after adding (important for UI to update)
-                                if container.refresh_pointer then
-                                    container:refresh_pointer()
-                                end
-
-                                if opts.refresh_fx_list then
-                                    opts.refresh_fx_list()
-                                end
-
-                                -- Auto-select the newly added modulator
-                                local new_mod_guid = new_mod:get_guid()
-                                local updated_modulators = get_device_modulators(container)
-                                for idx, mod in ipairs(updated_modulators) do
-                                    if mod:get_guid() == new_mod_guid then
-                                        state.expanded_mod_slot[state_guid] = idx - 1  -- 0-based slot index
-                                        break
-                                    end
-                                end
+                            -- Store container GUID (stable across FX changes)
+                            local ok_guid, container_guid = pcall(function() return container:get_guid() end)
+                            if ok_guid and container_guid then
+                                -- Queue the modulator addition for next frame
+                                state.pending_modulator_add = state.pending_modulator_add or {}
+                                table.insert(state.pending_modulator_add, {
+                                    container_guid = container_guid,
+                                    modulator_type = MODULATOR_TYPES[1],
+                                    state_guid = state_guid,  -- For selecting after add
+                                })
+                                -- Invalidate FX list to bail out of current render
+                                state_module.invalidate_fx_list()
                             end
                         end
                         interacted = true
@@ -350,19 +345,32 @@ local function draw_rate_controls(ctx, guid, expanded_modulator)
 
         -- Rate slider/dropdown - fill remaining width
         if tempo_mode < 0.5 then
-            -- Free mode - show Hz slider
+            -- Free mode - show Hz slider using normalized 0-1 range for fine control
             local ok_rate, rate_norm = pcall(function() return expanded_modulator:get_param_normalized(1) end)
             if ok_rate then
-                local rate_hz = 0.01 + rate_norm * 9.99
+                -- Get slider position BEFORE drawing
+                local slider_x, slider_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+                local avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
                 ctx:set_next_item_width(-1)
-                local changed, new_rate = ctx:slider_double("##rate_" .. guid, rate_hz, 0.01, 10, "%.1f Hz")
+
+                -- Use normalized 0-1 for slider (like FX params), display as space, overlay Hz text
+                -- Default: 1Hz = (1 - 0.01) / 9.99 ≈ 0.099
+                local default_norm = (1.0 - 0.01) / 9.99
+                local changed, new_norm = drawing.slider_double_fine(ctx, "##rate_" .. guid, rate_norm, 0.0, 1.0, " ", nil, 1, default_norm)
+
+                -- Overlay Hz value on slider
+                local rate_hz = 0.01 + rate_norm * 9.99
+                local hz_text = string.format("%.2f Hz", rate_hz)
+                local text_w = r.ImGui_CalcTextSize(ctx.ctx, hz_text)
+                local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
+                local text_x = slider_x + (avail_w - text_w) / 2
+                local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
+                local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                r.ImGui_DrawList_AddText(draw_list, text_x, text_y, 0xFFFFFFFF, hz_text)
+
                 if changed then
-                    local norm_val = (new_rate - 0.01) / 9.99
-                    expanded_modulator:set_param_normalized(1, norm_val)
+                    expanded_modulator:set_param_normalized(1, new_norm)
                     interacted = true
-                end
-                if ctx:is_item_hovered() then
-                    ctx:set_tooltip("Rate (Hz)")
                 end
             end
         else
@@ -490,7 +498,7 @@ local function draw_link_param_dropdown(ctx, guid, fx, expanded_modulator, exist
         local ok_params, param_count = pcall(function() return target_device:get_num_params() end)
         if ok_params and param_count and param_count > 0 then
             local current_param_name = "Link..."
-            ctx:set_next_item_width(158)
+            ctx:set_next_item_width(-1)
             if ctx:begin_combo("##link_param_" .. guid, current_param_name) then
                 for param_idx = 0, param_count - 1 do
                     local ok_pname, param_name = pcall(function() return target_device:get_param_name(param_idx) end)
@@ -579,7 +587,8 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
             local ok_thresh, audio_thresh = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD) end)
             if ok_thresh then
                 ctx:set_next_item_width(150)
-                local changed, new_thresh = ctx:slider_double("Threshold##thresh_" .. guid, audio_thresh, 0, 1, "%.2f")
+                -- Default threshold: 0.5
+                local changed, new_thresh = drawing.slider_double_fine(ctx, "Threshold##thresh_" .. guid, audio_thresh, 0, 1, "%.2f", 0.01, nil, 0.5)
                 if changed then
                     expanded_modulator:set_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD, new_thresh)
                     interacted = true
@@ -591,12 +600,13 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
         if ok_trig and trig_idx and trig_idx > 0 then
             ctx:spacing()
             ctx:text("Envelope")
-            
+
             local ok_atk, attack_ms = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_ATTACK) end)
             if ok_atk then
                 local atk_val = attack_ms * 1999 + 1
                 ctx:set_next_item_width(150)
-                local changed, new_atk_val = ctx:slider_double("Attack##atk_" .. guid, atk_val, 1, 2000, "%.0f ms")
+                -- Default attack: 10ms
+                local changed, new_atk_val = drawing.slider_double_fine(ctx, "Attack##atk_" .. guid, atk_val, 1, 2000, "%.0f ms", nil, nil, 10)
                 if changed then
                     expanded_modulator:set_param_normalized(PARAM.PARAM_ATTACK, (new_atk_val - 1) / 1999)
                     interacted = true
@@ -607,7 +617,8 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
             if ok_rel then
                 local rel_val = release_ms * 4999 + 1
                 ctx:set_next_item_width(150)
-                local changed, new_rel_val = ctx:slider_double("Release##rel_" .. guid, rel_val, 1, 5000, "%.0f ms")
+                -- Default release: 100ms
+                local changed, new_rel_val = drawing.slider_double_fine(ctx, "Release##rel_" .. guid, rel_val, 1, 5000, "%.0f ms", nil, nil, 100)
                 if changed then
                     expanded_modulator:set_param_normalized(PARAM.PARAM_RELEASE, (new_rel_val - 1) / 4999)
                     interacted = true
@@ -721,16 +732,35 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                     ctx:set_tooltip("Bipolar")
                 end
 
-                -- Column 3: Depth slider
+                -- Column 3: Depth slider (use 0-1 internal range, scale to -1 to 1)
                 ctx:table_set_column_index(2)
+                -- Get slider position BEFORE drawing
+                local depth_slider_x, depth_slider_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+                local depth_avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
                 ctx:set_next_item_width(-1)
-                local display_depth = is_disabled and (state.link_saved_scale[link_key] or 0) * 100 or actual_depth * 100
+
+                local depth_value = is_disabled and (state.link_saved_scale[link_key] or 0) or actual_depth
+                -- Convert -1 to 1 range to 0-1 for slider (better granularity)
+                local depth_norm = (depth_value + 1) / 2
+
                 if is_disabled then
                     r.ImGui_BeginDisabled(ctx.ctx)
                 end
-                local changed, new_depth_pct = ctx:slider_double("##depth_" .. link.param_idx .. "_" .. guid, display_depth, -100, 100, "%.0f%%")
+                -- Default depth: 0.5 = 0.75 normalized ((0.5 + 1) / 2)
+                local changed, new_depth_norm = drawing.slider_double_fine(ctx, "##depth_" .. link.param_idx .. "_" .. guid, depth_norm, 0.0, 1.0, " ", nil, 1, 0.75)
+
+                -- Overlay depth value on slider
+                local display_depth = depth_norm * 2 - 1
+                local depth_text = string.format("%.2f", display_depth)
+                local depth_text_w = r.ImGui_CalcTextSize(ctx.ctx, depth_text)
+                local depth_slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
+                local depth_text_x = depth_slider_x + (depth_avail_w - depth_text_w) / 2
+                local depth_text_y = depth_slider_y + (depth_slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
+                local depth_draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                r.ImGui_DrawList_AddText(depth_draw_list, depth_text_x, depth_text_y, 0xFFFFFFFF, depth_text)
+
                 if changed and not is_disabled then
-                    local new_depth = new_depth_pct / 100
+                    local new_depth = new_depth_norm * 2 - 1  -- Convert back to -1 to 1
                     if is_bipolar then
                         fx:set_named_config_param(plink_prefix .. "offset", "-0.5")
                     end
@@ -774,14 +804,33 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                 -- Column 5: Bake button
                 ctx:table_set_column_index(4)
                 if ctx:button("B##bake_" .. i .. "_" .. guid, 18, 0) then
-                    -- Open bake modal for this specific link
-                    state.bake_modal = state.bake_modal or {}
-                    state.bake_modal[guid] = {
-                        open = true,
-                        link = link,
-                        modulator = expanded_modulator,
-                        fx = fx
-                    }
+                    -- Check config: show picker or use default?
+                    if config.get('bake_show_range_picker') then
+                        -- Open bake modal for this specific link
+                        state.bake_modal = state.bake_modal or {}
+                        state.bake_modal[guid] = {
+                            open = true,
+                            link = link,
+                            modulator = expanded_modulator,
+                            fx = fx
+                        }
+                    else
+                        -- Use default range directly
+                        local bake_options = {
+                            range_mode = config.get('bake_default_range_mode'),
+                            disable_link = config.get('bake_disable_link_after')
+                        }
+                        local ok, result, msg = pcall(function()
+                            return modulator_bake.bake_to_automation(state.track, expanded_modulator, fx, link.param_idx, bake_options)
+                        end)
+                        if ok and result then
+                            r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
+                        elseif not ok then
+                            r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
+                        else
+                            r.ShowConsoleMsg("SideFX: " .. tostring(msg or "No automation created") .. "\n")
+                        end
+                    end
                     interacted = true
                 end
                 if ctx:is_item_hovered() then
@@ -827,6 +876,30 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
     -- Initialize state tables if needed
     state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
     state.expanded_mod_slot = state.expanded_mod_slot or {}
+
+    -- Process pending modulator selection (from previous frame's add operation)
+    if state.pending_mod_selection and state.pending_mod_selection[state_guid] then
+        local pending = state.pending_mod_selection[state_guid]
+        local container_guid = pending.container_guid
+        local mod_guid = pending.mod_guid
+
+        -- Only process if this is the right container (safely get GUID)
+        local ok_container_guid, current_guid = pcall(function()
+            return container and container:get_guid()
+        end)
+        if ok_container_guid and current_guid == container_guid then
+            local modulators = get_device_modulators(container)
+            for idx, mod in ipairs(modulators) do
+                local ok_guid, m_guid = pcall(function() return mod:get_guid() end)
+                if ok_guid and m_guid == mod_guid then
+                    state.expanded_mod_slot[state_guid] = idx - 1  -- 0-based slot index
+                    break
+                end
+            end
+            -- Clear the pending selection
+            state.pending_mod_selection[state_guid] = nil
+        end
+    end
 
     state.cached_preset_names = state.cached_preset_names or {}
 

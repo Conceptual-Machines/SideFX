@@ -202,8 +202,29 @@ local function draw_chains_table(ctx, chains, rack, mixer, is_nested, state, get
                     on_chain_select = function(chain_guid, is_selected, is_nested_rack, rack_guid)
                         if is_selected then
                             state.expanded_nested_chains[rack_guid] = nil
+                            -- Clear chain from breadcrumb path (back to rack level)
+                            state_module.select_rack(rack_guid)
                         else
                             state.expanded_nested_chains[rack_guid] = chain_guid
+                            -- Find the chain and select first device inside it
+                            local chain_fx = state.track:find_fx_by_guid(chain_guid)
+                            if chain_fx then
+                                local first_device_guid = nil
+                                for child in chain_fx:iter_container_children() do
+                                    local ok, child_guid = pcall(function() return child:get_guid() end)
+                                    if ok and child_guid then
+                                        first_device_guid = child_guid
+                                        break
+                                    end
+                                end
+                                if first_device_guid then
+                                    state_module.select_device(rack_guid, chain_guid, first_device_guid)
+                                else
+                                    state_module.select_chain(rack_guid, chain_guid)
+                                end
+                            else
+                                state_module.select_chain(rack_guid, chain_guid)
+                            end
                         end
                         state_module.save_expansion_state()
                     end,
@@ -302,7 +323,6 @@ end
 --   - refresh_fx_list: function () -> nil
 --   - get_rack_mixer: function (rack) -> TrackFX|nil
 --   - draw_pan_slider: function (ctx, id, pan_val, width) -> (changed, new_pan)
---   - dissolve_container: function (rack) -> nil
 --   - get_fx_display_name: function (fx) -> string
 --   - add_device_to_chain: function (chain, plugin) -> nil
 --   - reorder_chain_in_rack: function (rack, from_idx, to_idx) -> nil
@@ -331,7 +351,6 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
     local refresh_fx_list = opts.refresh_fx_list
     local get_rack_mixer = opts.get_rack_mixer
     local draw_pan_slider = opts.draw_pan_slider
-    local dissolve_container = opts.dissolve_container
     local get_fx_display_name = opts.get_fx_display_name
     local add_device_to_chain = opts.add_device_to_chain
     local reorder_chain_in_rack = opts.reorder_chain_in_rack
@@ -354,6 +373,11 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
     -- This allows multiple top-level racks to be expanded independently
     local is_expanded = (state.expanded_racks[rack_guid] == true)
 
+    -- Auto-select rack if it's expanded but not in the path (e.g., loaded from saved state)
+    if is_expanded and #state.expanded_path == 0 then
+        state_module.select_rack(rack_guid)
+    end
+
     -- Get chains from rack (filter out internal mixer)
     local chains = {}
     for child in rack:iter_container_children() do
@@ -366,11 +390,25 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
     local rack_w = is_expanded and 350 or 150
     local rack_h = avail_height - 10
 
+    -- Check if this rack is selected (first item in expanded_path)
+    local is_selected = (#state.expanded_path >= 1 and state.expanded_path[1] == rack_guid)
+
     ctx:push_style_color(imgui.Col.ChildBg(), 0x252535FF)
+    -- Highlight border if selected
+    if is_selected then
+        ctx:push_style_color(reaper.ImGui_Col_Border(), 0x5588BBAA)  -- Subtle blue highlight
+    end
     -- Use unique child ID that includes nested flag to ensure no state conflicts
     local child_id = is_nested and ("rack_nested_" .. rack_guid) or ("rack_" .. rack_guid)
     local rack_window_flags = imgui.WindowFlags.NoScrollbar()
     if ctx:begin_child(child_id, rack_w, rack_h, imgui.ChildFlags.Border(), rack_window_flags) then
+
+        -- Click anywhere on rack to select it (deselects chain/device if selected)
+        if reaper.ImGui_IsWindowHovered(ctx.ctx, reaper.ImGui_HoveredFlags_ChildWindows())
+           and reaper.ImGui_IsMouseClicked(ctx.ctx, 0) then
+            -- Always select rack level (removes chain/device from path if selected)
+            state_module.select_rack(rack_guid)
+        end
 
         -- Draw rack header using widget
         rack_ui.draw_rack_header(ctx, rack, is_nested, state, {
@@ -379,17 +417,18 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
                 if is_expanded then
                     state.expanded_racks[rack_guid] = nil
                     state.expanded_nested_chains[rack_guid] = nil
+                    -- Clear selection when collapsing
+                    state_module.clear_selection()
                 else
                     state.expanded_racks[rack_guid] = true
+                    -- Select rack in breadcrumb path
+                    state_module.select_rack(rack_guid)
                 end
                 state_module.save_expansion_state()
             end,
             on_rename = function(rack_guid, display_name)
                 state.renaming_fx = rack_guid
                 state.rename_text = display_name or ""
-            end,
-            on_dissolve = function(rack)
-                dissolve_container(rack)
             end,
             on_delete = function(rack)
                 rack:delete()
@@ -463,7 +502,11 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
 
         ctx:end_child()
     end
-    ctx:pop_style_color()
+    -- Pop border color if it was pushed
+    if is_selected then
+        ctx:pop_style_color()
+    end
+    ctx:pop_style_color()  -- ChildBg
 
     -- Return data needed for chain column
     return {

@@ -42,10 +42,16 @@ local log_once = helpers.log_once_func("DeviceChain")
 --   - draw_rack_panel: function (ctx, rack, avail_height, is_nested) -> table
 function M.draw(ctx, fx_list, avail_width, avail_height, opts)
     local state = opts.state
-    
+
     -- If a deletion just occurred, skip rendering this frame
     -- The next frame will have fresh FX data
     if state.deletion_pending then
+        return
+    end
+
+    -- If FX list was invalidated (e.g., modulator added), skip rendering this frame
+    -- The next frame will refresh the FX list first
+    if state.fx_list_invalid then
         return
     end
     
@@ -88,7 +94,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
 
     -- Build display list - handles D-containers and legacy FX
     local display_fx = {}
-    
+
     for i, fx in ipairs(fx_list) do
         if is_device_container(fx) then
             -- D-container: extract main FX and utility from inside
@@ -96,14 +102,21 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
             local utility = get_device_utility(fx)
             local missing = (utility == nil)
             
-            -- Log when utility is missing
+            -- Log when utility is missing (safely get name)
             if missing then
-                log_once("Missing utility in:", fx:get_name())
+                local ok_name, fx_name = pcall(function() return fx:get_name() end)
+                if ok_name and fx_name then
+                    log_once("Missing utility in:", fx_name)
+                end
             end
-            
+
             if main_fx then
-                -- Update state with missing utility info
-                local container_guid = fx:get_guid()
+                -- Update state with missing utility info (safely get GUID)
+                local ok_guid, container_guid = pcall(function() return fx:get_guid() end)
+                if not ok_guid or not container_guid then
+                    -- Skip this item if we can't get its GUID
+                    goto continue_fx_loop
+                end
                 if missing then
                     state.missing_utilities[container_guid] = true
                 else
@@ -142,6 +155,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         end
         -- Skip standalone utilities (they're shown in sidebar)
         -- Skip unknown containers
+        ::continue_fx_loop::
     end
 
     if #display_fx == 0 then
@@ -191,8 +205,8 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
     -- Draw each FX as a device panel, horizontally
     local display_idx = 0
     for _, item in ipairs(display_fx) do
-        -- Check before processing each item - previous iteration may have deleted
-        if state.deletion_pending then
+        -- Check before processing each item - previous iteration may have invalidated
+        if state.deletion_pending or state.fx_list_invalid then
             break
         end
         
@@ -253,9 +267,9 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         end
 
         ctx:pop_id()
-        
-        -- Break immediately if deletion occurred - remaining items have stale pointers
-        if state.deletion_pending then
+
+        -- Break immediately if deletion or invalidation occurred - remaining items have stale pointers
+        if state.deletion_pending or state.fx_list_invalid then
             break
         end
     end

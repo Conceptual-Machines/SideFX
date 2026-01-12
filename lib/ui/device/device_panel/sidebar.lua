@@ -114,6 +114,7 @@ end
 local function draw_gain_fader_control(ctx, utility, gain_val)
     local r = reaper
     local imgui = require('imgui')
+    local drawing = require('lib.ui.common.drawing')
     local state_module = require('lib.core.state')
     local interacted = false
 
@@ -129,8 +130,10 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local scale_w = 20
 
     local _, remaining_h = ctx:get_content_region_avail()
-    -- Leave room for phase controls below (80px for label + buttons + spacing)
-    local fader_h = remaining_h - 80
+    -- Leave room for phase controls below (80px for label + buttons + spacing) if enabled
+    local config = require('lib.core.config')
+    local phase_reserve = config.get('show_phase_controls') and 80 or 0
+    local fader_h = remaining_h - phase_reserve
     fader_h = math.max(50, fader_h)
 
     local avail_w, _ = ctx:get_content_region_avail()
@@ -210,20 +213,17 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     r.ImGui_DrawList_AddRect(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
 
     -- Invisible slider for fader interaction
+    -- Features: Shift+drag for fine control, Ctrl/Cmd+click to reset to 0dB, double-click for text input
     r.ImGui_SetCursorScreenPos(ctx.ctx, fader_x, screen_y)
     ctx:push_style_color(imgui.Col.FrameBg(), 0x00000000)
     ctx:push_style_color(imgui.Col.FrameBgHovered(), 0x00000000)
     ctx:push_style_color(imgui.Col.FrameBgActive(), 0x00000000)
     ctx:push_style_color(imgui.Col.SliderGrab(), 0xAAAAAAFF)
     ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
-    local gain_changed, new_gain_db = ctx:v_slider_double("##gain_fader_v", fader_w, fader_h, gain_db, -24, 24, "")
+    local gain_changed, new_gain_db = drawing.v_slider_double_fine(ctx, "##gain_fader_v", fader_w, fader_h, gain_db, -24, 24, "", nil, nil, 0)
     if gain_changed then
         local new_norm = (new_gain_db + 24) / 48
         pcall(function() utility:set_param_normalized(0, new_norm) end)
-        interacted = true
-    end
-    if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-        pcall(function() utility:set_param_normalized(0, 0.5) end)
         interacted = true
     end
     ctx:pop_style_color(5)
@@ -364,13 +364,16 @@ function M.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_col
                 end
             end
 
-            -- Phase Invert controls
-            local ok_phase_l, phase_l = pcall(function() return utility:get_param_normalized(2) end)
-            local ok_phase_r, phase_r = pcall(function() return utility:get_param_normalized(3) end)
+            -- Phase Invert controls (if enabled in settings)
+            local config = require('lib.core.config')
+            if config.get('show_phase_controls') then
+                local ok_phase_l, phase_l = pcall(function() return utility:get_param_normalized(2) end)
+                local ok_phase_r, phase_r = pcall(function() return utility:get_param_normalized(3) end)
 
-            if ok_phase_l and ok_phase_r then
-                if draw_phase_controls(ctx, utility, phase_l, phase_r, center_item) then
-                    interacted = true
+                if ok_phase_l and ok_phase_r then
+                    if draw_phase_controls(ctx, utility, phase_l, phase_r, center_item) then
+                        interacted = true
+                    end
                 end
             end
         else

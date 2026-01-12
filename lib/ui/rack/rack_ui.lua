@@ -85,21 +85,17 @@ local function draw_rack_rename_input(ctx, rack_guid, state, state_module)
     return interacted
 end
 
---- Draw rack context menu (Rename, Dissolve, Delete)
+--- Draw rack context menu (Rename, Delete)
 -- @param ctx ImGui context
 -- @param button_id string Button ID for popup context
 -- @param rack_guid string Rack GUID
 -- @param rack ReaWrap rack FX object
 -- @param state table State object
--- @param callbacks table Callbacks {on_rename, on_dissolve, on_delete}
+-- @param callbacks table Callbacks {on_rename, on_delete}
 local function draw_rack_context_menu(ctx, button_id, rack_guid, rack, state, callbacks)
     if ctx:begin_popup_context_item(button_id) then
         if ctx:menu_item("Rename") then
             callbacks.on_rename(rack_guid, state.display_names[rack_guid])
-        end
-        ctx:separator()
-        if ctx:menu_item("Dissolve Container") then
-            callbacks.on_dissolve(rack)
         end
         ctx:separator()
         if ctx:menu_item("Delete") then
@@ -122,7 +118,9 @@ local function draw_rack_toggle_button(ctx, rack_guid, expand_icon, rack_name, i
     -- Show only icon when collapsed, full name when expanded
     local button_text = is_expanded and (expand_icon .. " " .. rack_name:sub(1, 20)) or expand_icon
     if ctx:button(button_text .. "##" .. button_id, -1, 20) then
-        callbacks.on_toggle_expand(rack_guid, is_expanded)
+        if callbacks and callbacks.on_toggle_expand then
+            callbacks.on_toggle_expand(rack_guid, is_expanded)
+        end
         return true
     end
     return false
@@ -224,7 +222,7 @@ local function draw_chain_button(ctx, chain_name, chain_guid, chain_btn_id, row_
     end
 end
 
---- Draw chain context menu (Rename, Delete)
+--- Draw chain context menu (Rename, Convert to Devices, Delete)
 -- @param ctx ImGui context
 -- @param chain_btn_id string Button ID for popup context
 -- @param chain_guid string Chain GUID
@@ -241,6 +239,22 @@ local function draw_chain_context_menu(ctx, chain_btn_id, chain_guid, chain, is_
             callbacks.on_rename_chain(chain_guid, custom_name)
         end
         ctx:separator()
+
+        -- Chain-specific options
+        local chain_name = chain:get_name() or ""
+        if chain_name:match("^R%d+_C%d+") then
+            if ctx:menu_item("Convert to Devices") then
+                local container_module = require('lib.device.container')
+                local result = container_module.convert_chain_to_devices(chain)
+                if result and #result > 0 then
+                    local state_mod = require('lib.core.state')
+                    state_mod.invalidate_fx_list()
+                end
+                callbacks.on_refresh()
+            end
+            ctx:separator()
+        end
+
         if ctx:menu_item("Delete") then
             chain:delete()
             local rack_guid = rack:get_guid()
@@ -306,7 +320,6 @@ end
 -- @param callbacks table Callbacks:
 --   - on_toggle_expand: (rack_guid, is_expanded) -> nil
 --   - on_rename: (rack_guid, display_name) -> nil
---   - on_dissolve: (rack) -> nil
 --   - on_delete: (rack) -> nil
 --   - icon_font: ImGui font for emojis (optional)
 function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
@@ -329,21 +342,19 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
     -- Check if rack is being renamed
     local is_renaming_rack = (state.renaming_fx == rack_guid)
 
-    -- Use table for layout with burger menu, name, path, on/off, and delete
+    -- Use table for layout with burger menu, name, on/off, and delete
     local table_flags = imgui.TableFlags.SizingStretchProp()
-    if ctx:begin_table("rack_header_" .. rack_guid, 5, table_flags) then
+    if ctx:begin_table("rack_header_" .. rack_guid, 4, table_flags) then
         -- Column 0: Burger menu (fixed width)
         ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
         if is_expanded then
             -- Expanded: name gets most space
             ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 7)
-            ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 1)
             ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
             ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
         else
             -- Collapsed: equal distribution
             ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthStretch(), 1)
-            ctx:table_setup_column("path", imgui.TableColumnFlags.WidthStretch(), 1)
             ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
             ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
         end
@@ -401,16 +412,8 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
             draw_rack_context_menu(ctx, button_id, rack_guid, rack, state, callbacks)
         end
 
-        -- Column 2: Path identifier
+        -- Column 2: ON button
         ctx:table_set_column_index(2)
-        local rack_id = fx_utils.get_rack_identifier(rack)
-        if rack_id then
-            local short_id = fx_naming.get_short_path(rack_id)
-            ctx:text_colored(0x888888FF, "[" .. short_id .. "]")
-        end
-
-        -- Column 3: ON button
-        ctx:table_set_column_index(3)
         local ok_enabled, rack_enabled = pcall(function() return rack:get_enabled() end)
         rack_enabled = ok_enabled and rack_enabled or false
         -- Draw custom circle indicator with colored background
@@ -419,8 +422,8 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
             pcall(function() rack:set_enabled(not rack_enabled) end)
         end
 
-        -- Column 4: X button
-        ctx:table_set_column_index(4)
+        -- Column 3: X button
+        ctx:table_set_column_index(3)
         ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
         if ctx:button("×##rack_del", -1, 20) then
             callbacks.on_delete(rack)
@@ -598,7 +601,7 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
             local vol_db = -60 + vol_norm * 72
             local vol_format = (math.abs(vol_db) < 0.1) and "0" or (vol_db > 0 and string.format("+%.0f", vol_db) or string.format("%.0f", vol_db))
             ctx:set_next_item_width(-1)
-            local vol_changed, new_vol_db = ctx:slider_double("##vol_" .. chain_idx, vol_db, -60, 12, vol_format)
+            local vol_changed, new_vol_db = drawing.slider_double_fine(ctx, "##vol_" .. chain_idx, vol_db, -60, 12, vol_format)
             if vol_changed then
                 -- Fixed: Convert back using correct range
                 local new_norm = (new_vol_db + 60) / 72
@@ -692,7 +695,7 @@ function M.draw_collapsed_fader_control(ctx, mixer, rack_guid, state)
     ctx:push_style_color(imgui.Col.FrameBgActive(), 0x00000000)
     ctx:push_style_color(imgui.Col.SliderGrab(), 0xAAAAAAFF)
     ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
-    local gain_changed, new_gain_db = ctx:v_slider_double("##master_gain_v", fader_w, fader_h, gain_db, -24, 12, "")
+    local gain_changed, new_gain_db = drawing.v_slider_double_fine(ctx, "##master_gain_v", fader_w, fader_h, gain_db, -24, 12, "")
     if gain_changed then
         pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
     end
@@ -746,7 +749,7 @@ function M.draw_master_controls_table(ctx, mixer)
             local gain_db = -24 + gain_norm * 36
             local gain_format = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.1f", gain_db) or string.format("%.1f", gain_db))
             ctx:set_next_item_width(-1)
-            local gain_changed, new_gain_db = ctx:slider_double("##master_gain", gain_db, -24, 12, gain_format)
+            local gain_changed, new_gain_db = drawing.slider_double_fine(ctx, "##master_gain", gain_db, -24, 12, gain_format)
             if gain_changed then
                 pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
             end

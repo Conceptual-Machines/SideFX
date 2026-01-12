@@ -120,6 +120,10 @@ local icon_font = nil
 local icon_size = 16
 local default_font = nil
 
+-- Font references (updated by main_window when fonts are loaded)
+local default_font_ref = { value = nil }
+local icon_font_ref = { value = nil }
+
 local function icon_text(icon_id)
     return constants.icon_text(EmojImGui, icon_id)
 end
@@ -230,8 +234,9 @@ renumber_device_chain = function()
                         utility:set_named_config_param("renamed_name", util_name)
                     end
                 end
-            elseif is_container then
-                -- Container that doesn't match D{n}: pattern - might have been renamed
+            elseif is_container and not name:match("^R%d+") then
+                -- Container that doesn't match D{n}: or R{n} pattern - might have been renamed
+                -- Skip R-containers (racks) - they have their own naming scheme
                 -- Check if it has a main FX inside (SideFX device structure)
                 local main_fx = get_device_main_fx(fx)
                 if main_fx then
@@ -291,7 +296,12 @@ end
 -- Device operations (uses state singleton via device_module)
 local function add_plugin_to_track(plugin, position)
     local result = device_module.add_plugin_to_track(plugin, position)
-    if result then 
+    if result then
+        -- Auto-select the newly created standalone device
+        local device_guid = result:get_guid()
+        if device_guid then
+            state_module.select_standalone_device(device_guid)
+        end
         refresh_fx_list()
     end
     return result
@@ -299,7 +309,14 @@ end
 
 local function add_plugin_by_name(plugin_name, position)
     local result = device_module.add_plugin_by_name(plugin_name, position)
-    if result then refresh_fx_list() end
+    if result then
+        -- Auto-select the newly created standalone device
+        local device_guid = result:get_guid()
+        if device_guid then
+            state_module.select_standalone_device(device_guid)
+        end
+        refresh_fx_list()
+    end
     return result
 end
 
@@ -338,18 +355,28 @@ local function add_to_new_container(fx_list)
     return container
 end
 
-local function dissolve_container(container)
-    local result = container_module.dissolve_container(container)
-    if result then refresh_fx_list() end
-    return result
-end
-
 --------------------------------------------------------------------------------
 -- UI: Plugin Browser
 --------------------------------------------------------------------------------
 
 local function draw_plugin_browser(ctx, icon_font_ref)
     browser_panel.draw(ctx, state, icon_font_ref.value, icon_size, add_plugin_to_track, filter_plugins)
+end
+
+--------------------------------------------------------------------------------
+-- Device Utilities
+--------------------------------------------------------------------------------
+
+local function convert_device_to_rack(device)
+    local result = container_module.convert_device_to_rack(device)
+    if result then refresh_fx_list() end
+    return result
+end
+
+local function convert_chain_to_devices(chain)
+    local result = container_module.convert_chain_to_devices(chain)
+    if result and #result > 0 then refresh_fx_list() end
+    return result
 end
 
 --------------------------------------------------------------------------------
@@ -361,8 +388,9 @@ local function draw_fx_context_menu(ctx, fx, guid, i, enabled, is_container, dep
         state = state,
         collapse_from_depth = collapse_from_depth,
         refresh_fx_list = refresh_fx_list,
-        dissolve_container = dissolve_container,
         add_to_new_container = add_to_new_container,
+        convert_to_rack = convert_device_to_rack,
+        convert_to_devices = convert_chain_to_devices,
         get_multi_select_count = get_multi_select_count,
         get_multi_selected_fx = get_multi_selected_fx,
         clear_multi_select = clear_multi_select,
@@ -395,7 +423,7 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
         state = state,
         state_module = state_module,
         track = state.track,
-        icon_font = icon_font,
+        icon_font = icon_font_ref.value,
         icon_size = icon_size,
         icon_text = icon_text,
         Icons = Icons,
@@ -456,7 +484,10 @@ local function draw_toolbar(ctx, icon_font_ref)
             state_module.on_refresh = renumber_device_chain
             refresh_fx_list()
         end,
-        on_refresh = refresh_fx_list,
+        on_refresh = function()
+            refresh_fx_list()
+            browser_module.rescan_plugins()
+        end,
         on_add_rack = add_rack_to_track,
         on_add_fx = function() end,  -- TODO: Implement
         on_collapse_from_depth = collapse_from_depth,
@@ -481,34 +512,20 @@ local rack_panel = nil    -- Lazy loaded
 -- Rack panel drawing helpers moved to lib/ui/rack_panel_main.lua
 -- Chain column drawing moved to lib/ui/chain_column.lua
 
--- Draw expanded chain column with devices
-local function draw_chain_column(ctx, selected_chain, rack_h)
-    chain_column.draw(ctx, selected_chain, rack_h, {
-        state = state,
-        get_fx_display_name = get_fx_display_name,
-                            refresh_fx_list = refresh_fx_list,
-        get_device_main_fx = get_device_main_fx,
-        get_device_utility = get_device_utility,
-        is_rack_container = is_rack_container,
-        add_device_to_chain = add_device_to_chain,
-        add_rack_to_chain = add_rack_to_chain,
-        draw_rack_panel = draw_rack_panel,
-        icon_font = icon_font,
-        default_font = default_font,
-    })
-end
+-- Forward declaration for mutual recursion
+local draw_chain_column
 
 -- Draw the rack panel (main rack UI without chain column)
+-- NOTE: Must be defined BEFORE draw_chain_column which references it
 local function draw_rack_panel(ctx, rack, avail_height, is_nested, callbacks)
     callbacks = callbacks or {}
     return rack_panel_main.draw(ctx, rack, avail_height, is_nested, {
         state = state,
-            icon_font = icon_font,
+        icon_font = icon_font_ref.value,
         state_module = state_module,
         refresh_fx_list = refresh_fx_list,
         get_rack_mixer = get_rack_mixer,
         draw_pan_slider = draw_pan_slider,
-        dissolve_container = dissolve_container,
         get_fx_display_name = get_fx_display_name,
         add_device_to_chain = add_device_to_chain,
         reorder_chain_in_rack = reorder_chain_in_rack,
@@ -518,6 +535,24 @@ local function draw_rack_panel(ctx, rack, avail_height, is_nested, callbacks)
         add_nested_rack_to_rack = add_nested_rack_to_rack,
         drawing = drawing,
         on_drop = callbacks.on_drop,  -- Pass through on_drop callback for rack swapping
+    })
+end
+
+-- Draw expanded chain column with devices
+-- NOTE: Uses draw_rack_panel for nested racks inside chains
+draw_chain_column = function(ctx, selected_chain, rack_h)
+    chain_column.draw(ctx, selected_chain, rack_h, {
+        state = state,
+        get_fx_display_name = get_fx_display_name,
+        refresh_fx_list = refresh_fx_list,
+        get_device_main_fx = get_device_main_fx,
+        get_device_utility = get_device_utility,
+        is_rack_container = is_rack_container,
+        add_device_to_chain = add_device_to_chain,
+        add_rack_to_chain = add_rack_to_chain,
+        draw_rack_panel = draw_rack_panel,
+        icon_font = icon_font_ref.value,
+        default_font = default_font_ref.value,
     })
 end
 
@@ -587,15 +622,21 @@ local function main()
     -- Load user configuration (global, not per-track)
     state_module.load_config()
 
+    -- Load parameter selections (global, not per-track)
+    state_module.load_param_selections()
+
+    -- Load parameter unit overrides (global, not per-track)
+    state_module.load_param_unit_overrides()
+
     -- Load expansion state and display names for current track
     if state.track then
         state_module.load_expansion_state()
         state_module.load_display_names()
     end
 
-    -- Create font reference tables so they can be updated by callbacks
-    local default_font_ref = { value = default_font }
-    local icon_font_ref = { value = icon_font }
+    -- Initialize module-level font references (will be updated by main_window when fonts load)
+    default_font_ref.value = default_font
+    icon_font_ref.value = icon_font
 
     -- Create window callbacks
     local window_callbacks = main_window.create_callbacks({
