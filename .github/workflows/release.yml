@@ -62,7 +62,25 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-      
+
+      - name: Sync version files
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
+
+          # Update docs/version.json
+          echo "{\"version\": \"$VERSION\"}" > docs/version.json
+
+          # Update README badge
+          sed -i "s/version-[0-9]*\.[0-9]*\.[0-9]*/version-$VERSION/" README.md
+
+          # Commit if there are changes
+          if ! git diff --quiet; then
+            git add docs/version.json README.md
+            git commit -m "Sync version to $VERSION"
+            git push
+          fi
+
       - name: Create and push tag
         if: steps.check_tag.outputs.exists == 'false'
         run: |

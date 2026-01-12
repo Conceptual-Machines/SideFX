@@ -20,11 +20,18 @@ lua5.4 tests/runner_luaunit.lua
 luacheck . --config .luacheckrc
 ```
 
+### Version Bumping
+```bash
+# Bump version in all places (SideFX.lua, docs/version.json, README badge)
+./scripts/bump-version.sh 0.3.0
+```
+
 ### CI/CD
 - CI runs on push/PR to main/master/develop branches
 - Tests: `lua5.4 tests/runner_luaunit.lua`
 - Linting: `luacheck . --config .luacheckrc`
 - Release workflow auto-tags based on version in `SideFX.lua`
+- Release workflow auto-syncs version.json and README badge
 
 ## High-Level Architecture
 
