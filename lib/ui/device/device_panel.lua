@@ -555,14 +555,13 @@ end
 
 local function draw_panel_border(draw_list, cursor_x, cursor_y, panel_width, panel_height, colors, cfg, is_selected)
     local r = reaper
-    -- Always draw ONLY top and bottom lines (no side borders)
+    -- Draw full rectangle border (all four sides)
     -- No highlight - selection indicated by header background change
     local border_color = colors.panel_border
-    local thickness = 1
-    -- Top line
-    r.ImGui_DrawList_AddLine(draw_list, cursor_x, cursor_y, cursor_x + panel_width, cursor_y, border_color, thickness)
-    -- Bottom line
-    r.ImGui_DrawList_AddLine(draw_list, cursor_x, cursor_y + panel_height, cursor_x + panel_width, cursor_y + panel_height, border_color, thickness)
+    r.ImGui_DrawList_AddRect(draw_list,
+        cursor_x, cursor_y,
+        cursor_x + panel_width, cursor_y + panel_height,
+        border_color, 0, 0, 1)  -- 0 = no rounding, 0 = all corners, 1 = thickness
 end
 
 --- Calculate panel dimensions based on collapsed state
@@ -749,9 +748,10 @@ local function draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, 
     -- Begin child for panel content (no child border - we draw it manually)
     local window_flags = imgui.WindowFlags.NoScrollbar()
     if ctx:begin_child("panel_" .. guid, panel_width, panel_height, 0, window_flags) then
-        -- Click-to-select: detect clicks on panel background
+        -- Click-to-select: detect clicks on panel background (not on widgets)
         if opts.on_select and r.ImGui_IsWindowHovered(ctx.ctx, r.ImGui_HoveredFlags_ChildWindows())
-           and r.ImGui_IsMouseClicked(ctx.ctx, 0) then
+           and r.ImGui_IsMouseClicked(ctx.ctx, 0)
+           and not r.ImGui_IsAnyItemHovered(ctx.ctx) then
             opts.on_select()
         end
 

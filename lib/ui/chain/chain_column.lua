@@ -278,16 +278,20 @@ function M.draw(ctx, selected_chain, rack_h, opts)
     -- Check if this chain is selected (second item in expanded_path)
     local is_chain_selected = (#state.expanded_path >= 2 and state.expanded_path[2] == selected_chain_guid)
 
-    ctx:push_style_color(imgui.Col.ChildBg(), 0x252530FF)
+    -- Use slightly lighter background when selected
+    local chain_bg = is_chain_selected and 0x2D2D3AFF or 0x252530FF
+    ctx:push_style_color(imgui.Col.ChildBg(), chain_bg)
     -- Highlight border if selected
     if is_chain_selected then
         ctx:push_style_color(reaper.ImGui_Col_Border(), 0x5588BBAA)  -- Subtle blue highlight
     end
     local window_flags = imgui.WindowFlags.NoScrollbar()
     if ctx:begin_child("chain_wrapper_" .. selected_chain_guid, 0, rack_h, wrapper_flags, window_flags) then
-        -- Click anywhere on chain to select it (deselects device if one was selected)
+        -- Click on chain background to select it (deselects device if one was selected)
+        -- Don't trigger if clicking on a widget (button, slider, etc.)
         if reaper.ImGui_IsWindowHovered(ctx.ctx, reaper.ImGui_HoveredFlags_ChildWindows())
-           and reaper.ImGui_IsMouseClicked(ctx.ctx, 0) then
+           and reaper.ImGui_IsMouseClicked(ctx.ctx, 0)
+           and not reaper.ImGui_IsAnyItemHovered(ctx.ctx) then
             -- Get the parent rack to build the selection path
             local ok_parent, parent_rack = pcall(function() return selected_chain:get_parent_container() end)
             if ok_parent and parent_rack then
