@@ -3,54 +3,64 @@
 [![CI](https://github.com/Conceptual-Machines/SideFX/actions/workflows/ci.yml/badge.svg)](https://github.com/Conceptual-Machines/SideFX/actions/workflows/ci.yml)
 [![Release](https://github.com/Conceptual-Machines/SideFX/actions/workflows/release.yml/badge.svg)](https://github.com/Conceptual-Machines/SideFX/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](https://github.com/Conceptual-Machines/SideFX/releases)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/Conceptual-Machines/SideFX/releases)
 
-Smart FX container management for REAPER 7+.
+Ableton/Bitwig-style FX rack management for REAPER 7+.
+
+![SideFX Overview](docs/images/overview.png)
 
 ## Features
 
-- **Visual rack-style FX chain view** - See your entire FX chain with container hierarchy
-- **One-click parallel chain creation** - Select FX and create parallel routing instantly
-- **Instrument layer routing** - Fix multi-instrument container issues with proper routing
-- **Container routing diagnostics** - Detect and auto-fix common routing problems
+- **Horizontal device chain** - Visual rack-style FX management
+- **Parallel processing racks** - Create parallel chains with per-chain mixing
+- **LFO modulators** - Modulate any parameter with custom bezier curves
+- **Bake to automation** - Convert modulator movement to REAPER envelopes
+- **Smart parameter display** - Auto-detect units (dB, Hz, ms) with configurable overrides
+- **Preset system** - Save/load entire FX chain configurations
+- **Plugin browser** - Search and filter plugins, drag to add
 
 ## Requirements
 
 - **REAPER 7.0+**
-- **[ReaWrap](https://github.com/Conceptual-Machines/ReaWrap) >= 0.7.3** - OOP wrapper for ReaScript
-- **[ReaImGui](https://forum.cockos.com/showthread.php?t=250419)** - ImGui bindings for REAPER
-- **[EmojImGui](https://github.com/talagan/EmojImGui)** (talagan_EmojImGui) - Emoji/icon support for ReaImGui
 
-All dependencies are available via ReaPack and will be installed automatically.
+### Dependencies (Install via ReaPack)
+
+| Package | Repository | Required For |
+|---------|------------|--------------|
+| ReaImGui | ReaTeam Extensions | UI framework |
+| js_ReaScriptAPI | ReaTeam Extensions | Extended API functions |
+| ReaWrap | ReaTeam Scripts | OOP wrapper library |
+| RPP-Parser | ReaTeam Scripts | Preset save/load |
+| EmojImGui | ReaTeam Scripts | Icon support |
+
+> **Note:** Dependencies must be installed manually via ReaPack before installing SideFX.
 
 ## Installation
 
-### Via ReaPack (Recommended)
+### Via ReaBoot (Easiest)
 
-1. Install [ReaPack](https://reapack.com/) if you haven't already
+[ReaBoot](https://reaboot.com/) can install SideFX and all dependencies automatically.
+
+### Via ReaPack
+
+1. Install all dependencies listed above from ReaPack
 2. Add this repository: `https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/index.xml`
 3. Install "SideFX" from the ReaPack browser
-
-### Manual Installation
-
-1. Download `SideFX.lua` and the `lib/` folder
-2. Place them in your REAPER Scripts folder
-3. Load as a new action in REAPER
+4. Restart REAPER
 
 ## Usage
 
-1. Select a track with FX
-2. Run the SideFX action
-3. Use the visual interface to:
-   - View FX chain structure
-   - Select multiple FX (Shift+click)
-   - Create parallel racks from selection
-   - Create instrument layers
-   - Diagnose and fix routing issues
+1. Select a track
+2. Run the SideFX action from the Actions menu
+3. Use the plugin browser to add devices
+4. Create racks for parallel processing
+5. Add modulators to automate parameters
 
-## Screenshots
+See the [full documentation](https://conceptual-machines.github.io/SideFX/) for detailed guides.
 
-*Coming soon*
+## Documentation
+
+📖 **[Online Manual](https://conceptual-machines.github.io/SideFX/)**
 
 ## License
 
@@ -59,4 +69,3 @@ MIT License - see [LICENSE](LICENSE)
 ## Author
 
 Nomad Monad
-
