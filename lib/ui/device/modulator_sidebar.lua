@@ -572,7 +572,8 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
             local ok_thresh, audio_thresh = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD) end)
             if ok_thresh then
                 ctx:set_next_item_width(150)
-                local changed, new_thresh = drawing.slider_double_fine(ctx, "Threshold##thresh_" .. guid, audio_thresh, 0, 1, "%.2f")
+                -- Default threshold: 0.5
+                local changed, new_thresh = drawing.slider_double_fine(ctx, "Threshold##thresh_" .. guid, audio_thresh, 0, 1, "%.2f", nil, nil, 0.5)
                 if changed then
                     expanded_modulator:set_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD, new_thresh)
                     interacted = true
@@ -584,12 +585,13 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
         if ok_trig and trig_idx and trig_idx > 0 then
             ctx:spacing()
             ctx:text("Envelope")
-            
+
             local ok_atk, attack_ms = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_ATTACK) end)
             if ok_atk then
                 local atk_val = attack_ms * 1999 + 1
                 ctx:set_next_item_width(150)
-                local changed, new_atk_val = drawing.slider_double_fine(ctx, "Attack##atk_" .. guid, atk_val, 1, 2000, "%.0f ms")
+                -- Default attack: 10ms
+                local changed, new_atk_val = drawing.slider_double_fine(ctx, "Attack##atk_" .. guid, atk_val, 1, 2000, "%.0f ms", nil, nil, 10)
                 if changed then
                     expanded_modulator:set_param_normalized(PARAM.PARAM_ATTACK, (new_atk_val - 1) / 1999)
                     interacted = true
@@ -600,7 +602,8 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
             if ok_rel then
                 local rel_val = release_ms * 4999 + 1
                 ctx:set_next_item_width(150)
-                local changed, new_rel_val = drawing.slider_double_fine(ctx, "Release##rel_" .. guid, rel_val, 1, 5000, "%.0f ms")
+                -- Default release: 100ms
+                local changed, new_rel_val = drawing.slider_double_fine(ctx, "Release##rel_" .. guid, rel_val, 1, 5000, "%.0f ms", nil, nil, 100)
                 if changed then
                     expanded_modulator:set_param_normalized(PARAM.PARAM_RELEASE, (new_rel_val - 1) / 4999)
                     interacted = true
@@ -721,7 +724,8 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                 if is_disabled then
                     r.ImGui_BeginDisabled(ctx.ctx)
                 end
-                local changed, new_depth_pct = drawing.slider_double_fine(ctx, "##depth_" .. link.param_idx .. "_" .. guid, display_depth, -100, 100, "%.0f%%")
+                -- Default depth: 50%
+                local changed, new_depth_pct = drawing.slider_double_fine(ctx, "##depth_" .. link.param_idx .. "_" .. guid, display_depth, -100, 100, "%.0f%%", nil, nil, 50)
                 if changed and not is_disabled then
                     local new_depth = new_depth_pct / 100
                     if is_bipolar then
