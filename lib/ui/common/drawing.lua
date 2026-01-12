@@ -230,12 +230,22 @@ end
 -- @param max number Maximum value
 -- @param format string Display format (optional)
 -- @param fine_factor number Fine control multiplier (default 0.1)
+-- @param display_mult number Multiplier for display value (e.g., 100 for percentage)
 -- @return boolean changed, number new_value
-function M.slider_double_fine(ctx, label, value, min, max, format, fine_factor)
+function M.slider_double_fine(ctx, label, value, min, max, format, fine_factor, display_mult)
     fine_factor = fine_factor or 0.1
+    display_mult = display_mult or 1
     local shift_held = M.is_shift_held(ctx)
 
-    local changed, new_value = ctx:slider_double(label, value, min, max, format)
+    -- If we have a display multiplier, scale the slider range for display
+    local display_value = value * display_mult
+    local display_min = min * display_mult
+    local display_max = max * display_mult
+
+    local changed, new_display_value = ctx:slider_double(label, display_value, display_min, display_max, format)
+
+    -- Convert back to actual value
+    local new_value = new_display_value / display_mult
 
     if changed and shift_held then
         -- Apply fine control: reduce the delta
@@ -245,10 +255,11 @@ function M.slider_double_fine(ctx, label, value, min, max, format, fine_factor)
         new_value = math.max(min, math.min(max, new_value))
     end
 
-    -- Show value tooltip when hovering
+    -- Show value tooltip when hovering (with fine indicator)
     if r.ImGui_IsItemHovered(ctx.ctx) then
         local display_format = (format and format ~= "") and format or "%.3f"
-        local tooltip = string.format(display_format, changed and new_value or value)
+        local tooltip_value = (changed and new_value or value) * display_mult
+        local tooltip = string.format(display_format, tooltip_value)
         if shift_held then
             tooltip = tooltip .. " (fine)"
         end
@@ -268,12 +279,22 @@ end
 -- @param max number Maximum value
 -- @param format string Display format (optional)
 -- @param fine_factor number Fine control multiplier (default 0.1)
+-- @param display_mult number Multiplier for display value (e.g., 100 for percentage)
 -- @return boolean changed, number new_value
-function M.v_slider_double_fine(ctx, label, width, height, value, min, max, format, fine_factor)
+function M.v_slider_double_fine(ctx, label, width, height, value, min, max, format, fine_factor, display_mult)
     fine_factor = fine_factor or 0.1
+    display_mult = display_mult or 1
     local shift_held = M.is_shift_held(ctx)
 
-    local changed, new_value = ctx:v_slider_double(label, width, height, value, min, max, format)
+    -- If we have a display multiplier, scale the slider range for display
+    local display_value = value * display_mult
+    local display_min = min * display_mult
+    local display_max = max * display_mult
+
+    local changed, new_display_value = ctx:v_slider_double(label, width, height, display_value, display_min, display_max, format)
+
+    -- Convert back to actual value
+    local new_value = new_display_value / display_mult
 
     if changed and shift_held then
         -- Apply fine control: reduce the delta
@@ -283,10 +304,11 @@ function M.v_slider_double_fine(ctx, label, width, height, value, min, max, form
         new_value = math.max(min, math.min(max, new_value))
     end
 
-    -- Show value tooltip when hovering
+    -- Show value tooltip when hovering (with fine indicator)
     if r.ImGui_IsItemHovered(ctx.ctx) then
         local display_format = (format and format ~= "") and format or "%.3f"
-        local tooltip = string.format(display_format, changed and new_value or value)
+        local tooltip_value = (changed and new_value or value) * display_mult
+        local tooltip = string.format(display_format, tooltip_value)
         if shift_held then
             tooltip = tooltip .. " (fine)"
         end

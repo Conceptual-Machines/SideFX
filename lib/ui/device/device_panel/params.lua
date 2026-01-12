@@ -74,7 +74,7 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
         -- Draw the slider with the BASELINE value if modulated, otherwise current value
         -- Uses fine control (Shift key for precision)
         local display_val = link and base_val or param_val
-        local changed, new_val = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, "")
+        local changed, new_val = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, "%.0f%%", nil, 100)
         if changed then
             if link then
                 -- If modulated, update baseline in both REAPER and UI state
