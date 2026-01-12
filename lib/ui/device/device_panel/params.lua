@@ -79,46 +79,77 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
 
         -- Check for user override first, otherwise auto-detect
         local unit_override = plugin_name and state_module.get_param_unit_override(plugin_name, param_idx)
+        local unit_info = unit_override and unit_detector.get_unit_info(unit_override)
         local is_percentage = ok_fmt and param_formatted and param_formatted:match("%%$")
 
-        local slider_format, slider_mult
-        if unit_override then
-            local unit_info = unit_detector.get_unit_info(unit_override)
-            slider_format = unit_info.format
-            slider_mult = unit_info.display_mult
-        elseif is_percentage then
-            slider_format = "%.1f%%"
-            slider_mult = 100
-        else
-            -- Non-percentage: use space format, overlay plugin's value
-            slider_format = " "
-            slider_mult = 1
-        end
+        local changed, new_val = false, display_val
 
-        local changed, new_val = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, slider_format, nil, slider_mult)
-
-        -- For non-percentage values, overlay plugin's formatted value (with unit) on slider
-        if not unit_override and not is_percentage and ok_fmt and param_formatted then
-            local text_w = r.ImGui_CalcTextSize(ctx.ctx, param_formatted)
-            local text_x = slider_x + (slider_w - text_w) / 2
-            local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
-            local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
-            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-            r.ImGui_DrawList_AddText(draw_list, text_x, text_y, 0xFFFFFFFF, param_formatted)
-        end
-
-        -- Show unit next to slider (override or detected)
-        local unit_to_show = nil
-        if unit_override then
-            -- Show the overridden unit
-            if unit_override ~= "percent" and unit_override ~= "linear" and unit_override ~= "linear100" then
-                unit_to_show = unit_override
+        -- Handle switch type: render as toggle
+        if unit_info and unit_info.is_switch then
+            local is_on = display_val >= 0.5
+            local toggled
+            toggled, is_on = ctx:checkbox("##switch_" .. param_name .. "_" .. param_idx, is_on)
+            if toggled then
+                new_val = is_on and 1.0 or 0.0
+                changed = true
             end
-        elseif ok_fmt and param_formatted then
-            -- Show detected unit
-            local detected = unit_detector.detect_unit(param_formatted)
-            if detected and detected.unit ~= "percent" and detected.unit ~= "linear" and detected.unit ~= "linear100" then
-                unit_to_show = detected.unit
+        -- Handle bipolar type: -50 to +50
+        elseif unit_info and unit_info.is_bipolar then
+            local bipolar_val = (display_val - 0.5) * 100  -- Convert 0-1 to -50 to +50
+            local slider_changed, new_bipolar = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, bipolar_val, -50, 50, "%+.0f", nil, 1)
+            if slider_changed then
+                new_val = (new_bipolar / 100) + 0.5  -- Convert back to 0-1
+                changed = true
+            end
+        else
+            -- Normal slider
+            local slider_format, slider_mult
+            if unit_info then
+                slider_format = unit_info.format
+                slider_mult = unit_info.display_mult
+                -- If using plugin format, show empty and overlay plugin value
+                if unit_info.use_plugin_format then
+                    slider_format = " "
+                end
+            elseif is_percentage then
+                slider_format = "%.1f%%"
+                slider_mult = 100
+            else
+                -- Non-percentage: use space format, overlay plugin's value
+                slider_format = " "
+                slider_mult = 1
+            end
+
+            changed, new_val = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, slider_format, nil, slider_mult)
+
+            -- Overlay plugin's formatted value on slider (for plugin format or auto-detected non-percentage)
+            local should_overlay = (unit_info and unit_info.use_plugin_format) or (not unit_info and not is_percentage)
+            if should_overlay and ok_fmt and param_formatted then
+                local text_w = r.ImGui_CalcTextSize(ctx.ctx, param_formatted)
+                local text_x = slider_x + (slider_w - text_w) / 2
+                local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
+                local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
+                local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                r.ImGui_DrawList_AddText(draw_list, text_x, text_y, 0xFFFFFFFF, param_formatted)
+            end
+        end
+
+        -- Show unit next to slider (override or detected) - unless hide_label is set
+        local unit_to_show = nil
+        local hide_label = unit_info and unit_info.hide_label
+        if not hide_label then
+            if unit_override then
+                -- Show the overridden unit (skip certain types)
+                if unit_override ~= "percent" and unit_override ~= "linear" and unit_override ~= "linear100"
+                   and unit_override ~= "switch" and unit_override ~= "bipolar" and unit_override ~= "plugin" then
+                    unit_to_show = unit_override
+                end
+            elseif ok_fmt and param_formatted then
+                -- Show detected unit
+                local detected = unit_detector.detect_unit(param_formatted)
+                if detected and detected.unit ~= "percent" and detected.unit ~= "linear" and detected.unit ~= "linear100" then
+                    unit_to_show = detected.unit
+                end
             end
         end
 

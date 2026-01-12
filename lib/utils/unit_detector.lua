@@ -17,6 +17,9 @@ M.UNITS = {
     s = { format = "%.2f s", display_mult = 1, label = "Seconds (s)", use_plugin_format = true },
     linear = { format = "%.3f", display_mult = 1, label = "Linear (0-1)", use_plugin_format = false },
     linear100 = { format = "%.1f", display_mult = 100, label = "Linear (0-100)", use_plugin_format = false },
+    bipolar = { format = "%+.0f", display_mult = 100, label = "Bipolar (-50/+50)", use_plugin_format = false, is_bipolar = true },
+    switch = { format = "", display_mult = 1, label = "Switch (On/Off)", use_plugin_format = false, is_switch = true },
+    plugin = { format = " ", display_mult = 1, label = "Plugin Format", use_plugin_format = true, hide_label = true },
 }
 
 --- Unit options for dropdown (in display order)
@@ -30,6 +33,9 @@ M.UNIT_OPTIONS = {
     { id = "s", label = "Seconds (s)" },
     { id = "linear", label = "Linear (0-1)" },
     { id = "linear100", label = "Linear (0-100)" },
+    { id = "bipolar", label = "Bipolar (-50/+50)" },
+    { id = "switch", label = "Switch (On/Off)" },
+    { id = "plugin", label = "Plugin Format" },
 }
 
 --- Detect unit from formatted parameter value string
@@ -119,7 +125,10 @@ function M.get_unit_info(unit_id)
             format = unit.format,
             display_mult = unit.display_mult,
             label = unit.label,
-            use_plugin_format = unit.use_plugin_format or false
+            use_plugin_format = unit.use_plugin_format or false,
+            is_bipolar = unit.is_bipolar or false,
+            is_switch = unit.is_switch or false,
+            hide_label = unit.hide_label or false
         }
     end
 
