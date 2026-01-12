@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SideFX Manual</title>
+    <style>
+        :root {
+            --bg-primary: #1a1a1e;
+            --bg-secondary: #252529;
+            --bg-tertiary: #2d2d33;
+            --text-primary: #e0e0e0;
+            --text-secondary: #a0a0a0;
+            --accent: #5588aa;
+            --accent-hover: #77aacc;
+            --border: #3a3a40;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        /* Layout */
+        .container {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            padding: 20px;
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+        }
+
+        .sidebar h1 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: var(--accent);
+        }
+
+        .sidebar .version {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+        }
+
+        .sidebar nav ul {
+            list-style: none;
+        }
+
+        .sidebar nav li {
+            margin-bottom: 0.5rem;
+        }
+
+        .sidebar nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            display: block;
+            padding: 0.4rem 0.8rem;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .sidebar nav a:hover {
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+        }
+
+        .sidebar nav a.active {
+            color: var(--accent);
+            background: var(--bg-tertiary);
+        }
+
+        /* Main content */
+        .main {
+            margin-left: 260px;
+            padding: 40px 60px;
+            max-width: 900px;
+        }
+
+        .main h2 {
+            font-size: 1.8rem;
+            margin-top: 3rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-primary);
+        }
+
+        .main h2:first-child {
+            margin-top: 0;
+        }
+
+        .main h3 {
+            font-size: 1.3rem;
+            margin-top: 2rem;
+            margin-bottom: 0.75rem;
+            color: var(--text-primary);
+        }
+
+        .main p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .main ul, .main ol {
+            margin-bottom: 1rem;
+            padding-left: 1.5rem;
+            color: var(--text-secondary);
+        }
+
+        .main li {
+            margin-bottom: 0.5rem;
+        }
+
+        .main code {
+            background: var(--bg-tertiary);
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-family: 'SF Mono', Consolas, monospace;
+            font-size: 0.9em;
+        }
+
+        .main pre {
+            background: var(--bg-tertiary);
+            padding: 1rem;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin-bottom: 1rem;
+        }
+
+        .main pre code {
+            background: none;
+            padding: 0;
+        }
+
+        /* Keyboard shortcuts */
+        kbd {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 0.1rem 0.4rem;
+            font-family: 'SF Mono', Consolas, monospace;
+            font-size: 0.85em;
+        }
+
+        /* Tips/Notes */
+        .tip {
+            background: rgba(85, 136, 170, 0.1);
+            border-left: 3px solid var(--accent);
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 0 6px 6px 0;
+        }
+
+        .tip strong {
+            color: var(--accent);
+        }
+
+        /* Warning boxes */
+        .warning {
+            background: rgba(200, 100, 50, 0.15);
+            border-left: 3px solid #c86432;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 0 6px 6px 0;
+        }
+
+        .warning strong {
+            color: #c86432;
+        }
+
+        /* Screenshots */
+        .screenshot {
+            margin: 1.5rem 0;
+            text-align: center;
+        }
+
+        .screenshot img {
+            max-width: 100%;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .screenshot figcaption {
+            margin-top: 0.5rem;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+        }
+
+        td {
+            color: var(--text-secondary);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 100%;
+                height: auto;
+                position: relative;
+            }
+
+            .main {
+                margin-left: 0;
+                padding: 20px;
+            }
+
+            .container {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <aside class="sidebar">
+            <h1>SideFX</h1>
+            <p class="version">v0.2.0</p>
+            <nav>
+                <ul>
+                    <li><a href="#installation">Installation</a></li>
+                    <li><a href="#how-it-works">How It Works</a></li>
+                    <li><a href="#quick-start">Quick Start</a></li>
+                    <li><a href="#devices">Devices</a></li>
+                    <li><a href="#racks">Racks &amp; Chains</a></li>
+                    <li><a href="#modulators">Modulators</a></li>
+                    <li><a href="#baking">Baking Automation</a></li>
+                    <li><a href="#presets">Presets</a></li>
+                    <li><a href="#settings">Settings</a></li>
+                    <li><a href="#shortcuts">Keyboard Shortcuts</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <main class="main">
+            <h2 id="installation">Installation</h2>
+            <p>SideFX requires REAPER 7.0 or later.</p>
+
+            <h3>Via ReaBoot (Easiest)</h3>
+            <p><a href="https://reaboot.com/">ReaBoot</a> automatically installs SideFX and all its dependencies in one click.</p>
+            <ol>
+                <li>Go to <a href="https://reaboot.com/">reaboot.com</a></li>
+                <li>Search for "SideFX"</li>
+                <li>Click Install - ReaBoot handles everything</li>
+            </ol>
+
+            <h3>Via ReaPack (Manual)</h3>
+            <p>If you already have ReaPack installed, you'll need to install SideFX and its dependencies separately.</p>
+
+            <h4>Step 1: Install Dependencies</h4>
+            <p>Go to <strong>Extensions &gt; ReaPack &gt; Browse packages</strong> and install each of these:</p>
+            <table>
+                <tr>
+                    <th>Package</th>
+                    <th>Repository</th>
+                    <th>Description</th>
+                </tr>
+                <tr>
+                    <td><strong>ReaImGui</strong></td>
+                    <td>ReaTeam Extensions</td>
+                    <td>ImGui bindings for REAPER UI</td>
+                </tr>
+                <tr>
+                    <td><strong>js_ReaScriptAPI</strong></td>
+                    <td>ReaTeam Extensions</td>
+                    <td>Extended ReaScript functions</td>
+                </tr>
+                <tr>
+                    <td><strong>ReaWrap</strong></td>
+                    <td>ReaTeam Scripts</td>
+                    <td>OOP wrapper library</td>
+                </tr>
+                <tr>
+                    <td><strong>RPP-Parser</strong></td>
+                    <td>ReaTeam Scripts</td>
+                    <td>Required for preset save/load</td>
+                </tr>
+            </table>
+
+            <h4>Step 2: Add SideFX Repository</h4>
+            <ol>
+                <li>Go to <strong>Extensions &gt; ReaPack &gt; Import repositories...</strong></li>
+                <li>Paste: <code>https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></li>
+                <li>Click OK</li>
+            </ol>
+
+            <h4>Step 3: Install SideFX</h4>
+            <ol>
+                <li>Go to <strong>Extensions &gt; ReaPack &gt; Browse packages</strong></li>
+                <li>Search for "SideFX"</li>
+                <li>Right-click and select <strong>Install</strong></li>
+                <li>Restart REAPER</li>
+            </ol>
+
+            <h3>Running SideFX</h3>
+            <p>After installation:</p>
+            <ol>
+                <li>Go to <strong>Actions &gt; Show action list</strong></li>
+                <li>Search for "SideFX"</li>
+                <li>Select the action and click <strong>Run</strong></li>
+                <li>(Optional) Assign a keyboard shortcut for quick access</li>
+            </ol>
+
+            <!-- ============================================================ -->
+
+            <h2 id="how-it-works">How It Works</h2>
+            <p>SideFX provides an Ableton/Bitwig-style interface for managing REAPER's FX chain. Understanding how it works under the hood will help you get the most out of it.</p>
+
+            <h3>Container-Based Architecture</h3>
+            <p>SideFX uses REAPER 7's <strong>Container FX</strong> as its primary building block. Every device, rack, and chain you create is actually a container with a specific naming convention:</p>
+            <ul>
+                <li><strong>Devices</strong> (<code>D1:</code>, <code>D2:</code>, etc.) - Containers wrapping individual plugins</li>
+                <li><strong>Racks</strong> (<code>R1</code>, <code>R2</code>, etc.) - Containers for parallel processing</li>
+                <li><strong>Chains</strong> (<code>C1</code>, <code>C2</code>, etc.) - Containers for each parallel path within a rack</li>
+            </ul>
+            <p>This approach gives SideFX full control over the FX structure while leveraging REAPER's native container capabilities.</p>
+
+            <h3>SideFX as Your FX Manager</h3>
+            <p>SideFX is designed to be the <strong>primary interface</strong> for managing your track's effects. When you use SideFX, it takes ownership of the FX chain structure.</p>
+
+            <div class="warning">
+                <strong>Important:</strong> Avoid modifying SideFX-created containers directly in REAPER's FX window. Renaming, reordering, or restructuring containers outside of SideFX may cause unexpected behavior or break the interface. Always use SideFX to manage devices, racks, and chains.
+            </div>
+
+            <h3>What You Can Safely Do in REAPER</h3>
+            <ul>
+                <li>Adjust plugin parameters (they sync with SideFX)</li>
+                <li>Open plugin UIs from REAPER's FX window</li>
+                <li>Add automation to parameters</li>
+                <li>Copy/paste entire tracks</li>
+            </ul>
+
+            <h3>What to Avoid</h3>
+            <ul>
+                <li>Renaming containers created by SideFX</li>
+                <li>Moving FX in/out of SideFX containers manually</li>
+                <li>Deleting individual items from within containers</li>
+                <li>Adding FX directly inside SideFX containers</li>
+            </ul>
+
+            <!-- ============================================================ -->
+
+            <h2 id="quick-start">Quick Start</h2>
+            <p>Get up and running with SideFX in minutes.</p>
+
+            <figure class="screenshot">
+                <img src="images/overview.png" alt="SideFX main interface">
+                <figcaption>The SideFX interface showing the plugin browser, device chain, and rack</figcaption>
+            </figure>
+
+            <h3>1. Open SideFX</h3>
+            <p>Run the SideFX action from REAPER's action list, or assign it to a keyboard shortcut.</p>
+
+            <h3>2. Select a Track</h3>
+            <p>SideFX operates on the currently selected track. Select a track in REAPER's arrange view or mixer.</p>
+
+            <h3>3. Add Plugins</h3>
+            <p>Use the plugin browser on the left to find and add plugins. Double-click a plugin or drag it onto the device chain.</p>
+
+            <h3>4. Create a Rack</h3>
+            <p>Click <strong>+ Rack</strong> to create a parallel processing rack. Add devices to each chain for parallel effects.</p>
+
+            <figure class="screenshot">
+                <img src="images/rack.png" alt="A rack with multiple chains">
+                <figcaption>A rack containing two parallel chains with different effects</figcaption>
+            </figure>
+
+            <h3>5. Add Modulation</h3>
+            <p>Expand a device panel and use the modulator section to add LFO modulation to any parameter.</p>
+
+            <figure class="screenshot">
+                <img src="images/modulator.png" alt="Modulator panel">
+                <figcaption>A modulator linked to a filter cutoff parameter</figcaption>
+            </figure>
+
+            <!-- ============================================================ -->
+
+            <h2 id="devices">Devices</h2>
+            <p>Devices are the building blocks of your FX chain. Each device wraps a plugin in a container with additional controls.</p>
+
+            <h3>Adding Devices</h3>
+            <ul>
+                <li><strong>Double-click</strong> a plugin in the browser to add it at the end</li>
+                <li><strong>Drag and drop</strong> from the browser to a specific position</li>
+                <li>Use the search box to filter plugins by name or manufacturer</li>
+            </ul>
+
+            <h3>Device Controls</h3>
+            <p>Each device panel shows:</p>
+            <ul>
+                <li><strong>Header</strong> - Device name (click to rename), enable/disable toggle</li>
+                <li><strong>Parameters</strong> - Configurable parameter sliders</li>
+                <li><strong>Sidebar</strong> - Mix (dry/wet), Delta (difference mode)</li>
+            </ul>
+
+            <h3>Selecting Parameters</h3>
+            <p>Right-click a device header and select <strong>Select Parameters</strong> to choose which parameters appear in the device panel. You can also set unit overrides (dB, Hz, ms, etc.) for each parameter.</p>
+
+            <figure class="screenshot">
+                <img src="images/param-selector.png" alt="Parameter selector dialog">
+                <figcaption>The parameter selector with unit override dropdowns</figcaption>
+            </figure>
+
+            <h3>Device Context Menu</h3>
+            <p>Right-click a device header for options:</p>
+            <ul>
+                <li><strong>Rename</strong> - Change the device display name</li>
+                <li><strong>Select Parameters</strong> - Configure visible parameters</li>
+                <li><strong>Open Plugin UI</strong> - Show the plugin's native interface</li>
+                <li><strong>Delete</strong> - Remove the device</li>
+            </ul>
+
+            <!-- ============================================================ -->
+
+            <h2 id="racks">Racks &amp; Chains</h2>
+            <p>Racks enable parallel processing with multiple chains that can be mixed together.</p>
+
+            <h3>Creating a Rack</h3>
+            <ol>
+                <li>Click the <strong>+ Rack</strong> button in the toolbar (or drag it to a specific position)</li>
+                <li>A new rack appears with one empty chain</li>
+                <li>Drag plugins from the browser into the chain</li>
+            </ol>
+
+            <h3>Adding Chains</h3>
+            <p>Click the <strong>+</strong> button at the bottom of a rack to add a new chain. Each chain processes audio in parallel.</p>
+
+            <h3>Chain Mixer</h3>
+            <p>Each rack has a built-in mixer with per-chain controls:</p>
+            <ul>
+                <li><strong>Volume</strong> - Chain output level</li>
+                <li><strong>Pan</strong> - Stereo position</li>
+                <li><strong>Mute/Solo</strong> - Isolate chains for mixing</li>
+            </ul>
+
+            <h3>Converting Chains to Devices</h3>
+            <p>Right-click a chain header and select <strong>Convert to Devices</strong> to extract the chain's contents back to the main device chain.</p>
+
+            <!-- ============================================================ -->
+
+            <h2 id="modulators">Modulators</h2>
+            <p>Modulators add movement to your sound by automatically varying parameter values over time.</p>
+
+            <h3>Adding a Modulator</h3>
+            <ol>
+                <li>Expand a device panel</li>
+                <li>In the modulator section, click <strong>+ Mod</strong></li>
+                <li>A new LFO modulator appears</li>
+            </ol>
+
+            <h3>Linking Parameters</h3>
+            <ol>
+                <li>Select a target parameter from the dropdown</li>
+                <li>Adjust the modulation depth and offset</li>
+                <li>The parameter will now move with the LFO</li>
+            </ol>
+
+            <h3>Modulator Controls</h3>
+            <table>
+                <tr>
+                    <th>Control</th>
+                    <th>Description</th>
+                </tr>
+                <tr>
+                    <td><strong>Rate</strong></td>
+                    <td>LFO speed (Hz or synced to tempo)</td>
+                </tr>
+                <tr>
+                    <td><strong>Depth</strong></td>
+                    <td>Modulation amount (0-100%)</td>
+                </tr>
+                <tr>
+                    <td><strong>Phase</strong></td>
+                    <td>LFO starting position</td>
+                </tr>
+                <tr>
+                    <td><strong>Curve</strong></td>
+                    <td>LFO shape (click to edit)</td>
+                </tr>
+            </table>
+
+            <h3>Curve Editor</h3>
+            <p>Click the curve display to open the curve editor. Create custom LFO shapes by adding and moving control points. Use bezier handles for smooth curves.</p>
+
+            <figure class="screenshot">
+                <img src="images/curve-editor.png" alt="Curve editor">
+                <figcaption>The curve editor with a custom LFO shape</figcaption>
+            </figure>
+
+            <div class="tip">
+                <strong>Tip:</strong> Hold <kbd>Shift</kbd> while dragging sliders for fine control.
+            </div>
+
+            <!-- ============================================================ -->
+
+            <h2 id="baking">Baking Automation</h2>
+            <p>Convert modulator movements into REAPER automation envelopes for precise editing or to free up CPU.</p>
+
+            <h3>How to Bake</h3>
+            <ol>
+                <li>Set up your modulator and parameter link</li>
+                <li>Click the <strong>Bake</strong> button on the modulator</li>
+                <li>Choose a range (project, track, time selection, or selected items)</li>
+                <li>Click <strong>Bake</strong> to create the automation</li>
+            </ol>
+
+            <h3>Range Modes</h3>
+            <table>
+                <tr>
+                    <th>Mode</th>
+                    <th>Description</th>
+                </tr>
+                <tr>
+                    <td><strong>Project</strong></td>
+                    <td>Entire project length</td>
+                </tr>
+                <tr>
+                    <td><strong>Track</strong></td>
+                    <td>From first to last item on track</td>
+                </tr>
+                <tr>
+                    <td><strong>Time Selection</strong></td>
+                    <td>Current time selection</td>
+                </tr>
+                <tr>
+                    <td><strong>Selected Items</strong></td>
+                    <td>Duration of selected items</td>
+                </tr>
+            </table>
+
+            <h3>Bake Settings</h3>
+            <p>Configure baking behavior in <strong>Settings</strong>:</p>
+            <ul>
+                <li><strong>Disable link after bake</strong> - Automatically unlink the parameter after baking</li>
+                <li><strong>Default range mode</strong> - Pre-select your preferred range</li>
+                <li><strong>Show range picker</strong> - Skip the dialog and use defaults</li>
+            </ul>
+
+            <!-- ============================================================ -->
+
+            <h2 id="presets">Presets</h2>
+            <p>Save and load your entire FX chain configuration, including all devices, racks, modulators, and parameter links.</p>
+
+            <h3>Saving a Preset</h3>
+            <ol>
+                <li>Click the <strong>floppy disk icon</strong> in the toolbar</li>
+                <li>Enter a name for your preset</li>
+                <li>Click <strong>Save</strong></li>
+            </ol>
+            <p>Presets are saved to a <code>SideFX/chains/</code> folder in your REAPER resources directory. Each preset consists of:</p>
+            <ul>
+                <li>An <code>.RfxChain</code> file (REAPER-compatible FX chain)</li>
+                <li>A <code>.sidefx.json</code> file (SideFX metadata: display names, parameter selections, modulator links)</li>
+            </ul>
+
+            <h3>Loading a Preset</h3>
+            <ol>
+                <li>Click the <strong>floppy disk icon</strong> in the toolbar</li>
+                <li>Select a preset from the list</li>
+                <li>Click <strong>Load</strong></li>
+            </ol>
+
+            <div class="warning">
+                <strong>Warning:</strong> Loading a preset replaces all FX on the current track. Make sure to save your current setup first if needed.
+            </div>
+
+            <h3>What Gets Saved</h3>
+            <ul>
+                <li>All devices, racks, and chains</li>
+                <li>Plugin settings and parameter values</li>
+                <li>Custom device display names</li>
+                <li>Parameter visibility selections</li>
+                <li>Modulator configurations and parameter links</li>
+            </ul>
+
+            <!-- ============================================================ -->
+
+            <h2 id="settings">Settings</h2>
+            <p>Click the gear icon in the toolbar to access settings.</p>
+
+            <h3>Display</h3>
+            <ul>
+                <li><strong>Show track name</strong> - Display current track in toolbar</li>
+                <li><strong>Show breadcrumbs</strong> - Navigation path when inside containers</li>
+                <li><strong>Show Mix/Delta controls</strong> - Sidebar wet/dry and delta controls</li>
+                <li><strong>Show phase controls</strong> - Phase slider in modulator panel</li>
+            </ul>
+
+            <h3>Parameters</h3>
+            <ul>
+                <li><strong>Max visible parameters</strong> - Limit parameters shown per device (default: 32)</li>
+            </ul>
+
+            <h3>Bake</h3>
+            <ul>
+                <li><strong>Disable link after bake</strong> - Auto-disable parameter link after baking</li>
+                <li><strong>Default range mode</strong> - Default range for bake dialog</li>
+                <li><strong>Show range picker modal</strong> - Show range selection dialog</li>
+            </ul>
+
+            <!-- ============================================================ -->
+
+            <h2 id="shortcuts">Keyboard Shortcuts</h2>
+            <table>
+                <tr>
+                    <th>Shortcut</th>
+                    <th>Action</th>
+                </tr>
+                <tr>
+                    <td><kbd>Shift</kbd> + drag</td>
+                    <td>Fine control on sliders</td>
+                </tr>
+                <tr>
+                    <td>Double-click slider</td>
+                    <td>Reset to default value</td>
+                </tr>
+                <tr>
+                    <td>Double-click plugin</td>
+                    <td>Add plugin to chain</td>
+                </tr>
+                <tr>
+                    <td>Right-click device</td>
+                    <td>Open context menu</td>
+                </tr>
+            </table>
+
+        </main>
+    </div>
+</body>
+</html>

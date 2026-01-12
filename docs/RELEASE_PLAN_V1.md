@@ -43,6 +43,9 @@ Final tasks before v1.0 release. No gain staging in this release.
   - Baking automation
   - Settings reference
 
+## Known Bugs (Fix Before Release)
+- [ ] Track name in toolbar header doesn't update when track is renamed in REAPER
+
 ## Out of Scope for v1.0
 - Gain staging feature (deferred to future release)
 
