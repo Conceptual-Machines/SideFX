@@ -345,16 +345,31 @@ local function draw_rate_controls(ctx, guid, expanded_modulator)
 
         -- Rate slider/dropdown - fill remaining width
         if tempo_mode < 0.5 then
-            -- Free mode - show Hz slider
-            -- Features: Shift+drag for fine control, Ctrl/Cmd+click to reset to 1Hz, double-click for text input
+            -- Free mode - show Hz slider using normalized 0-1 range for fine control
             local ok_rate, rate_norm = pcall(function() return expanded_modulator:get_param_normalized(1) end)
             if ok_rate then
-                local rate_hz = 0.01 + rate_norm * 9.99
+                -- Get slider position BEFORE drawing
+                local slider_x, slider_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+                local avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
                 ctx:set_next_item_width(-1)
-                local changed, new_rate = drawing.slider_double_fine(ctx, "##rate_" .. guid, rate_hz, 0.01, 10, "%.2f Hz", nil, nil, 1.0)
+
+                -- Use normalized 0-1 for slider (like FX params), display as space, overlay Hz text
+                -- Default: 1Hz = (1 - 0.01) / 9.99 ≈ 0.099
+                local default_norm = (1.0 - 0.01) / 9.99
+                local changed, new_norm = drawing.slider_double_fine(ctx, "##rate_" .. guid, rate_norm, 0.0, 1.0, " ", nil, 1, default_norm)
+
+                -- Overlay Hz value on slider
+                local rate_hz = 0.01 + rate_norm * 9.99
+                local hz_text = string.format("%.2f Hz", rate_hz)
+                local text_w = r.ImGui_CalcTextSize(ctx.ctx, hz_text)
+                local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
+                local text_x = slider_x + (avail_w - text_w) / 2
+                local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
+                local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                r.ImGui_DrawList_AddText(draw_list, text_x, text_y, 0xFFFFFFFF, hz_text)
+
                 if changed then
-                    local norm_val = (new_rate - 0.01) / 9.99
-                    expanded_modulator:set_param_normalized(1, norm_val)
+                    expanded_modulator:set_param_normalized(1, new_norm)
                     interacted = true
                 end
             end
@@ -573,7 +588,7 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
             if ok_thresh then
                 ctx:set_next_item_width(150)
                 -- Default threshold: 0.5
-                local changed, new_thresh = drawing.slider_double_fine(ctx, "Threshold##thresh_" .. guid, audio_thresh, 0, 1, "%.2f", nil, nil, 0.5)
+                local changed, new_thresh = drawing.slider_double_fine(ctx, "Threshold##thresh_" .. guid, audio_thresh, 0, 1, "%.2f", 0.01, nil, 0.5)
                 if changed then
                     expanded_modulator:set_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD, new_thresh)
                     interacted = true
@@ -717,17 +732,35 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                     ctx:set_tooltip("Bipolar")
                 end
 
-                -- Column 3: Depth slider
+                -- Column 3: Depth slider (use 0-1 internal range, scale to -1 to 1)
                 ctx:table_set_column_index(2)
+                -- Get slider position BEFORE drawing
+                local depth_slider_x, depth_slider_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+                local depth_avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
                 ctx:set_next_item_width(-1)
-                local display_depth = is_disabled and (state.link_saved_scale[link_key] or 0) * 100 or actual_depth * 100
+
+                local depth_value = is_disabled and (state.link_saved_scale[link_key] or 0) or actual_depth
+                -- Convert -1 to 1 range to 0-1 for slider (better granularity)
+                local depth_norm = (depth_value + 1) / 2
+
                 if is_disabled then
                     r.ImGui_BeginDisabled(ctx.ctx)
                 end
-                -- Default depth: 50%
-                local changed, new_depth_pct = drawing.slider_double_fine(ctx, "##depth_" .. link.param_idx .. "_" .. guid, display_depth, -100, 100, "%.0f%%", nil, nil, 50)
+                -- Default depth: 0.5 = 0.75 normalized ((0.5 + 1) / 2)
+                local changed, new_depth_norm = drawing.slider_double_fine(ctx, "##depth_" .. link.param_idx .. "_" .. guid, depth_norm, 0.0, 1.0, " ", nil, 1, 0.75)
+
+                -- Overlay depth value on slider
+                local display_depth = depth_norm * 2 - 1
+                local depth_text = string.format("%.2f", display_depth)
+                local depth_text_w = r.ImGui_CalcTextSize(ctx.ctx, depth_text)
+                local depth_slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
+                local depth_text_x = depth_slider_x + (depth_avail_w - depth_text_w) / 2
+                local depth_text_y = depth_slider_y + (depth_slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
+                local depth_draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                r.ImGui_DrawList_AddText(depth_draw_list, depth_text_x, depth_text_y, 0xFFFFFFFF, depth_text)
+
                 if changed and not is_disabled then
-                    local new_depth = new_depth_pct / 100
+                    local new_depth = new_depth_norm * 2 - 1  -- Convert back to -1 to 1
                     if is_bipolar then
                         fx:set_named_config_param(plink_prefix .. "offset", "-0.5")
                     end

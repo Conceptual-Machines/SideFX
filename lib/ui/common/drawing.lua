@@ -258,10 +258,13 @@ function M.slider_double_fine(ctx, label, value, min, max, format, fine_factor, 
     local display_min = min * display_mult
     local display_max = max * display_mult
 
-    local slider_changed, new_display_value = ctx:slider_double(label, display_value, display_min, display_max, format)
+    -- Use raw ImGui API with NoRoundToFormat flag for better precision
+    local raw_ctx = ctx.ctx or ctx
+    local flags = r.ImGui_SliderFlags_NoRoundToFormat()
+    local slider_changed, new_display_value = r.ImGui_SliderDouble(raw_ctx, label, display_value, display_min, display_max, format or "%.3f", flags)
 
-    local is_hovered = r.ImGui_IsItemHovered(ctx.ctx)
-    local mouse_double_clicked = r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0)
+    local is_hovered = r.ImGui_IsItemHovered(raw_ctx)
+    local mouse_double_clicked = r.ImGui_IsMouseDoubleClicked(raw_ctx, 0)
 
     -- Check for double-click to reset to default
     if is_hovered and mouse_double_clicked and default_value ~= nil then
@@ -314,10 +317,13 @@ function M.v_slider_double_fine(ctx, label, width, height, value, min, max, form
     local display_min = min * display_mult
     local display_max = max * display_mult
 
-    local slider_changed, new_display_value = ctx:v_slider_double(label, width, height, display_value, display_min, display_max, format)
+    -- Use raw ImGui API with NoRoundToFormat flag for better precision
+    local raw_ctx = ctx.ctx or ctx
+    local flags = r.ImGui_SliderFlags_NoRoundToFormat()
+    local slider_changed, new_display_value = r.ImGui_VSliderDouble(raw_ctx, label, width, height, display_value, display_min, display_max, format or "%.3f", flags)
 
-    local is_hovered = r.ImGui_IsItemHovered(ctx.ctx)
-    local mouse_double_clicked = r.ImGui_IsMouseDoubleClicked(ctx.ctx, 0)
+    local is_hovered = r.ImGui_IsItemHovered(raw_ctx)
+    local mouse_double_clicked = r.ImGui_IsMouseDoubleClicked(raw_ctx, 0)
 
     -- Check for double-click to reset to default
     if is_hovered and mouse_double_clicked and default_value ~= nil then
