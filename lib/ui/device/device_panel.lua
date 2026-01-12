@@ -506,12 +506,30 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         local link_count = 0
         local ok_params, param_count = pcall(function() return fx:get_num_params() end)
         if ok_params and param_count then
+            -- Initialize baseline_formatted cache if needed
+            state.baseline_formatted = state.baseline_formatted or {}
+
             for param_idx = 0, param_count - 1 do
                 local link_info = fx:get_param_link_info(param_idx)
                 if link_info then
                     -- Add bipolar flag from state (if set)
                     local link_key = guid .. "_" .. param_idx
                     link_info.is_bipolar = state.link_bipolar and state.link_bipolar[link_key] or false
+
+                    -- Cache formatted baseline value on first detection
+                    if not state.baseline_formatted[link_key] and link_info.baseline then
+                        local ok_cache = pcall(function()
+                            local current_val = fx:get_param_normalized(param_idx)
+                            fx:set_param_normalized(param_idx, link_info.baseline)
+                            local baseline_fmt = fx:get_formatted_param_value(param_idx)
+                            fx:set_param_normalized(param_idx, current_val)
+                            if baseline_fmt then
+                                state.baseline_formatted[link_key] = baseline_fmt
+                            end
+                        end)
+                    end
+                    link_info.baseline_formatted = state.baseline_formatted[link_key]
+
                     mod_links[param_idx] = link_info
                     link_count = link_count + 1
                 end

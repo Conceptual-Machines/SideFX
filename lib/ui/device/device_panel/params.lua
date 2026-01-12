@@ -120,34 +120,73 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
                 slider_mult = 1
             end
 
+            -- When modulated, hide slider text (we'll overlay baseline for computable units)
+            if link then
+                slider_format = "##"
+            end
+
             changed, new_val = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, slider_format, nil, slider_mult)
 
-            -- Overlay plugin's formatted value on slider (for plugin format or auto-detected non-percentage)
-            -- When modulated with use_plugin_format units (dB, Hz, etc), don't overlay - we can't compute baseline value
-            -- When modulated with auto-detect, show baseline as percentage
-            local should_overlay = (unit_info and unit_info.use_plugin_format) or (not unit_info and not is_percentage)
-            if should_overlay and ok_fmt and param_formatted then
-                local overlay_text = nil
-                if link then
-                    -- Modulated: only show overlay for non-plugin-format units
-                    if not (unit_info and unit_info.use_plugin_format) then
-                        local baseline = link.baseline or 0
+            -- Overlay text on slider
+            -- When modulated: show cached baseline formatted value (static)
+            -- When not modulated: show plugin's current formatted value
+            local overlay_text = nil
+            if link then
+                -- Prefer cached baseline formatted value (static, doesn't change with modulation)
+                if link.baseline_formatted then
+                    overlay_text = link.baseline_formatted
+                else
+                    -- Fallback: compute from baseline if we have a computable unit
+                    local baseline = link.baseline or 0
+                    if unit_info and not unit_info.use_plugin_format then
+                        local display_mult = unit_info.display_mult or 1
+                        local fmt = unit_info.format or "%.1f"
+                        overlay_text = string.format(fmt, baseline * display_mult)
+                    else
+                        -- Last resort: show as percentage
                         overlay_text = string.format("%.1f%%", baseline * 100)
                     end
-                    -- For plugin format units (dB, Hz, etc), don't overlay - slider position shows baseline
-                else
-                    -- Not modulated: show plugin's formatted value
-                    overlay_text = param_formatted
                 end
+            elseif ok_fmt and param_formatted then
+                -- Not modulated: show plugin's formatted value
+                overlay_text = param_formatted
+            end
 
-                if overlay_text then
-                    local text_w = r.ImGui_CalcTextSize(ctx.ctx, overlay_text)
-                    local text_x = slider_x + (slider_w - text_w) / 2
-                    local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
-                    local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
-                    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-                    r.ImGui_DrawList_AddText(draw_list, text_x, text_y, 0xFFFFFFFF, overlay_text)
+            if overlay_text then
+                local text_w = r.ImGui_CalcTextSize(ctx.ctx, overlay_text)
+                local text_x = slider_x + (slider_w - text_w) / 2
+                local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
+                local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
+                local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                r.ImGui_DrawList_AddText(draw_list, text_x, text_y, 0xFFFFFFFF, overlay_text)
+            end
+
+            -- Tooltip showing modulation range when hovering
+            -- TODO: Show range in actual units (Hz, dB, etc.) instead of percentage.
+            -- This requires caching formatted values for lower/upper bounds, which gets
+            -- complicated when bipolar mode changes. Need to either:
+            -- 1. Cache on-demand when tooltip is shown (temporarily set param, get format, restore)
+            -- 2. Invalidate cache properly when baseline/scale/bipolar changes
+            -- 3. Store formatted bounds when modulation link is created in modulator.lua
+            if link and r.ImGui_IsItemHovered(ctx.ctx) then
+                local baseline = link.baseline or 0
+                local scale = link.scale or 0.5
+                local tooltip
+
+                if link.is_bipolar then
+                    -- Bipolar: centered on baseline, ± half range
+                    local half_range = math.abs(scale) / 2
+                    local lower = math.max(0, baseline - half_range) * 100
+                    local upper = math.min(1, baseline + half_range) * 100
+                    tooltip = string.format("Mod range: %.0f%% <-> %.0f%% (center: %.0f%%)",
+                        lower, upper, baseline * 100)
+                else
+                    -- Unipolar: baseline to baseline+scale
+                    local lower = math.max(0, math.min(baseline, baseline + scale)) * 100
+                    local upper = math.min(1, math.max(baseline, baseline + scale)) * 100
+                    tooltip = string.format("Mod range: %.0f%% -> %.0f%%", lower, upper)
                 end
+                ctx:set_tooltip(tooltip)
             end
         end
 
