@@ -11,10 +11,7 @@ SideFX is a REAPER 7+ script that provides Ableton/Bitwig-style rack FX manageme
 ### Testing
 ```bash
 # Run all unit tests (standalone, no REAPER required)
-lua5.4 tests/runner.lua
-
-# Run tests in REAPER (load as ReaScript action)
-# File: tests/runner.lua
+lua5.4 tests/runner_luaunit.lua
 ```
 
 ### Linting
@@ -25,7 +22,7 @@ luacheck . --config .luacheckrc
 
 ### CI/CD
 - CI runs on push/PR to main/master/develop branches
-- Tests: `lua5.4 tests/runner.lua`
+- Tests: `lua5.4 tests/runner_luaunit.lua`
 - Linting: `luacheck . --config .luacheckrc`
 - Release workflow auto-tags based on version in `SideFX.lua`
 

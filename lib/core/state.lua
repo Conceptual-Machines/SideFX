@@ -77,6 +77,10 @@ M.state = {
     
     -- Parameter visibility selections (keyed by plugin full_name)
     param_selections = {},  -- {[plugin_full_name] = {param_idx1, param_idx2, ...}}
+
+    -- Parameter unit overrides (keyed by plugin full_name, then param_idx)
+    -- nil or "auto" = auto-detect, otherwise specific unit ID
+    param_unit_overrides = {},  -- {[plugin_full_name] = {[param_idx] = "dB", ...}}
     
     -- User configuration
     config = {
@@ -672,6 +676,96 @@ function M.load_param_selections()
             state.param_selections = parsed
         end
     end
+end
+
+--------------------------------------------------------------------------------
+-- Parameter Unit Overrides Persistence
+--------------------------------------------------------------------------------
+
+--- Save parameter unit overrides to ExtState (global, not per-project)
+function M.save_param_unit_overrides()
+    if not state.param_unit_overrides or next(state.param_unit_overrides) == nil then
+        -- Clear storage if no overrides
+        r.SetExtState("SideFX", "ParamUnitOverrides", "", true)
+        return
+    end
+
+    local json_str = json.encode(state.param_unit_overrides)
+    if json_str then
+        r.SetExtState("SideFX", "ParamUnitOverrides", json_str, true)
+    end
+end
+
+--- Load parameter unit overrides from ExtState
+function M.load_param_unit_overrides()
+    local json_str = r.GetExtState("SideFX", "ParamUnitOverrides")
+    if json_str and json_str ~= "" then
+        local parsed = json.decode(json_str)
+        if parsed and type(parsed) == "table" then
+            state.param_unit_overrides = parsed
+        end
+    end
+end
+
+--- Get unit override for a specific parameter
+-- Tries multiple name variations (exact match, clean name, prefix variations)
+-- @param plugin_name string The plugin name
+-- @param param_idx number The parameter index
+-- @return string|nil Unit ID or nil for auto-detect
+function M.get_param_unit_override(plugin_name, param_idx)
+    if not plugin_name or not param_idx then return nil end
+    if not state.param_unit_overrides then return nil end
+
+    -- Try exact match first
+    if state.param_unit_overrides[plugin_name] then
+        local override = state.param_unit_overrides[plugin_name][param_idx]
+        if override then return override end
+    end
+
+    -- Try with stripped prefixes
+    local naming = require('lib.utils.naming')
+    local clean_name = naming.strip_sidefx_prefixes(plugin_name)
+    if clean_name ~= plugin_name and state.param_unit_overrides[clean_name] then
+        local override = state.param_unit_overrides[clean_name][param_idx]
+        if override then return override end
+    end
+
+    -- Try matching stored keys against clean name
+    for key, overrides in pairs(state.param_unit_overrides) do
+        local key_clean = naming.strip_sidefx_prefixes(key)
+        if key_clean == clean_name and overrides[param_idx] then
+            return overrides[param_idx]
+        end
+    end
+
+    return nil
+end
+
+--- Set unit override for a specific parameter
+-- @param plugin_name string The plugin full name
+-- @param param_idx number The parameter index
+-- @param unit_id string|nil Unit ID or nil/auto for auto-detect
+function M.set_param_unit_override(plugin_name, param_idx, unit_id)
+    if not plugin_name or not param_idx then return end
+
+    -- Normalize "auto" to nil (no override)
+    if unit_id == "auto" then unit_id = nil end
+
+    -- Initialize plugin table if needed
+    if not state.param_unit_overrides[plugin_name] then
+        state.param_unit_overrides[plugin_name] = {}
+    end
+
+    -- Set or clear the override
+    state.param_unit_overrides[plugin_name][param_idx] = unit_id
+
+    -- Clean up empty plugin tables
+    if next(state.param_unit_overrides[plugin_name]) == nil then
+        state.param_unit_overrides[plugin_name] = nil
+    end
+
+    -- Save immediately
+    M.save_param_unit_overrides()
 end
 
 --- Get maximum visible parameters (capped at 128)

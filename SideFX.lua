@@ -612,6 +612,9 @@ local function main()
     -- Load parameter selections (global, not per-track)
     state_module.load_param_selections()
 
+    -- Load parameter unit overrides (global, not per-track)
+    state_module.load_param_unit_overrides()
+
     -- Load expansion state and display names for current track
     if state.track then
         state_module.load_expansion_state()

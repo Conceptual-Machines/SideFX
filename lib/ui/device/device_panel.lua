@@ -520,6 +520,7 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         opts.mod_links = mod_links
         opts.state = state  -- Pass state so params can update link_baselines
         opts.fx_guid = guid  -- Pass guid for building link keys
+        opts.plugin_name = name  -- Pass plugin name for unit override lookups
 
         if device_column.draw(ctx, is_device_collapsed, params_column, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts, name, fx_naming, draw_sidebar_column, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, colors) then
             interacted = true

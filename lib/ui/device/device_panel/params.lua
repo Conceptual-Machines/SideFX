@@ -4,24 +4,27 @@ Parameters Column Module - Draws device parameter grid with sliders
 
 local M = {}
 local drawing = require('lib.ui.common.drawing')
+local unit_detector = require('lib.utils.unit_detector')
+local state_module = require('lib.core.state')
 
 --- Draw a single parameter cell (label + slider + modulation overlay)
 -- @param ctx ImGui context
 -- @param fx The FX object
 -- @param param_idx Parameter index
--- @param opts Table with mod_links, state, fx_guid
+-- @param opts Table with mod_links, state, fx_guid, plugin_name
 local function draw_param_cell(ctx, fx, param_idx, opts)
     local r = reaper
     local imgui = require('imgui')
-    
+
     local mod_links = opts and opts.mod_links
     local state = opts and opts.state
     local fx_guid = opts and opts.fx_guid
+    local plugin_name = opts and opts.plugin_name
 
     -- Safely get param info (FX might have been deleted)
     local ok_name, param_name = pcall(function() return fx:get_param_name(param_idx) end)
     local ok_val, param_val = pcall(function() return fx:get_param_normalized(param_idx) end)
-    local ok_fmt, param_formatted = pcall(function() return fx:get_param_formatted(param_idx) end)
+    local ok_fmt, param_formatted = pcall(function() return fx:get_formatted_param_value(param_idx) end)
 
     local interacted = false
     if ok_name and ok_val then
@@ -72,9 +75,59 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
         end
         
         -- Draw the slider with the BASELINE value if modulated, otherwise current value
-        -- Uses fine control (Shift key for precision)
         local display_val = link and base_val or param_val
-        local changed, new_val = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, "%.0f%%", nil, 100)
+
+        -- Check for user override first, otherwise auto-detect
+        local unit_override = plugin_name and state_module.get_param_unit_override(plugin_name, param_idx)
+        local is_percentage = ok_fmt and param_formatted and param_formatted:match("%%$")
+
+        local slider_format, slider_mult
+        if unit_override then
+            local unit_info = unit_detector.get_unit_info(unit_override)
+            slider_format = unit_info.format
+            slider_mult = unit_info.display_mult
+        elseif is_percentage then
+            slider_format = "%.1f%%"
+            slider_mult = 100
+        else
+            -- Non-percentage: use space format, overlay plugin's value
+            slider_format = " "
+            slider_mult = 1
+        end
+
+        local changed, new_val = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, slider_format, nil, slider_mult)
+
+        -- For non-percentage values, overlay plugin's formatted value (with unit) on slider
+        if not unit_override and not is_percentage and ok_fmt and param_formatted then
+            local text_w = r.ImGui_CalcTextSize(ctx.ctx, param_formatted)
+            local text_x = slider_x + (slider_w - text_w) / 2
+            local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
+            local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
+            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+            r.ImGui_DrawList_AddText(draw_list, text_x, text_y, 0xFFFFFFFF, param_formatted)
+        end
+
+        -- Show unit next to slider (override or detected)
+        local unit_to_show = nil
+        if unit_override then
+            -- Show the overridden unit
+            if unit_override ~= "percent" and unit_override ~= "linear" and unit_override ~= "linear100" then
+                unit_to_show = unit_override
+            end
+        elseif ok_fmt and param_formatted then
+            -- Show detected unit
+            local detected = unit_detector.detect_unit(param_formatted)
+            if detected and detected.unit ~= "percent" and detected.unit ~= "linear" and detected.unit ~= "linear100" then
+                unit_to_show = detected.unit
+            end
+        end
+
+        if unit_to_show then
+            ctx:same_line()
+            ctx:push_style_color(imgui.Col.Text(), 0x88AACCFF)
+            ctx:text(unit_to_show)
+            ctx:pop_style_color()
+        end
         if changed then
             if link then
                 -- If modulated, update baseline in both REAPER and UI state
@@ -132,19 +185,6 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
 
         ctx:pop_style_var(1)
         ctx:pop_style_color(5)
-
-        -- Value label (centered below slider)
-        if ok_fmt then
-            ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
-            local val_text = param_formatted
-            local text_w = r.ImGui_CalcTextSize(ctx.ctx, val_text)
-            local avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
-            if avail_w > text_w then
-                r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + (avail_w - text_w) / 2)
-            end
-            ctx:text(val_text)
-            ctx:pop_style_color()
-        end
     end
 
     return interacted

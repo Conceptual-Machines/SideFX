@@ -5,6 +5,7 @@ for a plugin before adding it to the track.
 
 local r = reaper
 local imgui = require('imgui')
+local unit_detector = require('lib.utils.unit_detector')
 
 local M = {}
 
@@ -13,8 +14,9 @@ local dialog_state = {
     open = false,
     plugin_name = nil,
     plugin_full_name = nil,
-    all_params = {},  -- {idx, name, formatted}
+    all_params = {},  -- {idx, name, formatted, detected_unit}
     selected = {},  -- {[param_idx] = true}
+    unit_overrides = {},  -- {[param_idx] = unit_id or "auto"}
     search_text = "",
     popup_opened = false,  -- Track if popup has been opened
 }
@@ -68,10 +70,14 @@ local function scan_plugin_params(plugin_full_name)
             local lower = name:lower()
             -- Skip sidebar controls
             if lower ~= "wet" and lower ~= "delta" and lower ~= "bypass" then
+                local fmt_val = (ok_fmt and ret_fmt and formatted) or ""
+                -- Detect unit from formatted value
+                local detected = unit_detector.detect_unit(fmt_val)
                 table.insert(params, {
                     idx = i,
                     name = name,
-                    formatted = (ok_fmt and ret_fmt and formatted) or "",
+                    formatted = fmt_val,
+                    detected_unit = detected and detected.unit or "percent",
                 })
             end
         end
@@ -118,7 +124,7 @@ function M.draw(ctx, state)
         ctx:separator()
         
         -- Search box
-        ctx:set_next_item_width(300)
+        ctx:set_next_item_width(500)
         local changed, search = ctx:input_text("##search", dialog_state.search_text)
         if changed then
             dialog_state.search_text = search
@@ -126,11 +132,11 @@ function M.draw(ctx, state)
         if ctx:is_item_hovered() then
             ctx:set_tooltip("Search parameters...")
         end
-        
+
         ctx:spacing()
-        
+
         -- Parameter list in a scrollable child
-        if ctx:begin_child("ParamList", 0, 300, imgui.ChildFlags.Border()) then
+        if ctx:begin_child("ParamList", 600, 400, imgui.ChildFlags.Border()) then
             local filtered_params = {}
             local search_lower = dialog_state.search_text:lower()
             
@@ -216,6 +222,34 @@ function M.draw(ctx, state)
                         dialog_state.selected[param.idx] = nil
                     end
                 end
+
+                -- Unit override dropdown (same line as checkbox)
+                ctx:same_line()
+                ctx:set_next_item_width(100)
+
+                -- Get current unit selection
+                local current_unit = dialog_state.unit_overrides[param.idx] or "auto"
+                local current_idx = unit_detector.get_unit_option_index(current_unit == "auto" and nil or current_unit)
+                local current_label = unit_detector.UNIT_OPTIONS[current_idx] and unit_detector.UNIT_OPTIONS[current_idx].label or "Auto"
+
+                if r.ImGui_BeginCombo(ctx.ctx, "##unit_" .. param.idx, current_label) then
+                    for i, opt in ipairs(unit_detector.UNIT_OPTIONS) do
+                        local is_selected = (i == current_idx)
+                        if r.ImGui_Selectable(ctx.ctx, opt.label, is_selected) then
+                            dialog_state.unit_overrides[param.idx] = opt.id
+                        end
+                        if is_selected then
+                            r.ImGui_SetItemDefaultFocus(ctx.ctx)
+                        end
+                    end
+                    r.ImGui_EndCombo(ctx.ctx)
+                end
+
+                -- Show detected unit and plugin's formatted value
+                ctx:same_line()
+                ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
+                ctx:text("[" .. param.detected_unit .. "]  " .. param.formatted)
+                ctx:pop_style_color()
             end
             
             ctx:end_child()
@@ -235,6 +269,7 @@ function M.draw(ctx, state)
             dialog_state.plugin_full_name = nil
             dialog_state.all_params = {}
             dialog_state.selected = {}
+            dialog_state.unit_overrides = {}
             dialog_state.search_text = ""
             dialog_state.popup_opened = false
         end
@@ -273,6 +308,16 @@ function M.draw(ctx, state)
 
                 -- Persist to ExtState
                 state_mod.save_param_selections()
+
+                -- Save unit overrides (only non-auto values)
+                for param_idx, unit_id in pairs(dialog_state.unit_overrides) do
+                    if unit_id and unit_id ~= "auto" then
+                        state_mod.set_param_unit_override(dialog_state.plugin_full_name, param_idx, unit_id)
+                    else
+                        -- Clear override if set to auto
+                        state_mod.set_param_unit_override(dialog_state.plugin_full_name, param_idx, nil)
+                    end
+                end
             end
 
             -- Close dialog
@@ -281,6 +326,7 @@ function M.draw(ctx, state)
             dialog_state.plugin_full_name = nil
             dialog_state.all_params = {}
             dialog_state.selected = {}
+            dialog_state.unit_overrides = {}
             dialog_state.search_text = ""
             dialog_state.popup_opened = false
         end
@@ -295,6 +341,7 @@ function M.draw(ctx, state)
         dialog_state.plugin_full_name = nil
         dialog_state.all_params = {}
         dialog_state.selected = {}
+        dialog_state.unit_overrides = {}
         dialog_state.search_text = ""
         dialog_state.popup_opened = false
     end
@@ -325,7 +372,8 @@ function M.open(plugin_name, plugin_full_name)
     local state = state_mod.state
     
     dialog_state.selected = {}
-    
+    dialog_state.unit_overrides = {}
+
     if state.param_selections and state.param_selections[plugin_full_name] then
         -- Use saved selections
         for _, idx in ipairs(state.param_selections[plugin_full_name]) do
@@ -338,6 +386,13 @@ function M.open(plugin_name, plugin_full_name)
             if param then
                 dialog_state.selected[param.idx] = true
             end
+        end
+    end
+
+    -- Load existing unit overrides
+    if state.param_unit_overrides and state.param_unit_overrides[plugin_full_name] then
+        for param_idx, unit_id in pairs(state.param_unit_overrides[plugin_full_name]) do
+            dialog_state.unit_overrides[param_idx] = unit_id
         end
     end
 end

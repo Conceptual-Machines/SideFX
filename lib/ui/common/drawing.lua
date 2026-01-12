@@ -214,12 +214,20 @@ end
 --------------------------------------------------------------------------------
 
 --- Check if Shift key is held
--- @param ctx ImGui context (raw or wrapper)
+-- @param ctx ImGui context (raw or wrapper) - not used, kept for API compatibility
 -- @return boolean True if Shift is held
 function M.is_shift_held(ctx)
+    -- Use REAPER's GetMouseState which returns modifier keys in the bitmask
+    -- Bit 8 (value 8) = Shift key held
+    local mouse_state = r.JS_Mouse_GetState and r.JS_Mouse_GetState(0) or 0
+    if (mouse_state & 8) ~= 0 then
+        return true
+    end
+    -- Fallback to ImGui detection
     local raw_ctx = ctx.ctx or ctx
-    local mods = r.ImGui_GetKeyMods(raw_ctx)
-    return (mods & r.ImGui_Mod_Shift()) ~= 0
+    local left_shift = r.ImGui_IsKeyDown(raw_ctx, r.ImGui_Key_LeftShift())
+    local right_shift = r.ImGui_IsKeyDown(raw_ctx, r.ImGui_Key_RightShift())
+    return left_shift or right_shift
 end
 
 --- Horizontal slider with fine control and double-click reset
@@ -259,7 +267,7 @@ function M.slider_double_fine(ctx, label, value, min, max, format, fine_factor, 
     if is_hovered and mouse_double_clicked and default_value ~= nil then
         new_value = default_value
         changed = true
-    -- Normal slider change
+    -- Normal slider change with optional fine control
     elseif slider_changed then
         new_value = new_display_value / display_mult
 
@@ -315,7 +323,7 @@ function M.v_slider_double_fine(ctx, label, width, height, value, min, max, form
     if is_hovered and mouse_double_clicked and default_value ~= nil then
         new_value = default_value
         changed = true
-    -- Normal slider change
+    -- Normal slider change with optional fine control
     elseif slider_changed then
         new_value = new_display_value / display_mult
 
