@@ -484,7 +484,10 @@ local function draw_toolbar(ctx, icon_font_ref)
             state_module.on_refresh = renumber_device_chain
             refresh_fx_list()
         end,
-        on_refresh = refresh_fx_list,
+        on_refresh = function()
+            refresh_fx_list()
+            browser_module.rescan_plugins()
+        end,
         on_add_rack = add_rack_to_track,
         on_add_fx = function() end,  -- TODO: Implement
         on_collapse_from_depth = collapse_from_depth,

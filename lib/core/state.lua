@@ -65,6 +65,7 @@ M.state = {
         plugins = {},
         filtered = {},
         scanned = false,
+        visible = true,  -- Browser panel visibility
     },
 
     -- Modulator state

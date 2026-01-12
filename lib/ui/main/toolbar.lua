@@ -10,6 +10,14 @@ local config = require('lib.core.config')
 
 local M = {}
 
+-- Status message state
+local status_message = nil
+local status_time = 0
+local STATUS_DURATION = 2.0  -- seconds to show message
+
+-- Button sizing
+local BUTTON_HEIGHT = 24  -- Match icon button height
+
 --------------------------------------------------------------------------------
 -- Toolbar
 --------------------------------------------------------------------------------
@@ -42,15 +50,49 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         local refresh_icon = constants.icon_text(emojimgui, constants.Icons.arrows_counterclockwise)
         if ctx:button(refresh_icon) then
             callbacks.on_refresh()
+            -- Set status message
+            local plugin_count = state.browser and state.browser.plugins and #state.browser.plugins or 0
+            status_message = string.format("Rescanned %d plugins", plugin_count)
+            status_time = reaper.time_precise()
         end
         if icon_font then ctx:pop_font() end
-        if ctx:is_item_hovered() then ctx:set_tooltip("Refresh FX list") end
+        if ctx:is_item_hovered() then ctx:set_tooltip("Refresh FX list & rescan plugins") end
+
+        -- Show status message if recent
+        if status_message then
+            local elapsed = reaper.time_precise() - status_time
+            if elapsed < STATUS_DURATION then
+                ctx:same_line()
+                -- Fade out effect (green text with fading alpha)
+                local alpha = math.floor(255 * (1 - elapsed / STATUS_DURATION))
+                local color = 0x88CC8800 + alpha  -- RRGGBBAA format
+                ctx:text_colored(color, status_message)
+            else
+                status_message = nil
+            end
+        end
+
+        ctx:same_line()
+
+        -- Browser toggle button
+        local browser_visible = state.browser and state.browser.visible
+        local browser_btn_color = browser_visible and 0x446644FF or 0x444444FF
+        ctx:push_style_color(imgui.Col.Button(), browser_btn_color)
+        if ctx:button(browser_visible and "Browser" or "Browser", 0, BUTTON_HEIGHT) then
+            if state.browser then
+                state.browser.visible = not state.browser.visible
+            end
+        end
+        ctx:pop_style_color()
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip(browser_visible and "Hide plugin browser" or "Show plugin browser")
+        end
 
         ctx:same_line()
 
         -- Add Rack button (also draggable)
         ctx:push_style_color(imgui.Col.Button(), 0x446688FF)
-        if ctx:button("+ Rack") then
+        if ctx:button("+ Rack", 0, BUTTON_HEIGHT) then
             if state.track then
                 callbacks.on_add_rack()
             end
