@@ -609,6 +609,9 @@ local function main()
     -- Load user configuration (global, not per-track)
     state_module.load_config()
 
+    -- Load parameter selections (global, not per-track)
+    state_module.load_param_selections()
+
     -- Load expansion state and display names for current track
     if state.track then
         state_module.load_expansion_state()

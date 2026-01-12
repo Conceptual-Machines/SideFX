@@ -269,8 +269,12 @@ function M.draw(ctx, state)
                     state.param_selections = {}
                 end
                 state.param_selections[dialog_state.plugin_full_name] = selected_list
+
+                -- Persist to ExtState
+                local state_mod = require('lib.core.state')
+                state_mod.save_param_selections()
             end
-            
+
             -- Close dialog
             dialog_state.open = false
             dialog_state.plugin_name = nil

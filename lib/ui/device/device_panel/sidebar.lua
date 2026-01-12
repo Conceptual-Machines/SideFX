@@ -129,8 +129,10 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local scale_w = 20
 
     local _, remaining_h = ctx:get_content_region_avail()
-    -- Leave room for phase controls below (80px for label + buttons + spacing)
-    local fader_h = remaining_h - 80
+    -- Leave room for phase controls below (80px for label + buttons + spacing) if enabled
+    local config = require('lib.core.config')
+    local phase_reserve = config.get('show_phase_controls') and 80 or 0
+    local fader_h = remaining_h - phase_reserve
     fader_h = math.max(50, fader_h)
 
     local avail_w, _ = ctx:get_content_region_avail()
@@ -364,13 +366,16 @@ function M.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_col
                 end
             end
 
-            -- Phase Invert controls
-            local ok_phase_l, phase_l = pcall(function() return utility:get_param_normalized(2) end)
-            local ok_phase_r, phase_r = pcall(function() return utility:get_param_normalized(3) end)
+            -- Phase Invert controls (if enabled in settings)
+            local config = require('lib.core.config')
+            if config.get('show_phase_controls') then
+                local ok_phase_l, phase_l = pcall(function() return utility:get_param_normalized(2) end)
+                local ok_phase_r, phase_r = pcall(function() return utility:get_param_normalized(3) end)
 
-            if ok_phase_l and ok_phase_r then
-                if draw_phase_controls(ctx, utility, phase_l, phase_r, center_item) then
-                    interacted = true
+                if ok_phase_l and ok_phase_r then
+                    if draw_phase_controls(ctx, utility, phase_l, phase_r, center_item) then
+                        interacted = true
+                    end
                 end
             end
         else

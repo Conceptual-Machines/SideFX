@@ -63,6 +63,13 @@ function M.draw(ctx)
         state_mod.load_config()
     end
 
+    -- Show/Hide Phase Controls
+    local show_phase = config.get('show_phase_controls')
+    if ctx:checkbox("Show Phase Controls", show_phase) then
+        config.set('show_phase_controls', not show_phase)
+        state_mod.load_config()
+    end
+
     ctx:spacing()
 
     -- Behavior Section

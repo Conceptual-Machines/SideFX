@@ -7,6 +7,7 @@
 local r = reaper
 local Project = require('project')
 local config_mod = require('lib.core.config')
+local json = require('lib.utils.json')
 
 local M = {}
 
@@ -642,6 +643,35 @@ function M.load_config()
     state.config.remember_window_pos = config_mod.get('remember_window_pos')
     state.config.gain_target_db = config_mod.get('gain_target_db')
     state.config.gain_tolerance_db = config_mod.get('gain_tolerance_db')
+end
+
+--------------------------------------------------------------------------------
+-- Parameter Selections Persistence
+--------------------------------------------------------------------------------
+
+--- Save parameter selections to ExtState (global, not per-project)
+function M.save_param_selections()
+    if not state.param_selections or next(state.param_selections) == nil then
+        -- Clear storage if no selections
+        r.SetExtState("SideFX", "ParamSelections", "", true)
+        return
+    end
+
+    local json_str = json.encode(state.param_selections)
+    if json_str then
+        r.SetExtState("SideFX", "ParamSelections", json_str, true)
+    end
+end
+
+--- Load parameter selections from ExtState
+function M.load_param_selections()
+    local json_str = r.GetExtState("SideFX", "ParamSelections")
+    if json_str and json_str ~= "" then
+        local parsed = json.decode(json_str)
+        if parsed and type(parsed) == "table" then
+            state.param_selections = parsed
+        end
+    end
 end
 
 --- Get maximum visible parameters (capped at 128)

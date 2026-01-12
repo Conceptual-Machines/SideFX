@@ -24,6 +24,7 @@ local defaults = {
     -- Display settings
     show_track_name = true,
     show_breadcrumbs = true,
+    show_phase_controls = true,
     icon_font_size = 1,  -- 0=Small, 1=Medium, 2=Large
     max_visible_params = 64,
 
