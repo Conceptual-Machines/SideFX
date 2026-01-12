@@ -249,7 +249,7 @@
     <div class="container">
         <aside class="sidebar">
             <h1>SideFX</h1>
-            <p class="version">v0.2.0</p>
+            <p class="version" id="version">v0.2.0</p>
             <nav>
                 <ul>
                     <li><a href="#installation">Installation</a></li>
@@ -660,5 +660,16 @@
 
         </main>
     </div>
+    <script>
+        // Load version from version.json
+        fetch('version.json')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('version').textContent = 'v' + data.version;
+            })
+            .catch(() => {
+                // Keep fallback version if fetch fails
+            });
+    </script>
 </body>
 </html>
