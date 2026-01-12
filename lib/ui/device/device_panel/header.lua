@@ -54,6 +54,9 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
     if has_delta then num_cols = num_cols + 1 end
     num_cols = num_cols + 1  -- ui button
 
+    -- Track header position for context menu overlay
+    local header_start_x, header_start_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+
     -- Use table for proper layout
     local table_flags = imgui.TableFlags.SizingStretchProp()
     if ctx:begin_table("header_left_" .. guid, num_cols, table_flags) then
@@ -216,7 +219,16 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         ctx:end_table()
     end
 
-    -- Right-click context menu on device header
+    -- Get header end position and calculate size for context menu overlay
+    local header_end_x, header_end_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+    local header_width = r.ImGui_GetContentRegionAvail(ctx.ctx)
+    local header_height = header_end_y - header_start_y
+
+    -- Draw invisible button over header area for context menu (go back to start position)
+    r.ImGui_SetCursorScreenPos(ctx.ctx, header_start_x, header_start_y)
+    r.ImGui_InvisibleButton(ctx.ctx, "##header_ctx_" .. guid, header_width, header_height)
+
+    -- Right-click context menu on entire header area
     if ctx:begin_popup_context_item("device_menu_" .. guid) then
         if ctx:menu_item("Open FX Window") then
             fx:show(3)
@@ -231,12 +243,31 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
             else
                 -- Fallback: use SideFX state system directly
                 local state_module = require('lib.core.state')
-                local sidefx_state = state_module.state
-                sidefx_state.renaming_fx = guid
-                sidefx_state.rename_text = name
+                local sidefx_state_local = state_module.state
+                sidefx_state_local.renaming_fx = guid
+                sidefx_state_local.rename_text = name
             end
         end
         ctx:separator()
+
+        -- Device-specific options (D-containers)
+        if container then
+            local container_name = container:get_name() or ""
+            local is_device_container = container_name:match("^D%d+")
+
+            if is_device_container then
+                if ctx:menu_item("Convert to Rack") then
+                    local container_module = require('lib.device.container')
+                    local result = container_module.convert_device_to_rack(container)
+                    if result then
+                        local state_mod = require('lib.core.state')
+                        state_mod.invalidate_fx_list()
+                    end
+                end
+                ctx:separator()
+            end
+        end
+
         if ctx:menu_item("Delete") then
             if opts.on_delete then
                 opts.on_delete(fx)
@@ -246,6 +277,9 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         end
         ctx:end_popup()
     end
+
+    -- Restore cursor position after overlay
+    r.ImGui_SetCursorScreenPos(ctx.ctx, header_start_x, header_end_y)
 
     return interacted
 end

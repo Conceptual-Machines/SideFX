@@ -33,7 +33,11 @@ end
 -- @param ctx ImGui context
 -- @param chain_name string Display name of chain
 -- @param default_font ImGui font handle (optional)
-local function draw_chain_header(ctx, chain_name, default_font)
+-- @param chain TrackFX Chain container object
+-- @param chain_guid string Chain GUID
+-- @param state table State object
+-- @param on_refresh function Refresh callback
+local function draw_chain_header(ctx, chain_name, default_font, chain, chain_guid, state, on_refresh)
     ctx:table_next_row(0, 20)  -- Smaller row height (20px)
     ctx:table_set_column_index(0)
     if default_font then
@@ -41,10 +45,61 @@ local function draw_chain_header(ctx, chain_name, default_font)
     end
     ctx:text_colored(0xAAAAAAFF, "Chain:")
     ctx:same_line()
-    ctx:text(chain_name)
+    -- Use selectable for right-click menu support (transparent background)
+    ctx:push_style_color(imgui.Col.Header(), 0x00000000)
+    ctx:push_style_color(imgui.Col.HeaderHovered(), 0x00000000)
+    ctx:push_style_color(imgui.Col.HeaderActive(), 0x00000000)
+    if ctx:selectable(chain_name .. "##chain_header_" .. chain_guid, false) then
+        -- Single click - select chain
+        if chain and chain_guid then
+            local ok_parent, parent_rack = pcall(function() return chain:get_parent_container() end)
+            if ok_parent and parent_rack then
+                local ok_rack_guid, rack_guid = pcall(function() return parent_rack:get_guid() end)
+                if ok_rack_guid and rack_guid then
+                    local state_module = require('lib.core.state')
+                    state_module.select_chain(rack_guid, chain_guid)
+                end
+            end
+        end
+    end
+    ctx:pop_style_color(3)
     if default_font then
         ctx:pop_font()
     end
+
+    -- Right-click context menu on chain header
+    if chain and chain_guid and ctx:begin_popup_context_item("chain_header_menu_" .. chain_guid) then
+        if ctx:menu_item("Rename") then
+            local state_module = require('lib.core.state')
+            state_module.state.renaming_fx = chain_guid
+            state_module.state.rename_text = state.display_names[chain_guid] or chain_name
+        end
+        ctx:separator()
+
+        -- Convert to Devices option
+        local chain_full_name = chain:get_name() or ""
+        if chain_full_name:match("^R%d+_C%d+") then
+            if ctx:menu_item("Convert to Devices") then
+                local container_module = require('lib.device.container')
+                local result = container_module.convert_chain_to_devices(chain)
+                if result then
+                    local state_mod = require('lib.core.state')
+                    state_mod.invalidate_fx_list()
+                end
+                if on_refresh then on_refresh() end
+            end
+            ctx:separator()
+        end
+
+        if ctx:menu_item("Delete") then
+            chain:delete()
+            local state_mod = require('lib.core.state')
+            state_mod.invalidate_fx_list()
+            if on_refresh then on_refresh() end
+        end
+        ctx:end_popup()
+    end
+
     ctx:separator()
 end
 
@@ -258,10 +313,20 @@ function M.draw(ctx, selected_chain, rack_h, opts)
 
     -- Get devices from chain
     local devices = {}
+    local seen_guids = {}  -- Track GUIDs to detect duplicates
     for child in selected_chain:iter_container_children() do
         local ok, child_name = pcall(function() return child:get_name() end)
+        local ok_guid, child_guid = pcall(function() return child:get_guid() end)
         if ok and child_name then
-            table.insert(devices, child)
+            -- Skip duplicates (same GUID)
+            if ok_guid and child_guid then
+                if not seen_guids[child_guid] then
+                    seen_guids[child_guid] = true
+                    table.insert(devices, child)
+                end
+            else
+                table.insert(devices, child)
+            end
         end
     end
 
@@ -309,8 +374,8 @@ function M.draw(ctx, selected_chain, rack_h, opts)
             -- Use table layout so header width matches content width
             local table_flags = imgui.TableFlags.SizingStretchSame()
             if ctx:begin_table("chain_table_" .. selected_chain_guid, 1, table_flags) then
-                -- Draw header with chain name
-                draw_chain_header(ctx, chain_name, default_font)
+                -- Draw header with chain name (with context menu support)
+                draw_chain_header(ctx, chain_name, default_font, selected_chain, selected_chain_guid, state, refresh_fx_list)
 
                 -- Row 2: Content
                 ctx:table_next_row()

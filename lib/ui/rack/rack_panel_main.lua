@@ -323,7 +323,6 @@ end
 --   - refresh_fx_list: function () -> nil
 --   - get_rack_mixer: function (rack) -> TrackFX|nil
 --   - draw_pan_slider: function (ctx, id, pan_val, width) -> (changed, new_pan)
---   - dissolve_container: function (rack) -> nil
 --   - get_fx_display_name: function (fx) -> string
 --   - add_device_to_chain: function (chain, plugin) -> nil
 --   - reorder_chain_in_rack: function (rack, from_idx, to_idx) -> nil
@@ -352,7 +351,6 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
     local refresh_fx_list = opts.refresh_fx_list
     local get_rack_mixer = opts.get_rack_mixer
     local draw_pan_slider = opts.draw_pan_slider
-    local dissolve_container = opts.dissolve_container
     local get_fx_display_name = opts.get_fx_display_name
     local add_device_to_chain = opts.add_device_to_chain
     local reorder_chain_in_rack = opts.reorder_chain_in_rack
@@ -431,9 +429,6 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
             on_rename = function(rack_guid, display_name)
                 state.renaming_fx = rack_guid
                 state.rename_text = display_name or ""
-            end,
-            on_dissolve = function(rack)
-                dissolve_container(rack)
             end,
             on_delete = function(rack)
                 rack:delete()

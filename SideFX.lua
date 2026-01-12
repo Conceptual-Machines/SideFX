@@ -355,18 +355,28 @@ local function add_to_new_container(fx_list)
     return container
 end
 
-local function dissolve_container(container)
-    local result = container_module.dissolve_container(container)
-    if result then refresh_fx_list() end
-    return result
-end
-
 --------------------------------------------------------------------------------
 -- UI: Plugin Browser
 --------------------------------------------------------------------------------
 
 local function draw_plugin_browser(ctx, icon_font_ref)
     browser_panel.draw(ctx, state, icon_font_ref.value, icon_size, add_plugin_to_track, filter_plugins)
+end
+
+--------------------------------------------------------------------------------
+-- Device Utilities
+--------------------------------------------------------------------------------
+
+local function convert_device_to_rack(device)
+    local result = container_module.convert_device_to_rack(device)
+    if result then refresh_fx_list() end
+    return result
+end
+
+local function convert_chain_to_devices(chain)
+    local result = container_module.convert_chain_to_devices(chain)
+    if result and #result > 0 then refresh_fx_list() end
+    return result
 end
 
 --------------------------------------------------------------------------------
@@ -378,8 +388,9 @@ local function draw_fx_context_menu(ctx, fx, guid, i, enabled, is_container, dep
         state = state,
         collapse_from_depth = collapse_from_depth,
         refresh_fx_list = refresh_fx_list,
-        dissolve_container = dissolve_container,
         add_to_new_container = add_to_new_container,
+        convert_to_rack = convert_device_to_rack,
+        convert_to_devices = convert_chain_to_devices,
         get_multi_select_count = get_multi_select_count,
         get_multi_selected_fx = get_multi_selected_fx,
         clear_multi_select = clear_multi_select,
@@ -512,7 +523,6 @@ local function draw_rack_panel(ctx, rack, avail_height, is_nested, callbacks)
         refresh_fx_list = refresh_fx_list,
         get_rack_mixer = get_rack_mixer,
         draw_pan_slider = draw_pan_slider,
-        dissolve_container = dissolve_container,
         get_fx_display_name = get_fx_display_name,
         add_device_to_chain = add_device_to_chain,
         reorder_chain_in_rack = reorder_chain_in_rack,

@@ -85,21 +85,17 @@ local function draw_rack_rename_input(ctx, rack_guid, state, state_module)
     return interacted
 end
 
---- Draw rack context menu (Rename, Dissolve, Delete)
+--- Draw rack context menu (Rename, Delete)
 -- @param ctx ImGui context
 -- @param button_id string Button ID for popup context
 -- @param rack_guid string Rack GUID
 -- @param rack ReaWrap rack FX object
 -- @param state table State object
--- @param callbacks table Callbacks {on_rename, on_dissolve, on_delete}
+-- @param callbacks table Callbacks {on_rename, on_delete}
 local function draw_rack_context_menu(ctx, button_id, rack_guid, rack, state, callbacks)
     if ctx:begin_popup_context_item(button_id) then
         if ctx:menu_item("Rename") then
             callbacks.on_rename(rack_guid, state.display_names[rack_guid])
-        end
-        ctx:separator()
-        if ctx:menu_item("Dissolve Container") then
-            callbacks.on_dissolve(rack)
         end
         ctx:separator()
         if ctx:menu_item("Delete") then
@@ -226,7 +222,7 @@ local function draw_chain_button(ctx, chain_name, chain_guid, chain_btn_id, row_
     end
 end
 
---- Draw chain context menu (Rename, Delete)
+--- Draw chain context menu (Rename, Convert to Devices, Delete)
 -- @param ctx ImGui context
 -- @param chain_btn_id string Button ID for popup context
 -- @param chain_guid string Chain GUID
@@ -243,6 +239,22 @@ local function draw_chain_context_menu(ctx, chain_btn_id, chain_guid, chain, is_
             callbacks.on_rename_chain(chain_guid, custom_name)
         end
         ctx:separator()
+
+        -- Chain-specific options
+        local chain_name = chain:get_name() or ""
+        if chain_name:match("^R%d+_C%d+") then
+            if ctx:menu_item("Convert to Devices") then
+                local container_module = require('lib.device.container')
+                local result = container_module.convert_chain_to_devices(chain)
+                if result and #result > 0 then
+                    local state_mod = require('lib.core.state')
+                    state_mod.invalidate_fx_list()
+                end
+                callbacks.on_refresh()
+            end
+            ctx:separator()
+        end
+
         if ctx:menu_item("Delete") then
             chain:delete()
             local rack_guid = rack:get_guid()
@@ -308,7 +320,6 @@ end
 -- @param callbacks table Callbacks:
 --   - on_toggle_expand: (rack_guid, is_expanded) -> nil
 --   - on_rename: (rack_guid, display_name) -> nil
---   - on_dissolve: (rack) -> nil
 --   - on_delete: (rack) -> nil
 --   - icon_font: ImGui font for emojis (optional)
 function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
