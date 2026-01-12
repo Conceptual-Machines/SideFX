@@ -126,13 +126,6 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
                 indicator_x - 2, slider_y,
                 indicator_x + 2, slider_y + slider_h,
                 0xFFFFFFFF)  -- White indicator
-            
-            -- DEBUG: Show values as tooltip on hover
-            if r.ImGui_IsItemHovered(ctx.ctx) then
-                local tooltip = string.format("base=%.3f off=%.3f sc=%.3f\ncurrent=%.3f\nbipolar=%s", 
-                    baseline, offset, scale, param_val, link.is_bipolar and "yes" or "no")
-                ctx:set_tooltip(tooltip)
-            end
         end
 
         ctx:pop_style_var(1)

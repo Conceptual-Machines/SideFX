@@ -120,6 +120,10 @@ local icon_font = nil
 local icon_size = 16
 local default_font = nil
 
+-- Font references (updated by main_window when fonts are loaded)
+local default_font_ref = { value = nil }
+local icon_font_ref = { value = nil }
+
 local function icon_text(icon_id)
     return constants.icon_text(EmojImGui, icon_id)
 end
@@ -408,7 +412,7 @@ local function draw_fx_list_column(ctx, fx_list, column_title, depth, width, par
         state = state,
         state_module = state_module,
         track = state.track,
-        icon_font = icon_font,
+        icon_font = icon_font_ref.value,
         icon_size = icon_size,
         icon_text = icon_text,
         Icons = Icons,
@@ -503,7 +507,7 @@ local function draw_rack_panel(ctx, rack, avail_height, is_nested, callbacks)
     callbacks = callbacks or {}
     return rack_panel_main.draw(ctx, rack, avail_height, is_nested, {
         state = state,
-        icon_font = icon_font,
+        icon_font = icon_font_ref.value,
         state_module = state_module,
         refresh_fx_list = refresh_fx_list,
         get_rack_mixer = get_rack_mixer,
@@ -534,8 +538,8 @@ draw_chain_column = function(ctx, selected_chain, rack_h)
         add_device_to_chain = add_device_to_chain,
         add_rack_to_chain = add_rack_to_chain,
         draw_rack_panel = draw_rack_panel,
-        icon_font = icon_font,
-        default_font = default_font,
+        icon_font = icon_font_ref.value,
+        default_font = default_font_ref.value,
     })
 end
 
@@ -611,9 +615,9 @@ local function main()
         state_module.load_display_names()
     end
 
-    -- Create font reference tables so they can be updated by callbacks
-    local default_font_ref = { value = default_font }
-    local icon_font_ref = { value = icon_font }
+    -- Initialize module-level font references (will be updated by main_window when fonts load)
+    default_font_ref.value = default_font
+    icon_font_ref.value = icon_font
 
     -- Create window callbacks
     local window_callbacks = main_window.create_callbacks({
