@@ -17,13 +17,14 @@ local M = {}
 function M.get_short_plugin_name(full_name)
     if not full_name then return "" end
     local name = full_name
-    name = name:gsub("^VST3?: ", "")
-    name = name:gsub("^AU: ", "")
+    name = name:gsub("^VST3?i?: ", "")  -- VST, VST3, VSTi, VST3i
+    name = name:gsub("^AUi?: ", "")     -- AU, AUi
     name = name:gsub("^JS: ", "")
-    name = name:gsub("^CLAP: ", "")
-    name = name:gsub("^VSTi: ", "")
+    name = name:gsub("^CLAPi?: ", "")   -- CLAP, CLAPi
     -- Strip path for JS
     name = name:gsub("^.+/", "")
+    -- Strip manufacturer info in parentheses at end
+    name = name:gsub("%s*%([^)]+%)%s*$", "")
     return name
 end
 
@@ -40,10 +41,14 @@ function M.strip_sidefx_prefixes(name)
     name = name:gsub("^D%d+:%s*", "")               -- D1: prefix
     name = name:gsub("^R%d+:%s*", "")               -- R1: prefix
     -- Also strip plugin format prefixes
-    name = name:gsub("^VST3?: ", "")
+    name = name:gsub("^VST3?i?: ", "")  -- VST, VST3, VSTi, VST3i
     name = name:gsub("^AU: ", "")
+    name = name:gsub("^AUi: ", "")
     name = name:gsub("^JS: ", "")
     name = name:gsub("^CLAP: ", "")
+    name = name:gsub("^CLAPi: ", "")
+    -- Strip manufacturer info in parentheses at end (e.g., "Plugin (Manufacturer)")
+    name = name:gsub("%s*%([^)]+%)%s*$", "")
     return name
 end
 
