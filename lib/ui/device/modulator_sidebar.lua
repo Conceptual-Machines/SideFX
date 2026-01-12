@@ -45,8 +45,10 @@ end
 -- Helper function to draw the modulator slot grid (4x2 grid)
 local function draw_modulator_grid(ctx, guid, modulators, expanded_slot_idx, slot_width, slot_height, state, state_guid, container, opts)
     local interacted = false
-    
-    ctx:dummy(8, 1)  -- Left padding
+
+    -- Add padding around the grid
+    ctx:spacing()
+    ctx:indent(8)  -- Left padding
 
     -- Use basic table - let button sizes control column width
     if ctx:begin_table("mod_grid_" .. guid, 4) then
