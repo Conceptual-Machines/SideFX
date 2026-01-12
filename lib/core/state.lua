@@ -660,7 +660,6 @@ end
 --- Save parameter selections to ExtState (global, not per-project)
 function M.save_param_selections()
     if not state.param_selections or next(state.param_selections) == nil then
-        -- Clear storage if no selections
         r.SetExtState("SideFX", "ParamSelections", "", true)
         return
     end

@@ -54,19 +54,19 @@ local function serialize_value(value, indent)
             table.insert(parts, "]")
             return table.concat(parts)
         else
-            -- Object
+            -- Object (single-line for ExtState compatibility)
             local parts = {}
-            table.insert(parts, "{\n")
+            table.insert(parts, "{")
             local first = true
             for k, v in pairs(value) do
                 if not first then
-                    table.insert(parts, ",\n")
+                    table.insert(parts, ",")
                 end
                 first = false
                 local key_str = type(k) == "string" and ('"' .. escape_string(k) .. '"') or tostring(k)
-                table.insert(parts, indent_str .. "  " .. key_str .. ": " .. serialize_value(v, indent + 1))
+                table.insert(parts, key_str .. ":" .. serialize_value(v, indent + 1))
             end
-            table.insert(parts, "\n" .. indent_str .. "}")
+            table.insert(parts, "}")
             return table.concat(parts)
         end
     else
@@ -86,7 +86,7 @@ end
 -- @return table|nil Decoded Lua table or nil on error
 function M.decode(json_str)
     if not json_str or json_str == "" then return nil end
-    
+
     local pos = 1
     local len = #json_str
     

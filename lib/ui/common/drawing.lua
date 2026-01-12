@@ -4,6 +4,10 @@
 local M = {}
 local r = reaper
 
+-- Track when a slider is being dragged with fine control (Shift held)
+-- This is used by curve_editor to avoid Shift key conflicts
+M.slider_fine_active = false
+
 --- Draw a UI icon (spanner/wrench emoji button)
 -- @param ctx ImGui context
 -- @param label string Label for the button
@@ -263,6 +267,15 @@ function M.slider_double_fine(ctx, label, value, min, max, format, fine_factor, 
     local flags = r.ImGui_SliderFlags_NoRoundToFormat()
     local slider_changed, new_display_value = r.ImGui_SliderDouble(raw_ctx, label, display_value, display_min, display_max, format or "%.3f", flags)
 
+    -- Track if this slider is actively being dragged with Shift (for curve_editor conflict avoidance)
+    local is_active = r.ImGui_IsItemActive(raw_ctx)
+    if is_active and shift_held then
+        M.slider_fine_active = true
+    elseif not is_active then
+        -- Only clear when no slider is active (will be set again if another slider is active)
+        M.slider_fine_active = false
+    end
+
     local is_hovered = r.ImGui_IsItemHovered(raw_ctx)
     local mouse_double_clicked = r.ImGui_IsMouseDoubleClicked(raw_ctx, 0)
 
@@ -321,6 +334,14 @@ function M.v_slider_double_fine(ctx, label, width, height, value, min, max, form
     local raw_ctx = ctx.ctx or ctx
     local flags = r.ImGui_SliderFlags_NoRoundToFormat()
     local slider_changed, new_display_value = r.ImGui_VSliderDouble(raw_ctx, label, width, height, display_value, display_min, display_max, format or "%.3f", flags)
+
+    -- Track if this slider is actively being dragged with Shift (for curve_editor conflict avoidance)
+    local is_active = r.ImGui_IsItemActive(raw_ctx)
+    if is_active and shift_held then
+        M.slider_fine_active = true
+    elseif not is_active then
+        M.slider_fine_active = false
+    end
 
     local is_hovered = r.ImGui_IsItemHovered(raw_ctx)
     local mouse_double_clicked = r.ImGui_IsMouseDoubleClicked(raw_ctx, 0)
