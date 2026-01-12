@@ -485,7 +485,7 @@ local function draw_link_param_dropdown(ctx, guid, fx, expanded_modulator, exist
         local ok_params, param_count = pcall(function() return target_device:get_num_params() end)
         if ok_params and param_count and param_count > 0 then
             local current_param_name = "Link..."
-            ctx:set_next_item_width(158)
+            ctx:set_next_item_width(-1)
             if ctx:begin_combo("##link_param_" .. guid, current_param_name) then
                 for param_idx = 0, param_count - 1 do
                     local ok_pname, param_name = pcall(function() return target_device:get_param_name(param_idx) end)
