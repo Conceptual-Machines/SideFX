@@ -46,10 +46,27 @@
             overflow-y: auto;
         }
 
-        .sidebar h1 {
-            font-size: 1.5rem;
+        .sidebar .logo {
+            width: 100%;
+            max-width: 160px;
             margin-bottom: 0.5rem;
-            color: var(--accent);
+        }
+
+        .hero {
+            text-align: center;
+            margin-bottom: 3rem;
+            padding-bottom: 2rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .hero .logo {
+            width: 280px;
+            margin-bottom: 1rem;
+        }
+
+        .hero p {
+            font-size: 1.2rem;
+            color: var(--text-secondary);
         }
 
         .sidebar .version {
@@ -248,7 +265,7 @@
 <body>
     <div class="container">
         <aside class="sidebar">
-            <h1>SideFX</h1>
+            <img src="assets/logo.svg" alt="SideFX" class="logo">
             <p class="version" id="version">v0.2.0</p>
             <nav>
                 <ul>
@@ -269,6 +286,11 @@
         </aside>
 
         <main class="main">
+            <div class="hero">
+                <img src="assets/logo.svg" alt="SideFX" class="logo">
+                <p>Parallel routing and modulation for REAPER 7+ — Ableton/Bitwig style</p>
+            </div>
+
             <h2 id="installation">Installation</h2>
             <p>SideFX requires REAPER 7.0 or later.</p>
 
