@@ -29,7 +29,7 @@ Ableton/Bitwig-style FX rack management for REAPER 7+.
 |---------|------------|--------------|
 | ReaImGui | ReaTeam Extensions | UI framework |
 | js_ReaScriptAPI | ReaTeam Extensions | Extended API functions |
-| ReaWrap | ReaTeam Scripts | OOP wrapper library |
+| ReaWrap | Conceptual Machines | OOP wrapper library |
 | RPP-Parser | ReaTeam Scripts | Preset save/load |
 | EmojImGui | ReaTeam Scripts | Icon support |
 
