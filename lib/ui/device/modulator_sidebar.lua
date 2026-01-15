@@ -944,6 +944,19 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
                     interacted = true
                 end
             end
+
+            -- Show input level meter (debug)
+            local ok_level, input_level = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_INPUT_LEVEL_DEBUG) end)
+            if ok_level and input_level then
+                ctx:text("Input Level:")
+                ctx:same_line()
+                local level_pct = math.floor(input_level * 100)
+                local level_color = input_level > audio_thresh and 0x44FF44FF or 0x888888FF
+                ctx:text_colored(level_color, string.format("%d%%", level_pct))
+                if input_level < 0.01 then
+                    ctx:text_colored(0xFF8844FF, "(No audio detected)")
+                end
+            end
         end
 
         -- Attack/Release (show when trigger mode is not Free)

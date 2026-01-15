@@ -93,6 +93,9 @@ slider89:0<0,1,1{Unipolar,Bipolar}>-Bipolar Mode
 // 0 = Internal (main input spl0/spl1), 1 = External (sidechain spl2/spl3)
 slider90:0<0,1,1{Internal,External}>-Audio Source
 
+// Debug: shows input level being received (read-only)
+slider91:0<0,1,0.001>-Input Level (Debug)
+
 @init
 MAX_NODES = 16;
 
@@ -450,6 +453,8 @@ trigger_mode == 3 ? (
   ) : (
     input_level = max(abs(spl2), abs(spl3));
   );
+  // Debug: expose input level (smoothed for display)
+  slider91 = slider91 * 0.95 + input_level * 0.05;
   input_level > slider23 ? (
     triggered = 1;
     env_value = env_value * attack_coeff + (1 - attack_coeff);
