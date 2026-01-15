@@ -1,15 +1,7 @@
 desc:SideFX Modulator
 author:Nomad Monad
-version:2.1
-options:no_meter
-
-// Pin declarations for main input + sidechain input
-in_pin:input L
-in_pin:input R
-in_pin:sidechain L
-in_pin:sidechain R
-out_pin:output L
-out_pin:output R
+version:2.2
+options:no_meter want_all_kb
 
 // Rate
 slider1:0<0,1,1{Free,Sync}>-Tempo Mode
