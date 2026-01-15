@@ -272,13 +272,6 @@ local function draw_phase_controls(ctx, utility, phase_l, phase_r, center_item_f
 
     ctx:spacing()
 
-    local phase_text = "Phase"
-    local phase_text_w = r.ImGui_CalcTextSize(ctx.ctx, phase_text)
-    center_item_fn(phase_text_w)
-    ctx:push_style_color(r.ImGui_Col_Text(), 0xCC8888FF)
-    ctx:text(phase_text)
-    ctx:pop_style_color()
-
     local phase_btn_w = 18
     local phase_gap = 2
     local phase_total_w = phase_btn_w * 2 + phase_gap
