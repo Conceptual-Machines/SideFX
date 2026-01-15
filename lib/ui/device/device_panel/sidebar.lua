@@ -130,9 +130,9 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local scale_w = 14
 
     local _, remaining_h = ctx:get_content_region_avail()
-    -- Leave room for phase controls below (30px for buttons + spacing) if enabled
+    -- Leave room for phase controls below (40px for buttons + spacing) if enabled
     local config = require('lib.core.config')
-    local phase_reserve = config.get('show_phase_controls') and 30 or 0
+    local phase_reserve = config.get('show_phase_controls') and 40 or 0
     local fader_h = remaining_h - phase_reserve
     fader_h = math.max(50, fader_h)
 
@@ -271,9 +271,10 @@ local function draw_phase_controls(ctx, utility, phase_l, phase_r, center_item_f
     local interacted = false
 
     ctx:spacing()
+    ctx:spacing()
 
-    local phase_btn_size = 14
-    local phase_gap = 2
+    local phase_btn_size = 18
+    local phase_gap = 4
     local phase_total_w = phase_btn_size * 2 + phase_gap
     center_item_fn(phase_total_w)
 
