@@ -584,11 +584,14 @@ local function draw_panel_border(draw_list, cursor_x, cursor_y, panel_width, pan
 end
 
 --- Calculate panel dimensions based on collapsed state
-local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, is_device_collapsed)
+local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, is_device_collapsed, show_mix_delta)
     local panel_height, panel_width, content_width, num_columns, params_per_column
 
     -- Fixed width for gain/pan column (right side of nested table)
     local gain_pan_w = 70
+
+    -- Extra width for mix/delta columns in header when shown
+    local mix_delta_extra_w = show_mix_delta and 60 or 0  -- mix (28) + delta (32)
 
     if is_panel_collapsed then
         -- Collapsed: full height but narrow width
@@ -613,7 +616,8 @@ local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg,
         -- Calculate device content width (for params) based on collapse state
         local device_content_width
         if is_device_collapsed then
-            device_content_width = 100  -- Fixed width when device collapsed (buttons + name + fader)
+            -- Dynamic width based on whether mix/delta is shown (3x2 vs 2x2 layout)
+            device_content_width = show_mix_delta and 100 or 70
         else
             device_content_width = cfg.column_width * num_columns  -- Full width for params
         end
@@ -624,8 +628,8 @@ local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg,
             -- Collapsed: no separate gain/pan column, it's in the device column
             device_wrapper_width = device_content_width
         else
-            -- Expanded: device content + gain/pan column
-            device_wrapper_width = device_content_width + gain_pan_w
+            -- Expanded: device content + gain/pan column + extra for mix/delta
+            device_wrapper_width = device_content_width + gain_pan_w + mix_delta_extra_w
         end
 
         -- Calculate total panel width: modulator column + device wrapper + padding
@@ -749,8 +753,12 @@ local function draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, 
     -- Check if device controls are collapsed
     local is_device_collapsed = device_collapsed[state_guid] or false
 
+    -- Check config for mix/delta display
+    local config = require('lib.core.config')
+    local show_mix_delta = config.get('show_mix_delta')
+
     -- Calculate panel dimensions
-    local dims = calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, is_device_collapsed)
+    local dims = calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, is_device_collapsed, show_mix_delta)
     local panel_height = dims.panel_height
     local panel_width = dims.panel_width
     local content_width = dims.content_width
