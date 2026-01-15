@@ -148,10 +148,12 @@ local function find_or_create_midi_send(source_track, dest_track)
     if send_idx >= 0 then
         -- Set audio to None (source channel -1)
         r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_SRCCHAN", -1)
-        -- Enable MIDI: 1057 (0x421) = source all (1) + dest all (1<<5) + MIDI to instruments (1024)
-        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_MIDIFLAGS", 1057)
-        -- Send on MIDI Bus 2 (index 1) to separate from internal MIDI (Bus 1)
-        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_MIDI_DSTBUS", 1)
+        -- Enable MIDI on Bus 2:
+        -- Bit 10 (1024): MIDI to instruments
+        -- Bit 23 (0x800000): Bus 2 destination
+        -- Source/dest channels: 0 = all (when bus is set)
+        local midi_flags = 1024 + 0x800000  -- MIDI to instruments + Bus 2
+        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_MIDIFLAGS", midi_flags)
         -- Ensure source track's main send to parent/master stays enabled
         r.SetMediaTrackInfo_Value(source_track.pointer, "B_MAINSEND", 1)
         return send_idx
@@ -596,11 +598,13 @@ local function draw_trigger_and_advanced_button(ctx, guid, expanded_modulator, o
         local trigger_modes = {"Free", "Transport", "MIDI", "Audio"}
         trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
 
-        -- Draw trigger indicator dot (for MIDI/Audio modes)
+        -- Draw trigger indicator dot (for MIDI/Audio modes) - flashes on trigger
         if trig_idx >= 2 then  -- MIDI or Audio mode
             local ok_triggered, triggered_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_TRIGGERED) end)
-            local is_triggered = ok_triggered and triggered_val and triggered_val > 0.5
-            local dot_color = is_triggered and 0x00FF00FF or 0x444444FF  -- Green when triggered, grey otherwise
+            -- JSFX outputs 1 for ~100ms on trigger, then 0
+            local show_flash = ok_triggered and triggered_val and triggered_val > 0.5
+
+            local dot_color = show_flash and 0x00FF00FF or 0x444444FF  -- Green flash, grey otherwise
             local dot_x, dot_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
             local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
             r.ImGui_DrawList_AddCircleFilled(draw_list, dot_x + 6, dot_y + 10, 4, dot_color)

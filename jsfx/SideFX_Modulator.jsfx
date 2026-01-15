@@ -120,6 +120,8 @@ mem_sorted_y = 1120;
 lfo_phase = 0;
 env_value = 1;
 triggered = 0;
+trigger_pulse_counter = 0;  // Block counter for UI pulse
+last_triggered = 0;
 current_tempo = 120;
 rate = 1;
 last_play_state = 0;
@@ -432,6 +434,9 @@ trigger_mode == 1 ? (
 midi_trigger_sample = -1;
 current_block_sample = 0;
 
+// Decrement block-based pulse counter (~10 blocks = visible flash)
+trigger_pulse_counter > 0 ? trigger_pulse_counter -= 1;
+
 // Filter MIDI by bus based on source setting (slider21)
 // Internal (0) = Bus 1 (ext_midi_bus=0), External (1) = Bus 2 (ext_midi_bus=1)
 trigger_mode == 2 ? (
@@ -450,6 +455,7 @@ while (midirecv(offset, msg1, msg2, msg3)) (
       (midi_note == 0 || note == midi_note) ? (
         midi_trigger_sample = offset;  // Store sample offset for @sample
         triggered = 1;
+        trigger_pulse_counter = 10;  // Flash for ~10 blocks
       );
     );
     // Note off is ignored - LFO continues running after being triggered
@@ -482,8 +488,11 @@ trigger_mode == 3 ? (
   input_level *= input_gain;
   // Debug: expose input level after gain (smoothed for display)
   slider92 = slider92 * 0.95 + min(input_level, 1) * 0.05;
+  last_triggered = triggered;
   input_level > slider23 ? (
     triggered = 1;
+    // Pulse on rising edge (threshold crossing)
+    last_triggered == 0 ? trigger_pulse_counter = 10;
     env_value = env_value * attack_coeff + (1 - attack_coeff);
   ) : (
     triggered = 0;
@@ -533,5 +542,8 @@ raw_lfo = eval_spline(phase);
 // The env_value still applies for attack/release envelope
 slider4 = raw_lfo * env_value;
 slider87 = phase;  // Expose current playhead position for UI (read-only, no automate)
-slider93 = triggered;  // Expose triggered state for UI indicator
+
+// Output pulse state for UI indicator (counter decremented in @block)
+slider93 = trigger_pulse_counter > 0 ? 1 : 0;
+
 slider_automate(slider4);
