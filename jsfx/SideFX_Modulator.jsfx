@@ -1,6 +1,6 @@
 desc:SideFX Modulator
 author:Nomad Monad
-version:2.5
+version:2.6
 options:no_meter gmem=SideFX
 
 // Rate
@@ -426,19 +426,14 @@ while (midirecv(offset, msg1, msg2, msg3)) (
     status = msg1 & 0xF0;
     note = msg2;
     velocity = msg3;
-    // Note on
+    // Note on - restart LFO
     status == 0x90 && velocity > 0 ? (
       (midi_note == 0 || note == midi_note) ? (
         triggered = 1;
         lfo_phase = 0;
       );
     );
-    // Note off (0x80 or 0x90 with velocity 0)
-    (status == 0x80 || (status == 0x90 && velocity == 0)) ? (
-      (midi_note == 0 || note == midi_note) ? (
-        triggered = 0;
-      );
-    );
+    // Note off is ignored - LFO continues running after being triggered
   );
   midisend(offset, msg1, msg2, msg3);
 );
