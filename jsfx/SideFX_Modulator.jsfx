@@ -1,6 +1,6 @@
 desc:SideFX Modulator
 author:Nomad Monad
-version:2.7
+version:2.8
 options:no_meter gmem=SideFX
 
 // Rate
@@ -509,7 +509,12 @@ one_shot = slider28;
 );
 
 phase = lfo_phase + slider5;
-phase >= 1 ? phase -= 1;
+// In one-shot mode, clamp phase at 1 to hold last value; in loop mode, wrap
+one_shot && lfo_phase >= 1 ? (
+  phase = 0.9999;  // Clamp just below 1 to get last point value
+) : (
+  phase >= 1 ? phase -= 1;
+);
 
 raw_lfo = eval_spline(phase);
 
