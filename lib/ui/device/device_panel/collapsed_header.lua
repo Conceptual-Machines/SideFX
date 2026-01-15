@@ -57,7 +57,7 @@ function M.draw(ctx, fx, container, state_guid, enabled, device_collapsed, opts,
     ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
     ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
     ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
-    if ctx:button("▶##expand_collapsed_" .. state_guid, 20, 20) then  -- Right arrow for collapsed (click to expand)
+    if ctx:button("◀##expand_collapsed_" .. state_guid, 20, 20) then  -- Left arrow for collapsed (click to expand)
         device_collapsed[state_guid] = false
         interacted = true
     end

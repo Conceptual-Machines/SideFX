@@ -60,7 +60,7 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
     -- Use table for proper layout
     local table_flags = imgui.TableFlags.SizingStretchProp()
     if ctx:begin_table("header_left_" .. guid, num_cols, table_flags) then
-        ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
+        ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 48)
         ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 70)
         if has_mix then
             ctx:table_setup_column("mix", imgui.TableColumnFlags.WidthFixed(), 28)
@@ -72,7 +72,7 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
 
         ctx:table_next_row()
 
-        -- Column 1: Drag handle
+        -- Column 1: Drag handle + Collapse button
         ctx:table_set_column_index(0)
         ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
         ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
@@ -80,9 +80,18 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         if ctx:button("≡##drag_" .. guid, 20, 20) then
             -- Drag handle doesn't do anything on click
         end
-        ctx:pop_style_color(3)
         if r.ImGui_IsItemHovered(ctx.ctx) then
             ctx:set_tooltip("Drag to reorder")
+        end
+        ctx:same_line()
+        if ctx:button("▼##collapse_" .. guid, 20, 20) then
+            if opts.device_collapsed then
+                opts.device_collapsed[opts.state_guid] = true
+            end
+        end
+        ctx:pop_style_color(3)
+        if r.ImGui_IsItemHovered(ctx.ctx) then
+            ctx:set_tooltip("Collapse device")
         end
 
         -- Drag/drop handling
@@ -284,18 +293,17 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
     return interacted
 end
 
---- Draw device control buttons (right side of header) - ON, Delete, and Device collapse
+--- Draw device control buttons (right side of header) - ON and Delete
 function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_device_collapsed, device_collapsed, opts, colors)
     local r = reaper
     local drawing = require('lib.ui.common.drawing')
     local imgui = require('imgui')
     local interacted = false
 
-    -- 3 columns: on | x | collapse
-    if ctx:begin_table("header_right_" .. state_guid, 3, 0) then
+    -- 2 columns: on | x
+    if ctx:begin_table("header_right_" .. state_guid, 2, 0) then
         ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 24)
         ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 20)
-        ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 20)
 
         ctx:table_next_row()
 
@@ -329,21 +337,6 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
         ctx:pop_style_color(2)
         if r.ImGui_IsItemHovered(ctx.ctx) then
             ctx:set_tooltip("Delete device")
-        end
-
-        -- Column: Collapse/Expand Device
-        ctx:table_set_column_index(2)
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
-        ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
-        local collapse_icon = "▼"  -- Down arrow for expanded (click to collapse)
-        if ctx:button(collapse_icon .. "##collapse_device_" .. state_guid, 20, 20) then
-            device_collapsed[state_guid] = true
-            interacted = true
-        end
-        ctx:pop_style_color(3)
-        if r.ImGui_IsItemHovered(ctx.ctx) then
-            ctx:set_tooltip("Collapse device controls")
         end
 
         ctx:end_table()
