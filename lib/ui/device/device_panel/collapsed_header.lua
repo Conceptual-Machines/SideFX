@@ -16,7 +16,7 @@ function M.draw(ctx, fx, container, state_guid, enabled, device_collapsed, opts,
     local btn_size = 20
 
     -- Use a table to center the 2x2 grid
-    if ctx:begin_table("collapsed_btns_" .. state_guid, 2, imgui.TableFlags.SizingFixedFit()) then
+    if ctx:begin_table("collapsed_btns_" .. state_guid, 2, r.ImGui_TableFlags_SizingFixedFit()) then
         ctx:table_setup_column("col1", imgui.TableColumnFlags.WidthFixed(), btn_size + 4)
         ctx:table_setup_column("col2", imgui.TableColumnFlags.WidthFixed(), btn_size + 4)
 
