@@ -125,9 +125,9 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     ctx:spacing()
 
     -- Fader with meter and scale (compact design)
-    local fader_w = 16
+    local fader_w = 12
     local meter_w = 8
-    local scale_w = 16
+    local scale_w = 14
 
     local _, remaining_h = ctx:get_content_region_avail()
     -- Leave room for phase controls below (50px for label + buttons + spacing) if enabled
@@ -138,7 +138,7 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
 
     local avail_w, _ = ctx:get_content_region_avail()
     local total_w = scale_w + fader_w + meter_w + 4
-    local offset_x = math.max(0, (avail_w - total_w) / 2)
+    local offset_x = math.max(0, (avail_w - total_w) / 2 - 4)  -- Shift left
 
     ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + offset_x)
 
