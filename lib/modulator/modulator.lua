@@ -219,22 +219,32 @@ function M.create_param_link(mod_fx, target_fx, target_param_idx)
     r.ShowConsoleMsg(string.format("Creating plink: mod_idx=%d (plink_effect=%d), target_idx=%d, param=%d\n",
         mod_fx_idx, plink_effect_idx, target_fx_idx, target_param_idx))
 
+    -- Get current parameter value to use as baseline offset
+    local current_value = r.TrackFX_GetParamNormalized(state.track.pointer, target_fx_idx, target_param_idx)
+    r.ShowConsoleMsg(string.format("Current param value: %.3f\n", current_value))
+
     local plink_prefix = string.format("param.%d.plink.", target_param_idx)
 
-    -- Create the parameter link
+    -- Create the parameter link with proper scale/offset to preserve current value
     local ok1 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "active", "1")
     local ok2 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "effect", tostring(plink_effect_idx))
     local ok3 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "param", tostring(M.MOD_OUTPUT_PARAM))
+    -- Set offset to current value so parameter doesn't jump
+    local ok4 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "offset", tostring(current_value))
+    -- Set scale to 0 initially - user increases via Depth control
+    local ok5 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "scale", "0")
 
-    r.ShowConsoleMsg(string.format("Plink result: ok1=%s ok2=%s ok3=%s\n",
-        tostring(ok1), tostring(ok2), tostring(ok3)))
+    r.ShowConsoleMsg(string.format("Plink result: active=%s effect=%s param=%s offset=%s scale=%s\n",
+        tostring(ok1), tostring(ok2), tostring(ok3), tostring(ok4), tostring(ok5)))
 
     -- Verify what was actually created by reading back the plink
     if ok1 and ok2 and ok3 then
         local _, actual_effect = r.TrackFX_GetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "effect")
         local _, actual_param = r.TrackFX_GetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "param")
-        r.ShowConsoleMsg(string.format("Plink verification: effect=%s, param=%s (expected effect=%d, param=%d)\n",
-            actual_effect or "nil", actual_param or "nil", plink_effect_idx, M.MOD_OUTPUT_PARAM))
+        local _, actual_offset = r.TrackFX_GetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "offset")
+        local _, actual_scale = r.TrackFX_GetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "scale")
+        r.ShowConsoleMsg(string.format("Plink verification: effect=%s, param=%s, offset=%s, scale=%s\n",
+            actual_effect or "nil", actual_param or "nil", actual_offset or "nil", actual_scale or "nil"))
 
         -- Also verify the target FX and parameter after moving
         local final_target_fx = state.track:get_track_fx(target_fx_idx)
@@ -245,7 +255,7 @@ function M.create_param_link(mod_fx, target_fx, target_param_idx)
         end
     end
 
-    return ok1 and ok2 and ok3
+    return ok1 and ok2 and ok3 and ok4 and ok5
 end
 
 --- Remove a parameter modulation link.
