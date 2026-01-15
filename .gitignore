@@ -10,11 +10,12 @@
 # Logs
 *.log
 
-presets/
-
 # Claude Code
 .claude/
 skills/
+
+# Debug scripts (development only)
+scripts/debug/
 
 # Python
 __pycache__/

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 60" width="220" height="60">
+  <!-- Full background -->
+  <rect x="4" y="4" width="200" height="52" rx="8" ry="8" fill="#1a1a1e" stroke="#5588aa" stroke-width="1.5"/>
+
+  <!-- SideFX text -->
+  <text x="18" y="40" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="32" font-weight="700" fill="#a0a0a0">SideFX</text>
+
+  <!-- Icon container pill - subtle, no border -->
+  <rect x="128" y="12" width="52" height="36" rx="6" ry="6" fill="#252529"/>
+
+  <!-- Menu icon (3 horizontal lines) -->
+  <svg x="131" y="18" width="24" height="24" viewBox="0 -960 960 960">
+    <path fill="#5588aa" d="M120-240v-80h720v80H120Zm0-200v-80h720v80H120Zm0-200v-80h720v80H120Z"/>
+  </svg>
+
+  <!-- Double arrow icon -->
+  <svg x="152" y="18" width="24" height="24" viewBox="0 -960 960 960">
+    <path fill="#5588aa" d="m242-200 200-280-200-280h98l200 280-200 280h-98Zm238 0 200-280-200-280h98l200 280-200 280h-98Z"/>
+  </svg>
+</svg>

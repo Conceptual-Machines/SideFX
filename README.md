@@ -28,10 +28,10 @@ Ableton/Bitwig-style FX rack management for REAPER 7+.
 | Package | Repository | Required For |
 |---------|------------|--------------|
 | ReaImGui | ReaTeam Extensions | UI framework |
-| js_ReaScriptAPI | ReaTeam Extensions | Extended API functions |
-| ReaWrap | ReaTeam Scripts | OOP wrapper library |
+| ReaWrap | Conceptual Machines | OOP wrapper library |
 | RPP-Parser | ReaTeam Scripts | Preset save/load |
 | EmojImGui | ReaTeam Scripts | Icon support |
+| js_ReaScriptAPI (optional) | ReaTeam Extensions | Custom preset folder selection |
 
 > **Note:** Dependencies must be installed manually via ReaPack before installing SideFX.
 
@@ -43,9 +43,13 @@ Ableton/Bitwig-style FX rack management for REAPER 7+.
 
 ### Via ReaPack
 
-1. Install all dependencies listed above from ReaPack
-2. Add this repository: `https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/index.xml`
-3. Install "SideFX" from the ReaPack browser
+1. Install dependencies from ReaTeam repositories (ReaImGui, RPP-Parser, EmojImGui)
+2. Add Conceptual Machines repositories via **Extensions > ReaPack > Import repositories...**:
+   ```
+   https://github.com/Conceptual-Machines/ReaWrap/raw/main/index.xml
+   https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml
+   ```
+3. Install "ReaWrap" and "SideFX" from the ReaPack browser
 4. Restart REAPER
 
 ## Usage
@@ -57,6 +61,19 @@ Ableton/Bitwig-style FX rack management for REAPER 7+.
 5. Add modulators to automate parameters
 
 See the [full documentation](https://conceptual-machines.github.io/SideFX/) for detailed guides.
+
+## Known Issues
+
+### Multiple Serum instances don't receive MIDI
+
+When using multiple Serum (or Serum 2) instances on the same track, only the first instance receives MIDI by default. This is because REAPER's VST instruments default to "Replace MIDI bus" mode instead of "Merge with MIDI bus".
+
+**Workaround:** For each additional Serum instance:
+1. Open the FX window for the Serum plugin
+2. Click the **I/O** button (routing)
+3. Under **MIDI Output**, select **"Merges with MIDI bus"**
+
+This setting is not exposed via REAPER's scripting API, so SideFX cannot set it automatically.
 
 ## Documentation
 

@@ -46,10 +46,27 @@
             overflow-y: auto;
         }
 
-        .sidebar h1 {
-            font-size: 1.5rem;
+        .sidebar .logo {
+            width: 100%;
+            max-width: 160px;
             margin-bottom: 0.5rem;
-            color: var(--accent);
+        }
+
+        .hero {
+            text-align: center;
+            margin-bottom: 3rem;
+            padding-bottom: 2rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .hero .logo {
+            width: 280px;
+            margin-bottom: 1rem;
+        }
+
+        .hero p {
+            font-size: 1.2rem;
+            color: var(--text-secondary);
         }
 
         .sidebar .version {
@@ -248,13 +265,14 @@
 <body>
     <div class="container">
         <aside class="sidebar">
-            <h1>SideFX</h1>
+            <img src="assets/logo.svg" alt="SideFX" class="logo">
             <p class="version" id="version">v0.2.0</p>
             <nav>
                 <ul>
                     <li><a href="#installation">Installation</a></li>
                     <li><a href="#how-it-works">How It Works</a></li>
                     <li><a href="#quick-start">Quick Start</a></li>
+                    <li><a href="#browser">Plugin Browser</a></li>
                     <li><a href="#devices">Devices</a></li>
                     <li><a href="#racks">Racks &amp; Chains</a></li>
                     <li><a href="#modulators">Modulators</a></li>
@@ -262,11 +280,17 @@
                     <li><a href="#presets">Presets</a></li>
                     <li><a href="#settings">Settings</a></li>
                     <li><a href="#shortcuts">Keyboard Shortcuts</a></li>
+                    <li><a href="#troubleshooting">Troubleshooting</a></li>
                 </ul>
             </nav>
         </aside>
 
         <main class="main">
+            <div class="hero">
+                <img src="assets/logo.svg" alt="SideFX" class="logo">
+                <p>Parallel routing and modulation for REAPER 7+ — Ableton/Bitwig style</p>
+            </div>
+
             <h2 id="installation">Installation</h2>
             <p>SideFX requires REAPER 7.0 or later.</p>
 
@@ -295,13 +319,8 @@
                     <td>ImGui bindings for REAPER UI</td>
                 </tr>
                 <tr>
-                    <td><strong>js_ReaScriptAPI</strong></td>
-                    <td>ReaTeam Extensions</td>
-                    <td>Extended ReaScript functions</td>
-                </tr>
-                <tr>
                     <td><strong>ReaWrap</strong></td>
-                    <td>ReaTeam Scripts</td>
+                    <td>Conceptual Machines</td>
                     <td>OOP wrapper library</td>
                 </tr>
                 <tr>
@@ -309,12 +328,25 @@
                     <td>ReaTeam Scripts</td>
                     <td>Required for preset save/load</td>
                 </tr>
+                <tr>
+                    <td><strong>EmojImGui</strong></td>
+                    <td>ReaTeam Scripts</td>
+                    <td>Icon support for UI elements</td>
+                </tr>
+                <tr>
+                    <td><strong>js_ReaScriptAPI</strong> (optional)</td>
+                    <td>ReaTeam Extensions</td>
+                    <td>Custom preset folder selection</td>
+                </tr>
             </table>
 
-            <h4>Step 2: Add SideFX Repository</h4>
+            <h4>Step 2: Add Conceptual Machines Repositories</h4>
             <ol>
                 <li>Go to <strong>Extensions &gt; ReaPack &gt; Import repositories...</strong></li>
-                <li>Paste: <code>https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></li>
+                <li>Paste both URLs (one per line):
+                    <pre><code>https://github.com/Conceptual-Machines/ReaWrap/raw/main/index.xml
+https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
+                </li>
                 <li>Click OK</li>
             </ol>
 
@@ -348,6 +380,50 @@
                 <li><strong>Chains</strong> (<code>C1</code>, <code>C2</code>, etc.) - Containers for each parallel path within a rack</li>
             </ul>
             <p>This approach gives SideFX full control over the FX structure while leveraging REAPER's native container capabilities.</p>
+
+            <h3>Device Structure (D-containers)</h3>
+            <p>When you add a plugin through SideFX, it gets wrapped in a <strong>D-container</strong> with the following structure:</p>
+            <pre><code>D1: Plugin Name (Container)
+├── D1_FX: Plugin Name (your plugin)
+└── D1_Util (SideFX_Utility JSFX)</code></pre>
+            <p>The utility JSFX provides additional controls like pre/post gain and routing options that appear in the device sidebar.</p>
+
+            <h3>Rack Structure (R-containers)</h3>
+            <p>Racks enable parallel processing by splitting audio into multiple chains:</p>
+            <pre><code>R1 (Container)
+├── SideFX_Mixer (JSFX - mixes all chains)
+├── C1 (Chain container)
+│   └── D1: Effect A
+├── C2 (Chain container)
+│   └── D2: Effect B
+└── C3 (Chain container)
+    └── D3: Effect C</code></pre>
+            <p>Audio enters the rack, gets duplicated to each chain, processed independently, then mixed back together by the SideFX_Mixer.</p>
+
+            <h3>JSFX Plugins</h3>
+            <p>SideFX includes three custom JSFX plugins that power its features:</p>
+            <table>
+                <tr>
+                    <th>Plugin</th>
+                    <th>Purpose</th>
+                </tr>
+                <tr>
+                    <td><strong>SideFX_Utility</strong></td>
+                    <td>Added to every device. Provides pre-gain, post-gain, and the Mix (dry/wet) and Delta controls shown in the device sidebar.</td>
+                </tr>
+                <tr>
+                    <td><strong>SideFX_Mixer</strong></td>
+                    <td>Added to every rack. A 16-channel mixer that combines parallel chains with individual volume, pan, mute, and solo controls per chain.</td>
+                </tr>
+                <tr>
+                    <td><strong>SideFX_Modulator</strong></td>
+                    <td>The LFO engine. Contains the actual modulation logic including rate, curve interpolation, tempo sync, and parameter output. See the Modulators section for details.</td>
+                </tr>
+            </table>
+
+            <div class="tip">
+                <strong>Note:</strong> These JSFX plugins are hidden from the plugin browser and are implementation details. They are automatically added and managed by SideFX — you should not add or configure them manually.
+            </div>
 
             <h3>SideFX as Your FX Manager</h3>
             <p>SideFX is designed to be the <strong>primary interface</strong> for managing your track's effects. When you use SideFX, it takes ownership of the FX chain structure.</p>
@@ -409,15 +485,39 @@
 
             <!-- ============================================================ -->
 
+            <h2 id="browser">Plugin Browser</h2>
+            <p>The plugin browser on the left side of SideFX lets you find and add plugins to your device chain.</p>
+
+            <h3>Searching Plugins</h3>
+            <ul>
+                <li><strong>Search box</strong> - Type to filter plugins by name or manufacturer</li>
+                <li><strong>Type filter</strong> - Filter by plugin type (Instruments, Effects, JSFX, etc.)</li>
+                <li>Results update as you type</li>
+            </ul>
+
+            <h3>Adding Plugins</h3>
+            <ul>
+                <li><strong>Double-click</strong> a plugin to add it at the end of the chain</li>
+                <li><strong>Drag and drop</strong> to add at a specific position</li>
+            </ul>
+
+            <h3>Selecting Parameters</h3>
+            <p>Right-click a device header and select <strong>Select Parameters</strong> to choose which parameters appear in the device panel. The parameter selector dialog lets you:</p>
+            <ul>
+                <li>Check/uncheck parameters to show or hide them</li>
+                <li>Set unit overrides (dB, Hz, ms, %, etc.) for each parameter</li>
+                <li>Search parameters by name</li>
+            </ul>
+
+            <figure class="screenshot">
+                <img src="images/param-selector.png" alt="Parameter selector dialog">
+                <figcaption>The parameter selector with unit override dropdowns</figcaption>
+            </figure>
+
+            <!-- ============================================================ -->
+
             <h2 id="devices">Devices</h2>
             <p>Devices are the building blocks of your FX chain. Each device wraps a plugin in a container with additional controls.</p>
-
-            <h3>Adding Devices</h3>
-            <ul>
-                <li><strong>Double-click</strong> a plugin in the browser to add it at the end</li>
-                <li><strong>Drag and drop</strong> from the browser to a specific position</li>
-                <li>Use the search box to filter plugins by name or manufacturer</li>
-            </ul>
 
             <h3>Device Controls</h3>
             <p>Each device panel shows:</p>
@@ -426,14 +526,6 @@
                 <li><strong>Parameters</strong> - Configurable parameter sliders</li>
                 <li><strong>Sidebar</strong> - Mix (dry/wet), Delta (difference mode)</li>
             </ul>
-
-            <h3>Selecting Parameters</h3>
-            <p>Right-click a device header and select <strong>Select Parameters</strong> to choose which parameters appear in the device panel. You can also set unit overrides (dB, Hz, ms, etc.) for each parameter.</p>
-
-            <figure class="screenshot">
-                <img src="images/param-selector.png" alt="Parameter selector dialog">
-                <figcaption>The parameter selector with unit override dropdowns</figcaption>
-            </figure>
 
             <h3>Device Context Menu</h3>
             <p>Right-click a device header for options:</p>
@@ -459,6 +551,10 @@
             <h3>Adding Chains</h3>
             <p>Click the <strong>+</strong> button at the bottom of a rack to add a new chain. Each chain processes audio in parallel.</p>
 
+            <div class="tip">
+                <strong>Note:</strong> Each rack supports up to 16 parallel chains.
+            </div>
+
             <h3>Chain Mixer</h3>
             <p>Each rack has a built-in mixer with per-chain controls:</p>
             <ul>
@@ -474,6 +570,16 @@
 
             <h2 id="modulators">Modulators</h2>
             <p>Modulators add movement to your sound by automatically varying parameter values over time.</p>
+
+            <h3>How Modulators Work</h3>
+            <p>Each modulator is powered by the <strong>SideFX_Modulator</strong> JSFX plugin. The JSFX handles all the real-time modulation logic:</p>
+            <ul>
+                <li><strong>LFO generation</strong> - Produces the oscillating signal based on rate and curve shape</li>
+                <li><strong>Tempo sync</strong> - Locks to REAPER's tempo when sync is enabled</li>
+                <li><strong>Curve interpolation</strong> - Reads the bezier curve data and generates smooth output</li>
+                <li><strong>Parameter output</strong> - Outputs a 0-1 signal that REAPER's parameter linking system uses</li>
+            </ul>
+            <p>SideFX's UI controls the JSFX parameters and uses REAPER's native <strong>parameter linking</strong> (plink) system to connect the modulator output to your target parameters. This means modulation happens at the audio engine level, not in the script.</p>
 
             <h3>Adding a Modulator</h3>
             <ol>
@@ -657,6 +763,24 @@
                     <td>Open context menu</td>
                 </tr>
             </table>
+
+            <!-- ============================================================ -->
+
+            <h2 id="troubleshooting">Troubleshooting</h2>
+
+            <h3>Multiple Serum instances don't receive MIDI</h3>
+            <p>When using multiple Serum (or Serum 2) instances on the same track, only the first instance receives MIDI by default. This is because REAPER's VST instruments default to "Replace MIDI bus" mode instead of "Merge with MIDI bus".</p>
+
+            <p><strong>Workaround:</strong> For each additional Serum instance:</p>
+            <ol>
+                <li>Open the FX window for the Serum plugin (double-click the device header)</li>
+                <li>Click the <strong>I/O</strong> button (routing)</li>
+                <li>Under <strong>MIDI Output</strong>, select <strong>"Merges with MIDI bus"</strong></li>
+            </ol>
+
+            <div class="tip">
+                <strong>Note:</strong> This setting is not exposed via REAPER's scripting API, so SideFX cannot set it automatically. This affects any instrument plugin that needs to pass MIDI to subsequent plugins.
+            </div>
 
         </main>
     </div>
