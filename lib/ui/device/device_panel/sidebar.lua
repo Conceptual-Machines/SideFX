@@ -130,9 +130,9 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local scale_w = 14
 
     local _, remaining_h = ctx:get_content_region_avail()
-    -- Leave room for phase controls below (50px for label + buttons + spacing) if enabled
+    -- Leave room for phase controls below (30px for buttons + spacing) if enabled
     local config = require('lib.core.config')
-    local phase_reserve = config.get('show_phase_controls') and 50 or 0
+    local phase_reserve = config.get('show_phase_controls') and 30 or 0
     local fader_h = remaining_h - phase_reserve
     fader_h = math.max(50, fader_h)
 
@@ -265,48 +265,52 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     return interacted
 end
 
---- Draw Phase invert toggle buttons (L/R)
+--- Draw Phase invert toggle buttons (L/R) - compact Ø icons
 local function draw_phase_controls(ctx, utility, phase_l, phase_r, center_item_fn)
     local r = reaper
     local interacted = false
 
     ctx:spacing()
 
-    local phase_btn_w = 18
+    local phase_btn_size = 14
     local phase_gap = 2
-    local phase_total_w = phase_btn_w * 2 + phase_gap
+    local phase_total_w = phase_btn_size * 2 + phase_gap
     center_item_fn(phase_total_w)
 
-    -- Phase L button
+    -- Phase L button - always Ø, color indicates state
     local phase_l_on = phase_l > 0.5
     if phase_l_on then
-        ctx:push_style_color(r.ImGui_Col_Button(), 0xCC6666FF)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0xCC4444FF)  -- Red when inverted
+        ctx:push_style_color(r.ImGui_Col_Text(), 0xFFFFFFFF)
     else
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x333333FF)  -- Dark when normal
+        ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
     end
-    if ctx:button(phase_l_on and "Ø" or "L", phase_btn_w, 16) then
+    if ctx:button("Ø##phase_l", phase_btn_size, phase_btn_size) then
         pcall(function() utility:set_param_normalized(2, phase_l_on and 0 or 1) end)
         interacted = true
     end
-    ctx:pop_style_color()
+    ctx:pop_style_color(2)
     if r.ImGui_IsItemHovered(ctx.ctx) then
         ctx:set_tooltip(phase_l_on and "Left Phase: Inverted" or "Left Phase: Normal")
     end
 
     ctx:same_line(0, phase_gap)
 
-    -- Phase R button
+    -- Phase R button - always Ø, color indicates state
     local phase_r_on = phase_r > 0.5
     if phase_r_on then
-        ctx:push_style_color(r.ImGui_Col_Button(), 0xCC6666FF)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0xCC4444FF)  -- Red when inverted
+        ctx:push_style_color(r.ImGui_Col_Text(), 0xFFFFFFFF)
     else
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x333333FF)  -- Dark when normal
+        ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
     end
-    if ctx:button(phase_r_on and "Ø" or "R", phase_btn_w, 16) then
+    if ctx:button("Ø##phase_r", phase_btn_size, phase_btn_size) then
         pcall(function() utility:set_param_normalized(3, phase_r_on and 0 or 1) end)
         interacted = true
     end
-    ctx:pop_style_color()
+    ctx:pop_style_color(2)
     if r.ImGui_IsItemHovered(ctx.ctx) then
         ctx:set_tooltip(phase_r_on and "Right Phase: Inverted" or "Right Phase: Normal")
     end
