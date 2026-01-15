@@ -166,6 +166,7 @@ function M.create_callbacks(opts)
     local draw_toolbar = opts.draw_toolbar
     local draw_plugin_browser = opts.draw_plugin_browser
     local draw_device_chain = opts.draw_device_chain
+    local draw_analyzers = opts.draw_analyzers
     local refresh_fx_list = opts.refresh_fx_list
     local EmojImGui = opts.EmojImGui
 
@@ -270,6 +271,10 @@ function M.create_callbacks(opts)
                 clear_multi_select()
                 refresh_fx_list()
 
+                -- Update analyzer state for new track
+                if opts.update_analyzer_state then
+                    opts.update_analyzer_state()
+                end
 
                 -- Load expansion state for new track
                 if state.track then
@@ -391,16 +396,27 @@ function M.create_callbacks(opts)
                         local filtered_fx = {}
                         for _, fx in ipairs(state.top_level_fx) do
                             -- Validate FX is still accessible (track may have been deleted)
-                            local ok = pcall(function()
+                            local ok, name = pcall(function()
                                 return fx:get_name()
                             end)
-                            if ok then
-                                table.insert(filtered_fx, fx)
+                            if ok and name then
+                                -- Filter out analyzer JSFX (they're drawn separately)
+                                -- Note: JSFX desc has space ("SideFX Oscilloscope"), file has underscore
+                                local name_lower = name:lower()
+                                local is_analyzer = name_lower:find("sidefx[_ ]oscilloscope") or name_lower:find("sidefx[_ ]spectrum")
+                                if not is_analyzer then
+                                    table.insert(filtered_fx, fx)
+                                end
                             end
                         end
 
                         -- Draw the horizontal device chain (includes modulators)
                         draw_device_chain(ctx, filtered_fx, chain_w, avail_h, icon_font_ref)
+
+                        -- Draw analyzer visualizations at end of chain
+                        if draw_analyzers then
+                            draw_analyzers(ctx, avail_h)
+                        end
                     end
                 end
 

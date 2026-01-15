@@ -1,0 +1,128 @@
+desc:SideFX Spectrum Analyzer
+//tags: analysis visualization spectrum fft
+//author: SideFX
+options:no_meter gmem=SideFX
+
+slider1:5<0,8,1{64,128,256,512,1024,2048,4096,8192,16384}>-FFT Size
+slider2:-60<-90,-12,1>-Floor (dB)
+slider3:0.7<0,0.95,0.01>-Smoothing
+slider4:0<0,12,0.5>-Slope (dB/oct)
+slider5:0<0,2,1{Stereo,Left,Right}>-Channel
+slider6:0<0,1,1{Off,On}>-Freeze
+slider7:0<0,15,1>-Slot (set by host)
+
+in_pin:left input
+in_pin:right input
+
+@init
+// FFT setup for spectrum (per-slot)
+// Each slot uses 520 addresses: 256 bins + metadata
+// Slot 0: gmem[10000-10519], Slot 1: gmem[10520-11039], etc.
+max_fft_size = 16384;
+fft_slot_size = 520;
+fft_buffer = 0;           // Input buffer (local memory, complex pairs)
+fft_window = max_fft_size * 2 + 100;  // Window function (local)
+fft_smooth = fft_window + max_fft_size + 100;  // Smoothed values (local)
+
+fft_pos = 0;
+current_fft_size = 512;
+window_built = 0;
+
+// Initialize base address (slider7 has default value at init)
+fft_base = 10000 + slider7 * fft_slot_size;
+
+@slider
+fft_idx = slider1;
+floor_db = slider2;
+smoothing = slider3;
+slope_db = slider4;
+channel = slider5;
+freeze = slider6;
+slot = slider7;
+
+// Calculate FFT size from index
+current_fft_size = 64 * (2 ^ fft_idx);
+current_fft_size = min(max_fft_size, current_fft_size);
+
+// Calculate base GMEM address for this slot
+fft_base = 10000 + slot * fft_slot_size;
+
+// Rebuild window if size changed
+window_built != current_fft_size ? (
+  window_built = current_fft_size;
+  // Create Hann window
+  i = 0;
+  loop(current_fft_size,
+    fft_window[i] = 0.5 * (1 - cos(2 * $pi * i / (current_fft_size - 1)));
+    i += 1;
+  );
+  // Reset smoothed values
+  i = 0;
+  loop(current_fft_size / 2,
+    fft_smooth[i] = 0;
+    i += 1;
+  );
+  fft_pos = 0;
+);
+
+// Store metadata in GMEM
+gmem[fft_base + 512] = current_fft_size / 2;  // num bins
+gmem[fft_base + 513] = floor_db;
+gmem[fft_base + 514] = srate;
+gmem[fft_base + 516] = current_fft_size;
+
+@sample
+// Get input based on channel selection
+channel == 0 ? input = (spl0 + spl1) * 0.5 :  // Stereo (mono sum)
+channel == 1 ? input = spl0 :                  // Left
+               input = spl1;                   // Right
+
+// Skip processing if frozen
+!freeze ? (
+  // Accumulate FFT buffer with windowing (real, imag pairs)
+  fft_buffer[fft_pos * 2] = input * fft_window[fft_pos];
+  fft_buffer[fft_pos * 2 + 1] = 0;  // Imaginary part
+  fft_pos += 1;
+
+  fft_pos >= current_fft_size ? (
+    // Run FFT
+    fft(fft_buffer, current_fft_size);
+    fft_permute(fft_buffer, current_fft_size);
+
+    // Calculate magnitudes and write to GMEM with smoothing
+    num_bins = min(current_fft_size / 2, 256);
+
+    // Slope calculation (dB per octave adjustment)
+    // Reference frequency for slope (1kHz)
+    ref_bin = 1000 * current_fft_size / srate;
+
+    i = 0;
+    loop(num_bins,
+      re = fft_buffer[i * 2];
+      im = fft_buffer[i * 2 + 1];
+      mag = sqrt(re * re + im * im) / current_fft_size;
+
+      // Convert to dB
+      mag_db = mag > 0.00001 ? 20 * log10(mag) : -100;
+
+      // Apply slope compensation (boost higher frequencies)
+      i > 0 && slope_db > 0 ? (
+        octaves_from_ref = log(i / ref_bin) / log(2);
+        mag_db += octaves_from_ref * slope_db;
+      );
+
+      // Normalize to 0-1 range based on floor
+      new_val = max(0, min(1, (mag_db - floor_db) / (-floor_db)));
+
+      // Apply smoothing (exponential moving average)
+      fft_smooth[i] = fft_smooth[i] * smoothing + new_val * (1 - smoothing);
+      gmem[fft_base + i] = fft_smooth[i];
+      i += 1;
+    );
+
+    gmem[fft_base + 515] = time_precise();  // update timestamp
+    fft_pos = 0;
+  );
+);
+
+// Pass through audio unchanged

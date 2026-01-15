@@ -106,6 +106,38 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         end
         if ctx:is_item_hovered() then ctx:set_tooltip("Click to add rack at end\nOr drag to drop anywhere") end
 
+        ctx:same_line()
+
+        -- Scope button (singleton - toggles on/off)
+        local has_scope = state.has_scope or false
+        local scope_color = has_scope and 0x448844FF or 0x444444FF
+        ctx:push_style_color(imgui.Col.Button(), scope_color)
+        if ctx:button("Scope", 0, BUTTON_HEIGHT) then
+            if state.track and callbacks.on_toggle_scope then
+                callbacks.on_toggle_scope()
+            end
+        end
+        ctx:pop_style_color()
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip(has_scope and "Remove oscilloscope" or "Add oscilloscope at end of chain")
+        end
+
+        ctx:same_line()
+
+        -- Spectrum button (singleton - toggles on/off)
+        local has_spectrum = state.has_spectrum or false
+        local spectrum_color = has_spectrum and 0x448844FF or 0x444444FF
+        ctx:push_style_color(imgui.Col.Button(), spectrum_color)
+        if ctx:button("Spectrum", 0, BUTTON_HEIGHT) then
+            if state.track and callbacks.on_toggle_spectrum then
+                callbacks.on_toggle_spectrum()
+            end
+        end
+        ctx:pop_style_color()
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip(has_spectrum and "Remove spectrum analyzer" or "Add spectrum analyzer at end of chain")
+        end
+
         -- Track name (if enabled)
         if config.get('show_track_name') then
             ctx:same_line()

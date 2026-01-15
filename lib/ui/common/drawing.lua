@@ -467,4 +467,296 @@ function M.draw_peak_meters(ctx, draw_list, meter_l_x, meter_r_x, screen_y, fade
     draw_meter_bar(meter_r_x + 1, half_meter_w - 1, peak_r)
 end
 
+--------------------------------------------------------------------------------
+-- Oscilloscope and Spectrum Analyzer Drawing Functions
+--------------------------------------------------------------------------------
+
+--- Draw oscilloscope waveform from GMEM buffer (stereo display)
+-- Based on Cockos gfxscope DSP
+-- GMEM layout per slot (base = 2000 + slot * 2100):
+--   [0-1023]    = left channel samples
+--   [1024-2047] = right channel samples
+--   [2048]      = num samples written
+--   [2049]      = view_msec
+--   [2050]      = view_maxdb
+--   [2051]      = sample_rate
+--   [2052]      = update timestamp
+--   [2053]      = num_samples
+-- @param ctx ImGui context wrapper
+-- @param label string Unique label for the widget
+-- @param width number Widget width
+-- @param height number Widget height
+-- @param slot number GMEM slot (0-15)
+-- @return boolean True if hovered
+function M.draw_oscilloscope(ctx, label, width, height, slot)
+    slot = slot or 0
+    local scope_slot_size = 2100
+    local scope_base = 2000 + slot * scope_slot_size
+
+    -- Read metadata from GMEM
+    local num_samples = r.gmem_read(scope_base + 2048) or 0
+    local view_msec = r.gmem_read(scope_base + 2049) or 100
+    local view_maxdb = r.gmem_read(scope_base + 2050) or 0
+
+    -- Use num_samples or default buffer size
+    local buffer_size = num_samples > 0 and math.floor(num_samples) or 1024
+
+    local x, y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+    local grid_color = 0x333333FF
+    local label_color = 0x888888FF
+    local color_l = 0x80FF80FF  -- Light green for left
+    local color_r = 0xFF80FFFF  -- Light magenta for right
+
+    -- Background
+    r.ImGui_DrawList_AddRectFilled(draw_list, x, y, x + width, y + height, 0x1A1A1AFF, 4)
+
+    -- Center line
+    local center_y = y + height/2
+    r.ImGui_DrawList_AddLine(draw_list, x, center_y, x + width, center_y, 0x666666FF, 1)
+
+    -- Y-axis grid (dB levels based on view_maxdb)
+    -- Draw some horizontal reference lines
+    local db_marks = {0, -6, -12, -18, -24}
+    if view_maxdb < 0 then
+        -- Zoom range from center
+        local zoom_scale = math.exp(-view_maxdb * (math.log(10)/20))
+        for _, db in ipairs(db_marks) do
+            local amp = math.exp(db * (math.log(10)/20))  -- dB to linear
+            local offset = amp * zoom_scale * (height/2 - 4)
+            if offset < height/2 - 4 then
+                -- Upper and lower lines
+                r.ImGui_DrawList_AddLine(draw_list, x, center_y - offset, x + width, center_y - offset, grid_color, 1)
+                r.ImGui_DrawList_AddLine(draw_list, x, center_y + offset, x + width, center_y + offset, grid_color, 1)
+                -- Labels
+                local label_text = string.format("%ddB", db)
+                r.ImGui_DrawList_AddText(draw_list, x + 2, center_y - offset - 10, label_color, label_text)
+            end
+        end
+    else
+        -- Standard amplitude grid
+        local y_levels = {1, 0.5, 0, -0.5, -1}
+        local y_labels = {"+1", "+.5", "0", "-.5", "-1"}
+        for i, level in ipairs(y_levels) do
+            local line_y = center_y - level * (height/2 - 4)
+            r.ImGui_DrawList_AddLine(draw_list, x, line_y, x + width, line_y, grid_color, 1)
+            r.ImGui_DrawList_AddText(draw_list, x + 2, line_y - 6, label_color, y_labels[i])
+        end
+    end
+
+    -- X-axis grid (time divisions)
+    local num_x_divs = 4
+    for i = 1, num_x_divs - 1 do
+        local line_x = x + (width * i / num_x_divs)
+        r.ImGui_DrawList_AddLine(draw_list, line_x, y, line_x, y + height, grid_color, 1)
+        -- Time label
+        local t = view_msec * (1 - i / num_x_divs)  -- Time ago from right
+        local label_text
+        if t < 1 then
+            label_text = string.format("%.1fms", t)
+        elseif t >= 1000 then
+            label_text = string.format("%.1fs", t/1000)
+        else
+            label_text = string.format("%.0fms", t)
+        end
+        r.ImGui_DrawList_AddText(draw_list, line_x + 2, y + height - 12, label_color, label_text)
+    end
+
+    -- Draw both channels if we have samples
+    if buffer_size > 0 then
+        -- Draw left channel
+        local prev_px_l, prev_py_l
+        local prev_px_r, prev_py_r
+
+        for i = 0, width - 1 do
+            local buf_idx = math.floor(i * buffer_size / width)
+            if buf_idx < buffer_size then
+                local sample_l = r.gmem_read(scope_base + buf_idx) or 0
+                local sample_r = r.gmem_read(scope_base + 1024 + buf_idx) or 0
+
+                -- Clamp samples
+                sample_l = math.max(-1, math.min(1, sample_l))
+                sample_r = math.max(-1, math.min(1, sample_r))
+
+                local px = x + i
+                local py_l = center_y - sample_l * (height/2 - 4)
+                local py_r = center_y - sample_r * (height/2 - 4)
+
+                -- Draw left channel line (green)
+                if prev_px_l then
+                    r.ImGui_DrawList_AddLine(draw_list, prev_px_l, prev_py_l, px, py_l, color_l, 1.5)
+                end
+
+                -- Draw right channel line (magenta) with slight transparency
+                if prev_px_r then
+                    r.ImGui_DrawList_AddLine(draw_list, prev_px_r, prev_py_r, px, py_r, color_r, 1.0)
+                end
+
+                prev_px_l, prev_py_l = px, py_l
+                prev_px_r, prev_py_r = px, py_r
+            end
+        end
+    end
+
+    -- Channel legend
+    r.ImGui_DrawList_AddText(draw_list, x + width - 50, y + 4, color_l, "L")
+    r.ImGui_DrawList_AddText(draw_list, x + width - 35, y + 4, color_r, "R")
+
+    -- Border
+    r.ImGui_DrawList_AddRect(draw_list, x, y, x + width, y + height, 0x444444FF, 4, 0, 1)
+
+    -- Invisible button for interaction
+    r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
+    local hovered = r.ImGui_IsItemHovered(ctx.ctx)
+
+    return hovered
+end
+
+--- Draw spectrum analyzer from GMEM FFT output (logarithmic frequency scale)
+-- Based on Cockos gfxanalyzer DSP
+-- GMEM layout per slot (base = 10000 + slot * 520):
+--   [0-255]   = magnitude bins (normalized 0-1)
+--   [512]     = num bins
+--   [513]     = floor_db
+--   [514]     = sample_rate
+--   [515]     = update timestamp
+--   [516]     = fft_size (actual FFT size)
+-- @param ctx ImGui context wrapper
+-- @param label string Unique label for the widget
+-- @param width number Widget width
+-- @param height number Widget height
+-- @param slot number GMEM slot (0-15)
+-- @return boolean True if hovered
+function M.draw_spectrum(ctx, label, width, height, slot)
+    slot = slot or 0
+    local fft_slot_size = 520
+    local fft_base = 10000 + slot * fft_slot_size
+
+    -- Read metadata from GMEM
+    local num_bins = r.gmem_read(fft_base + 512) or 256
+    local floor_db = r.gmem_read(fft_base + 513) or -120
+    local sample_rate = r.gmem_read(fft_base + 514) or 44100
+    local fft_size = r.gmem_read(fft_base + 516) or 512
+
+    num_bins = math.max(1, math.floor(num_bins))
+    if sample_rate <= 0 then sample_rate = 44100 end
+
+    local x, y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+    local grid_color = 0x333333FF
+    local label_color = 0x888888FF
+    local hz_per_bin = sample_rate / fft_size
+
+    -- Frequency range for log scale (20Hz to Nyquist)
+    local min_freq = 20
+    local max_freq = sample_rate / 2  -- Nyquist frequency
+    local log_min = math.log(min_freq)
+    local log_max = math.log(max_freq)
+    local log_range = log_max - log_min
+
+    -- Helper: convert frequency to x position (logarithmic)
+    local function freq_to_x(freq)
+        if freq <= min_freq then return x end
+        if freq >= max_freq then return x + width end
+        local log_freq = math.log(freq)
+        return x + ((log_freq - log_min) / log_range) * width
+    end
+
+    -- Background
+    r.ImGui_DrawList_AddRectFilled(draw_list, x, y, x + width, y + height, 0x1A1A1AFF, 4)
+
+    -- Y-axis grid (dB levels) - adapt to floor setting
+    local db_levels = {0, -12, -24, -36, -48, -60, -72, -84, -96, -108, -120}
+    for _, db in ipairs(db_levels) do
+        if db >= floor_db then
+            local norm = (db - floor_db) / (-floor_db)
+            local line_y = y + height - norm * height
+            r.ImGui_DrawList_AddLine(draw_list, x, line_y, x + width, line_y, grid_color, 1)
+            r.ImGui_DrawList_AddText(draw_list, x + 2, line_y - 10, label_color, string.format("%ddB", db))
+        end
+    end
+
+    -- X-axis grid (frequency markers - logarithmic positions)
+    local freq_markers = {30, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000}
+    for _, hz in ipairs(freq_markers) do
+        if hz >= min_freq and hz <= max_freq then
+            local line_x = freq_to_x(hz)
+            if line_x > x + 5 and line_x < x + width - 5 then
+                r.ImGui_DrawList_AddLine(draw_list, line_x, y, line_x, y + height, grid_color, 1)
+                local label_text = hz >= 1000 and string.format("%.0fk", hz/1000) or string.format("%.0f", hz)
+                r.ImGui_DrawList_AddText(draw_list, line_x + 2, y + 2, label_color, label_text)
+            end
+        end
+    end
+
+    -- Draw spectrum - iterate over bins and interpolate for smooth appearance
+    -- Build array of (x_pos, magnitude) points
+    local points = {}
+    for bin = 1, num_bins - 1 do  -- Skip bin 0 (DC)
+        local freq = bin * hz_per_bin
+        if freq >= min_freq and freq <= max_freq then
+            local bin_x = freq_to_x(freq)
+            local mag = r.gmem_read(fft_base + bin) or 0
+            mag = math.max(0, math.min(1, mag))
+            table.insert(points, {x = bin_x, mag = mag})
+        end
+    end
+
+    -- Draw filled spectrum by interpolating between points
+    local bottom_y = y + height - 1
+    for px = 0, width - 1 do
+        local px_x = x + px
+
+        -- Find surrounding points for interpolation
+        local mag = 0
+        local found = false
+
+        for i = 1, #points - 1 do
+            if points[i].x <= px_x and points[i+1].x >= px_x then
+                -- Linear interpolation between bins
+                local t = (px_x - points[i].x) / (points[i+1].x - points[i].x + 0.001)
+                mag = points[i].mag * (1 - t) + points[i+1].mag * t
+                found = true
+                break
+            end
+        end
+
+        -- Handle edges
+        if not found and #points > 0 then
+            if px_x < points[1].x then
+                mag = points[1].mag
+            elseif px_x > points[#points].x then
+                mag = points[#points].mag
+            end
+        end
+
+        mag = math.max(0, math.min(1, mag))
+        local bar_height = mag * (height - 2)
+        local bar_y = bottom_y - bar_height
+
+        if bar_height > 0 then
+            -- Color gradient based on magnitude (yellow spectrum style)
+            local bar_color
+            if mag > 0.8 then
+                bar_color = 0xFFFF00FF  -- Bright yellow
+            elseif mag > 0.5 then
+                bar_color = 0xFFCC00FF  -- Yellow
+            else
+                bar_color = 0xCC9900FF  -- Darker yellow/orange
+            end
+
+            r.ImGui_DrawList_AddLine(draw_list, px_x, bar_y, px_x, bottom_y, bar_color, 1)
+        end
+    end
+
+    -- Border
+    r.ImGui_DrawList_AddRect(draw_list, x, y, x + width, y + height, 0x444444FF, 4, 0, 1)
+
+    -- Invisible button for interaction
+    r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
+    local hovered = r.ImGui_IsItemHovered(ctx.ctx)
+
+    return hovered
+end
+
 return M

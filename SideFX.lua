@@ -380,6 +380,98 @@ local function convert_chain_to_devices(chain)
 end
 
 --------------------------------------------------------------------------------
+-- Scope/Spectrum Utilities (singleton analyzers)
+--------------------------------------------------------------------------------
+
+local SCOPE_JSFX_NAME = "SideFX_Oscilloscope"
+local SPECTRUM_JSFX_NAME = "SideFX_Spectrum"
+-- Patterns to match both "SideFX Oscilloscope" (desc) and "SideFX_Oscilloscope" (file)
+local SCOPE_PATTERN = "SideFX[_ ]Oscilloscope"
+local SPECTRUM_PATTERN = "SideFX[_ ]Spectrum"
+
+--- Find scope/spectrum FX on track by name pattern
+local function find_analyzer_fx(track, pattern)
+    if not track then return nil end
+    local fx_count = track:get_track_fx_count()
+    for i = 0, fx_count - 1 do
+        local ok, fx = pcall(function() return track:get_track_fx(i) end)
+        if ok and fx then
+            local ok_name, name = pcall(function() return fx:get_name() end)
+            if ok_name and name and name:find(pattern) then
+                return fx, i
+            end
+        end
+    end
+    return nil
+end
+
+--- Check if scope exists on current track
+local function has_scope_on_track()
+    return find_analyzer_fx(state.track, SCOPE_PATTERN) ~= nil
+end
+
+--- Check if spectrum exists on current track
+local function has_spectrum_on_track()
+    return find_analyzer_fx(state.track, SPECTRUM_PATTERN) ~= nil
+end
+
+--- Update analyzer state flags
+local function update_analyzer_state()
+    state.has_scope = find_analyzer_fx(state.track, SCOPE_PATTERN) ~= nil
+    state.has_spectrum = find_analyzer_fx(state.track, SPECTRUM_PATTERN) ~= nil
+end
+
+--- Get track slot (0-15) for GMEM isolation
+local function get_track_slot()
+    if not state.track then return 0 end
+    -- Use track index mod 16 as slot
+    local track_idx = math.floor(state.track:get_info_value("IP_TRACKNUMBER"))
+    return (track_idx - 1) % 16  -- 0-indexed, wrap to 0-15
+end
+
+--- Toggle oscilloscope on/off
+local function toggle_scope()
+    if not state.track then return end
+    local existing_fx = find_analyzer_fx(state.track, SCOPE_PATTERN)
+    if existing_fx then
+        -- Remove it
+        existing_fx:delete()
+        state.has_scope = false
+    else
+        -- Add at end of chain (use file name for adding)
+        local fx_idx = r.TrackFX_AddByName(state.track.pointer, "JS:" .. SCOPE_JSFX_NAME, false, -1)
+        if fx_idx >= 0 then
+            -- Set slot parameter (slider7, param index 6) to isolate GMEM
+            local slot = get_track_slot()
+            r.TrackFX_SetParamNormalized(state.track.pointer, fx_idx, 6, slot / 15)
+        end
+        state.has_scope = true
+    end
+    refresh_fx_list()
+end
+
+--- Toggle spectrum analyzer on/off
+local function toggle_spectrum()
+    if not state.track then return end
+    local existing_fx = find_analyzer_fx(state.track, SPECTRUM_PATTERN)
+    if existing_fx then
+        -- Remove it
+        existing_fx:delete()
+        state.has_spectrum = false
+    else
+        -- Add at end of chain (use file name for adding)
+        local fx_idx = r.TrackFX_AddByName(state.track.pointer, "JS:" .. SPECTRUM_JSFX_NAME, false, -1)
+        if fx_idx >= 0 then
+            -- Set slot parameter (slider7, param index 6) to isolate GMEM
+            local slot = get_track_slot()
+            r.TrackFX_SetParamNormalized(state.track.pointer, fx_idx, 6, slot / 15)
+        end
+        state.has_spectrum = true
+    end
+    refresh_fx_list()
+end
+
+--------------------------------------------------------------------------------
 -- UI: FX Context Menu
 --------------------------------------------------------------------------------
 
@@ -493,6 +585,8 @@ local function draw_toolbar(ctx, icon_font_ref)
         on_collapse_from_depth = collapse_from_depth,
         on_config = function() settings_dialog.open(ctx) end,
         on_preset = function() preset_dialog.open(ctx) end,
+        on_toggle_scope = toggle_scope,
+        on_toggle_spectrum = toggle_spectrum,
     })
 end
 
@@ -598,6 +692,252 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height, icon_f
     })
 end
 
+-- Default analyzer panel sizes (can be adjusted via state)
+local DEFAULT_ANALYZER_W = 500
+local DEFAULT_ANALYZER_H = 200
+
+--- Draw analyzer visualizations (scope/spectrum) at end of chain
+local function draw_analyzers(ctx, avail_height)
+    local drawing = require('lib.ui.common.drawing')
+    local imgui = require('imgui')
+
+    local has_any = state.has_scope or state.has_spectrum
+    if not has_any then return end
+
+    -- Connect to JSFX GMEM namespace (required to read GMEM data)
+    r.gmem_attach("SideFX")
+
+    ctx:same_line()
+
+    -- Get sizes from state or use defaults
+    local analyzer_w = state.analyzer_width or DEFAULT_ANALYZER_W
+    local controls_h = 50  -- Two rows of controls
+    local header_h = 26
+    local padding = 16
+    local analyzer_h = avail_height - controls_h - header_h - padding
+    local panel_h = avail_height - 4
+
+    -- Get current track slot for GMEM isolation
+    local slot = get_track_slot()
+
+    -- Draw scope if active
+    -- Params: 0=Time, 1=Gain, 2=TrigMode, 3=TrigLevel, 4=Channel, 5=Freeze, 6=Slot
+    if state.has_scope then
+        local scope_fx = find_analyzer_fx(state.track, SCOPE_PATTERN)
+
+        ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1AFF)
+        if ctx:begin_child("scope_panel", analyzer_w + 12, panel_h, imgui.ChildFlags.Border()) then
+            -- Header row with title and freeze button
+            ctx:text("Scope")
+
+            if scope_fx then
+                -- Freeze toggle (param 5)
+                ctx:same_line()
+                local freeze_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 5)
+                local is_frozen = freeze_val > 0.5
+                ctx:push_style_color(imgui.Col.Button(), is_frozen and 0x4488FFFF or 0x444444FF)
+                if ctx:button(is_frozen and "||" or ">", 24, 20) then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 5, is_frozen and 0 or 1)
+                end
+                ctx:pop_style_color()
+                if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
+            end
+
+            ctx:same_line(analyzer_w - 8)
+            ctx:push_style_color(imgui.Col.Button(), 0x663333FF)
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x884444FF)
+            if ctx:button("×##del_scope", 20, 20) then
+                toggle_scope()
+            end
+            ctx:pop_style_color(2)
+
+            -- Visualization
+            drawing.draw_oscilloscope(ctx, "##scope_viz", analyzer_w, analyzer_h, slot)
+
+            -- Controls row 1
+            if scope_fx then
+                local half_w = (analyzer_w - 8) / 2
+
+                -- Time window slider (param 0) - 1-500 ms
+                ctx:push_item_width(half_w)
+                local time_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 0)
+                local time_ms = 1 + time_val * 499
+                local changed, new_time = r.ImGui_SliderDouble(ctx.ctx, "##scope_time", time_ms, 1, 500, "%.0f ms")
+                if changed then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 0, (new_time - 1) / 499)
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Time window") end
+                ctx:pop_item_width()
+
+                ctx:same_line()
+
+                -- Gain slider (param 1) - -24 to +24 dB
+                ctx:push_item_width(half_w)
+                local gain_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 1)
+                local gain_db = -24 + gain_val * 48
+                local gain_changed, new_gain = r.ImGui_SliderDouble(ctx.ctx, "##scope_gain", gain_db, -24, 24, "%.1f dB")
+                if gain_changed then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 1, (new_gain + 24) / 48)
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Gain") end
+                ctx:pop_item_width()
+
+                -- Controls row 2
+                local third_w = (analyzer_w - 16) / 3
+
+                -- Trigger mode combo (param 2)
+                ctx:push_item_width(third_w)
+                local trig_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 2)
+                local trig_mode = math.floor(trig_val * 2 + 0.5)
+                local trig_changed, new_trig = r.ImGui_Combo(ctx.ctx, "##scope_trig", trig_mode, "Auto\0Rising\0Falling\0")
+                if trig_changed then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 2, new_trig / 2)
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Trigger mode") end
+                ctx:pop_item_width()
+
+                ctx:same_line()
+
+                -- Trigger level slider (param 3) - -1 to +1
+                ctx:push_item_width(third_w)
+                local level_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 3)
+                local level = -1 + level_val * 2
+                local level_changed, new_level = r.ImGui_SliderDouble(ctx.ctx, "##scope_level", level, -1, 1, "%.2f")
+                if level_changed then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 3, (new_level + 1) / 2)
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Trigger level") end
+                ctx:pop_item_width()
+
+                ctx:same_line()
+
+                -- Channel combo (param 4)
+                ctx:push_item_width(third_w)
+                local ch_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 4)
+                local ch_mode = math.floor(ch_val * 2 + 0.5)
+                local ch_changed, new_ch = r.ImGui_Combo(ctx.ctx, "##scope_ch", ch_mode, "Stereo\0Left\0Right\0")
+                if ch_changed then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 4, new_ch / 2)
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Channel") end
+                ctx:pop_item_width()
+            end
+
+            ctx:end_child()
+        end
+        ctx:pop_style_color()
+        ctx:same_line()
+    end
+
+    -- Draw spectrum if active
+    -- Params: 0=FFTSize, 1=Floor, 2=Smoothing, 3=Slope, 4=Channel, 5=Freeze, 6=Slot
+    if state.has_spectrum then
+        local spectrum_fx = find_analyzer_fx(state.track, SPECTRUM_PATTERN)
+
+        ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1AFF)
+        if ctx:begin_child("spectrum_panel", analyzer_w + 12, panel_h, imgui.ChildFlags.Border()) then
+            -- Header row with title and freeze button
+            ctx:text("Spectrum")
+
+            if spectrum_fx then
+                -- Freeze toggle (param 5)
+                ctx:same_line()
+                local freeze_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 5)
+                local is_frozen = freeze_val > 0.5
+                ctx:push_style_color(imgui.Col.Button(), is_frozen and 0x4488FFFF or 0x444444FF)
+                if ctx:button(is_frozen and "||" or ">", 24, 20) then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 5, is_frozen and 0 or 1)
+                end
+                ctx:pop_style_color()
+                if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
+            end
+
+            ctx:same_line(analyzer_w - 8)
+            ctx:push_style_color(imgui.Col.Button(), 0x663333FF)
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x884444FF)
+            if ctx:button("×##del_spectrum", 20, 20) then
+                toggle_spectrum()
+            end
+            ctx:pop_style_color(2)
+
+            -- Visualization
+            drawing.draw_spectrum(ctx, "##spectrum_viz", analyzer_w, analyzer_h, slot)
+
+            -- Controls row 1
+            if spectrum_fx then
+                local half_w = (analyzer_w - 8) / 2
+
+                -- FFT size combo (param 0) - 0-8 maps to 64-16384
+                ctx:push_item_width(half_w)
+                local fft_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 0)
+                local fft_idx = math.floor(fft_val * 8 + 0.5)
+                local fft_changed, new_fft = r.ImGui_Combo(ctx.ctx, "##spec_fft", fft_idx, "64\0128\0256\0512\01024\02048\04096\08192\016384\0")
+                if fft_changed then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 0, new_fft / 8)
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("FFT size") end
+                ctx:pop_item_width()
+
+                ctx:same_line()
+
+                -- Floor dB slider (param 1) - -90 to -12 dB
+                ctx:push_item_width(half_w)
+                local floor_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 1)
+                local floor_db = -90 + floor_val * 78
+                local floor_changed, new_floor = r.ImGui_SliderDouble(ctx.ctx, "##spec_floor", floor_db, -90, -12, "%.0f dB")
+                if floor_changed then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 1, (new_floor + 90) / 78)
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Floor level") end
+                ctx:pop_item_width()
+
+                -- Controls row 2
+                local third_w = (analyzer_w - 16) / 3
+
+                -- Smoothing slider (param 2) - 0 to 0.95
+                ctx:push_item_width(third_w)
+                local smooth_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 2)
+                local smooth = smooth_val * 0.95
+                local smooth_changed, new_smooth = r.ImGui_SliderDouble(ctx.ctx, "##spec_smooth", smooth * 100, 0, 95, "%.0f%%")
+                if smooth_changed then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 2, new_smooth / 100 / 0.95)
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Smoothing") end
+                ctx:pop_item_width()
+
+                ctx:same_line()
+
+                -- Slope slider (param 3) - 0 to 12 dB/oct
+                ctx:push_item_width(third_w)
+                local slope_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 3)
+                local slope = slope_val * 12
+                local slope_changed, new_slope = r.ImGui_SliderDouble(ctx.ctx, "##spec_slope", slope, 0, 12, "%.1f dB/oct")
+                if slope_changed then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 3, new_slope / 12)
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Slope (high freq boost)") end
+                ctx:pop_item_width()
+
+                ctx:same_line()
+
+                -- Channel combo (param 4)
+                ctx:push_item_width(third_w)
+                local ch_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 4)
+                local ch_mode = math.floor(ch_val * 2 + 0.5)
+                local ch_changed, new_ch = r.ImGui_Combo(ctx.ctx, "##spec_ch", ch_mode, "Stereo\0Left\0Right\0")
+                if ch_changed then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 4, new_ch / 2)
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Channel") end
+                ctx:pop_item_width()
+            end
+
+            ctx:end_child()
+        end
+        ctx:pop_style_color()
+    end
+end
+
 --------------------------------------------------------------------------------
 -- Main
 --------------------------------------------------------------------------------
@@ -613,6 +953,7 @@ local function main()
 
     state.track, state.track_name = get_selected_track()
     refresh_fx_list()
+    update_analyzer_state()
     scan_plugins()
     
     -- Initialize presets module
@@ -649,9 +990,11 @@ local function main()
         get_selected_track = get_selected_track,
         check_fx_changes = check_fx_changes,
         clear_multi_select = clear_multi_select,
+        update_analyzer_state = update_analyzer_state,
         draw_toolbar = draw_toolbar,
         draw_plugin_browser = draw_plugin_browser,
         draw_device_chain = draw_device_chain,
+        draw_analyzers = draw_analyzers,
         refresh_fx_list = refresh_fx_list,
         EmojImGui = EmojImGui,
         default_font_ref = default_font_ref,
