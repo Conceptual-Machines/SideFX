@@ -148,8 +148,8 @@ local function find_or_create_midi_send(source_track, dest_track)
     if send_idx >= 0 then
         -- Set audio to None (source channel -1)
         r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_SRCCHAN", -1)
-        -- Enable MIDI: 33 (0x21) = all source channels (1) + all dest channels (1 << 5)
-        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_MIDIFLAGS", 33)
+        -- Enable MIDI: 1057 (0x421) = source all (1) + dest all (1<<5) + MIDI to instruments (1024)
+        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_MIDIFLAGS", 1057)
         -- Ensure source track's main send to parent/master stays enabled
         r.SetMediaTrackInfo_Value(source_track.pointer, "B_MAINSEND", 1)
         return send_idx
@@ -172,6 +172,34 @@ local function remove_send_to_track(source_track, dest_track)
         end)
         if ok_dest and send_dest == dest_track.pointer then
             r.RemoveTrackSend(source_track.pointer, 0, i)
+        end
+    end
+end
+
+-- Helper: Clean up sends for all modulators in a device container
+-- Call this before deleting a device to remove any external source sends
+local function cleanup_device_sends(device_container, dest_track)
+    if not device_container or not dest_track then return end
+
+    local state = state_module.state
+
+    -- Get all modulators in this device
+    local ok, iter = pcall(function() return device_container:iter_container_children() end)
+    if not ok or not iter then return end
+
+    for child in iter do
+        local ok_name, name = pcall(function() return child:get_name() end)
+        if ok_name and name and (name:match("SideFX_Modulator") or name:match("SideFX Modulator")) then
+            -- This is a modulator - check if it has an external source
+            local ok_guid, mod_guid = pcall(function() return child:get_guid() end)
+            if ok_guid and mod_guid and state.modulator_source_track and state.modulator_source_track[mod_guid] then
+                local src_guid = state.modulator_source_track[mod_guid]
+                local src_track = find_track_by_guid(src_guid)
+                if src_track then
+                    remove_send_to_track(src_track, dest_track)
+                end
+                state.modulator_source_track[mod_guid] = nil
+            end
         end
     end
 end
@@ -1651,5 +1679,8 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
     return interacted
 end
+
+-- Export cleanup function for use when deleting devices
+M.cleanup_device_sends = cleanup_device_sends
 
 return M

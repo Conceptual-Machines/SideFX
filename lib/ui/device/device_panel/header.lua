@@ -277,6 +277,11 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         end
 
         if ctx:menu_item("Delete") then
+            -- Clean up any external source sends before deleting
+            local modulator_sidebar = require('lib.ui.device.modulator_sidebar')
+            if container and fx.track then
+                modulator_sidebar.cleanup_device_sends(container, fx.track)
+            end
             if opts.on_delete then
                 opts.on_delete(fx)
             else
@@ -328,6 +333,11 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
         ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
         ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x884444FF)
         if ctx:button("×##delete_" .. state_guid, btn_size, btn_size) then
+            -- Clean up any external source sends before deleting
+            local modulator_sidebar = require('lib.ui.device.modulator_sidebar')
+            if container and fx.track then
+                modulator_sidebar.cleanup_device_sends(container, fx.track)
+            end
             if opts.on_delete then
                 opts.on_delete(fx)
             else
