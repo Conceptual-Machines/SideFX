@@ -138,7 +138,7 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
 
     local avail_w, _ = ctx:get_content_region_avail()
     local total_w = scale_w + fader_w + meter_w + 4
-    local offset_x = math.max(0, (avail_w - total_w) / 2 - 4)  -- Shift left
+    local offset_x = math.max(0, (avail_w - total_w) / 2)  -- Centered
 
     ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + offset_x)
 
