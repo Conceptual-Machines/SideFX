@@ -162,7 +162,10 @@ function M.create_param_link(mod_fx, target_fx, target_param_idx)
         local mod_guid = mod_fx_obj:get_guid()
         local target_guid = target_fx_obj:get_guid()
 
-        local success = target_parent:add_fx_to_container(mod_fx_obj)
+        -- Add modulator at END of container so it receives audio from main FX
+        -- (Position 0 would put it BEFORE the audio source, breaking audio trigger)
+        local insert_pos = target_parent:get_container_child_count()
+        local success = target_parent:add_fx_to_container(mod_fx_obj, insert_pos)
         if not success then
             r.ShowConsoleMsg("Failed to move modulator into container\n")
             return false
