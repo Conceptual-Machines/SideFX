@@ -33,7 +33,7 @@ local function find_track_by_guid(target_guid)
     local project = get_project()
     if not project then return nil end
 
-    local ok, count = pcall(function() return project:get_track_count() end)
+    local ok, count = pcall(function() return project:count_tracks() end)
     if not ok or not count then return nil end
 
     for i = 0, count - 1 do
@@ -61,7 +61,7 @@ local function get_available_tracks(exclude_track)
     local project = get_project()
     if not project then return tracks end
 
-    local ok, count = pcall(function() return project:get_track_count() end)
+    local ok, count = pcall(function() return project:count_tracks() end)
     if not ok or not count then return tracks end
 
     for i = 0, count - 1 do
