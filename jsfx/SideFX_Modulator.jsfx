@@ -1,6 +1,6 @@
 desc:SideFX Modulator
 author:Nomad Monad
-version:2.6
+version:2.7
 options:no_meter gmem=SideFX
 
 // Rate
@@ -120,6 +120,10 @@ triggered = 0;
 current_tempo = 120;
 rate = 1;
 last_play_state = 0;
+
+// Sample-accurate MIDI triggering
+midi_trigger_sample = -1;  // Sample offset within block where trigger occurs (-1 = none)
+current_block_sample = 0;  // Current sample position within block
 
 // Drag state
 drag_node = -1;
@@ -421,16 +425,20 @@ trigger_mode == 1 ? (
   last_play_state = play_state & 1;
 );
 
+// Reset sample-accurate trigger for this block
+midi_trigger_sample = -1;
+current_block_sample = 0;
+
 while (midirecv(offset, msg1, msg2, msg3)) (
   trigger_mode == 2 ? (
     status = msg1 & 0xF0;
     note = msg2;
     velocity = msg3;
-    // Note on - restart LFO
+    // Note on - schedule LFO restart at exact sample offset
     status == 0x90 && velocity > 0 ? (
       (midi_note == 0 || note == midi_note) ? (
+        midi_trigger_sample = offset;  // Store sample offset for @sample
         triggered = 1;
-        lfo_phase = 0;
       );
     );
     // Note off is ignored - LFO continues running after being triggered
@@ -440,6 +448,12 @@ while (midirecv(offset, msg1, msg2, msg3)) (
 
 @sample
 trigger_mode = slider20;
+
+// Sample-accurate MIDI trigger - reset phase at exact sample
+trigger_mode == 2 && current_block_sample == midi_trigger_sample ? (
+  lfo_phase = 0;
+);
+current_block_sample += 1;
 
 trigger_mode == 0 ? ( env_value = 1; );
 trigger_mode == 1 ? ( triggered ? env_value = 1 : env_value = env_value * release_coeff; );
