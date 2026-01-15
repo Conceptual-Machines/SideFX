@@ -34,16 +34,13 @@ local function find_track_by_guid(target_guid)
     local project = get_project()
     if not project then return nil end
 
-    local ok, count = pcall(function() return project:count_tracks() end)
-    if not ok or not count then return nil end
+    local ok, iter = pcall(function() return project:iter_tracks() end)
+    if not ok or not iter then return nil end
 
-    for i = 0, count - 1 do
-        local ok_track, track = pcall(function() return project:get_track(i) end)
-        if ok_track and track then
-            local ok_guid, track_guid = pcall(function() return track:get_guid() end)
-            if ok_guid and track_guid == target_guid then
-                return track
-            end
+    for track in iter do
+        local ok_guid, track_guid = pcall(function() return track:get_guid() end)
+        if ok_guid and track_guid == target_guid then
+            return track
         end
     end
 
@@ -62,24 +59,23 @@ local function get_available_tracks(exclude_track)
     local project = get_project()
     if not project then return tracks end
 
-    local ok, count = pcall(function() return project:count_tracks() end)
-    if not ok or not count then return tracks end
+    local ok, iter = pcall(function() return project:iter_tracks() end)
+    if not ok or not iter then return tracks end
 
-    for i = 0, count - 1 do
-        local ok_track, track = pcall(function() return project:get_track(i) end)
-        if ok_track and track then
-            local ok_guid, track_guid = pcall(function() return track:get_guid() end)
-            if ok_guid and (not exclude_guid or track_guid ~= exclude_guid) then
-                local ok_name, track_name = pcall(function() return track:get_name() end)
-                local name = (ok_name and track_name and track_name ~= "") and track_name or ("Track " .. (i + 1))
-                table.insert(tracks, {
-                    track = track,
-                    guid = track_guid,
-                    name = name,
-                    index = i
-                })
-            end
+    local i = 0
+    for track in iter do
+        local ok_guid, track_guid = pcall(function() return track:get_guid() end)
+        if ok_guid and (not exclude_guid or track_guid ~= exclude_guid) then
+            local ok_name, track_name = pcall(function() return track:get_name() end)
+            local name = (ok_name and track_name and track_name ~= "") and track_name or ("Track " .. (i + 1))
+            table.insert(tracks, {
+                track = track,
+                guid = track_guid,
+                name = name,
+                index = i
+            })
         end
+        i = i + 1
     end
 
     return tracks
