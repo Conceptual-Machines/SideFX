@@ -21,7 +21,8 @@ local MODULATOR_TYPES = {
 
 -- Helper: Get project safely
 local function get_project()
-    local ok, project = pcall(function() return require('project')() end)
+    local Project = require('project')
+    local ok, project = pcall(function() return Project:new() end)
     if ok and project then return project end
     return nil
 end
