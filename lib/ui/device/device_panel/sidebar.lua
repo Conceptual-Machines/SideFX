@@ -125,7 +125,7 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     ctx:spacing()
 
     -- Fader with meter and scale (compact design)
-    local fader_w = 12
+    local fader_w = 14
     local meter_w = 8
     local scale_w = 14
 
@@ -134,7 +134,7 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local config = require('lib.core.config')
     local phase_reserve = config.get('show_phase_controls') and 50 or 0
     local fader_h = remaining_h - phase_reserve
-    fader_h = math.max(50, fader_h)
+    fader_h = math.max(50, math.min(fader_h, 160))  -- Cap height at 160
 
     local avail_w, _ = ctx:get_content_region_avail()
     local total_w = scale_w + fader_w + meter_w + 4
