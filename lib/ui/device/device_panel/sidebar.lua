@@ -149,16 +149,19 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local fader_x = screen_x + scale_w + 2
     local meter_x = fader_x + fader_w + 2
 
-    -- dB scale
-    local db_marks = {24, 12, 0, -12, -24}
+    -- dB scale (fewer labels to avoid overlap)
+    local db_marks = {12, 0, -12}
     for _, db in ipairs(db_marks) do
         local mark_norm = (db + 24) / 48
         local mark_y = screen_y + fader_h - (fader_h * mark_norm)
-        r.ImGui_DrawList_AddLine(draw_list, scale_x + scale_w - 6, mark_y, scale_x + scale_w, mark_y, 0x666666FF, 1)
-        if db == 0 or db == -12 or db == 12 or db == 24 then
-            local label = db == 0 and "0" or tostring(db)
-            r.ImGui_DrawList_AddText(draw_list, scale_x, mark_y - 5, 0x888888FF, label)
+        r.ImGui_DrawList_AddLine(draw_list, scale_x + scale_w - 4, mark_y, scale_x + scale_w, mark_y, 0x666666FF, 1)
+        -- Shorter labels: use single digits where possible
+        local label
+        if db == 0 then label = "0"
+        elseif db > 0 then label = tostring(db)
+        else label = tostring(db)
         end
+        r.ImGui_DrawList_AddText(draw_list, scale_x - 2, mark_y - 5, 0x666666FF, label)
     end
 
     -- Fader background
