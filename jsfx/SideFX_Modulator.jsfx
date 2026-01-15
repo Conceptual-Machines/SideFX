@@ -1,6 +1,6 @@
 desc:SideFX Modulator
 author:Nomad Monad
-version:2.9
+version:3.0
 options:no_meter gmem=SideFX
 
 // Rate
@@ -431,6 +431,14 @@ trigger_mode == 1 ? (
 // Reset sample-accurate trigger for this block
 midi_trigger_sample = -1;
 current_block_sample = 0;
+
+// Filter MIDI by bus based on source setting (slider21)
+// Internal (0) = Bus 1 (ext_midi_bus=0), External (1) = Bus 2 (ext_midi_bus=1)
+trigger_mode == 2 ? (
+  ext_midi_bus = slider21 < 0.5 ? 0 : 1;
+) : (
+  ext_midi_bus = -1;  // Receive all buses when not in MIDI mode
+);
 
 while (midirecv(offset, msg1, msg2, msg3)) (
   trigger_mode == 2 ? (

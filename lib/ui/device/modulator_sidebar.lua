@@ -150,6 +150,8 @@ local function find_or_create_midi_send(source_track, dest_track)
         r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_SRCCHAN", -1)
         -- Enable MIDI: 1057 (0x421) = source all (1) + dest all (1<<5) + MIDI to instruments (1024)
         r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_MIDIFLAGS", 1057)
+        -- Send on MIDI Bus 2 (index 1) to separate from internal MIDI (Bus 1)
+        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_MIDI_DSTBUS", 1)
         -- Ensure source track's main send to parent/master stays enabled
         r.SetMediaTrackInfo_Value(source_track.pointer, "B_MAINSEND", 1)
         return send_idx
