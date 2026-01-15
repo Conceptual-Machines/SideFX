@@ -97,7 +97,7 @@ local function draw_pan_control(ctx, utility, pan_val)
     ctx:spacing()
 
     local avail_w, _ = ctx:get_content_region_avail()
-    local pan_w = math.min(avail_w - 4, 80)
+    local pan_w = math.min(avail_w - 4, 50)
     local pan_offset = math.max(0, (avail_w - pan_w) / 2)
     ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + pan_offset)
     local pan_changed, new_pan = widgets.draw_pan_slider(ctx, "##utility_pan", pan_pct, pan_w)
@@ -124,10 +124,10 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
 
     ctx:spacing()
 
-    -- Fader with meter and scale
-    local fader_w = 32
-    local meter_w = 12
-    local scale_w = 20
+    -- Fader with meter and scale (slimmer design)
+    local fader_w = 20
+    local meter_w = 10
+    local scale_w = 18
 
     local _, remaining_h = ctx:get_content_region_avail()
     -- Leave room for phase controls below (80px for label + buttons + spacing) if enabled

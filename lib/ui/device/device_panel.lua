@@ -399,7 +399,7 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
     local is_device_collapsed = device_collapsed[state_guid] or false
 
     -- Fixed width for gain/pan column (right side of nested table)
-    local gain_pan_w = 70
+    local gain_pan_w = 56
 
     -- Outer table: dynamically 2 or 3 columns based on collapse state
     -- When expanded: 3 columns (modulators | device content | gain/pan)
@@ -588,7 +588,7 @@ local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg,
     local panel_height, panel_width, content_width, num_columns, params_per_column
 
     -- Fixed width for gain/pan column (right side of nested table)
-    local gain_pan_w = 70
+    local gain_pan_w = 56
 
     -- Extra width for mix/delta columns in header when shown
     local mix_delta_extra_w = show_mix_delta and 60 or 0  -- mix (28) + delta (32)
