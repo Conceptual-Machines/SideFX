@@ -18,13 +18,12 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
 
     -- Check config for which controls to show
     local config = require('lib.core.config')
-    local show_mix_control = config.get('show_mix_control')
-    local show_delta_control = config.get('show_delta_control')
+    local show_mix_delta = config.get('show_mix_delta')
 
     -- Check for mix (container parameter)
     local has_mix = false
     local mix_val, mix_idx
-    if container and show_mix_control then
+    if container and show_mix_delta then
         local ok_mix
         ok_mix, mix_idx = pcall(function() return container:get_param_from_ident(":wet") end)
         if ok_mix and mix_idx and mix_idx >= 0 then
@@ -37,7 +36,7 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
     -- Check for delta (container parameter)
     local has_delta = false
     local delta_val, delta_idx
-    if container and show_delta_control then
+    if container and show_mix_delta then
         local ok_delta
         ok_delta, delta_idx = pcall(function() return container:get_param_from_ident(":delta") end)
         if ok_delta and delta_idx and delta_idx >= 0 then
