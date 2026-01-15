@@ -43,9 +43,13 @@ Ableton/Bitwig-style FX rack management for REAPER 7+.
 
 ### Via ReaPack
 
-1. Install all dependencies listed above from ReaPack
-2. Add this repository: `https://raw.githubusercontent.com/Conceptual-Machines/SideFX/main/index.xml`
-3. Install "SideFX" from the ReaPack browser
+1. Install dependencies from ReaTeam repositories (ReaImGui, RPP-Parser, EmojImGui)
+2. Add Conceptual Machines repositories via **Extensions > ReaPack > Import repositories...**:
+   ```
+   https://github.com/Conceptual-Machines/ReaWrap/raw/main/index.xml
+   https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml
+   ```
+3. Install "ReaWrap" and "SideFX" from the ReaPack browser
 4. Restart REAPER
 
 ## Usage
