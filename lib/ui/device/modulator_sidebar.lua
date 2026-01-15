@@ -111,6 +111,8 @@ local function find_or_create_audio_sidechain_send(source_track, dest_track)
         r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_DSTCHAN", 2)
         -- Set to post-fader
         r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_SENDMODE", 0)
+        -- Ensure source track's main send to parent/master stays enabled
+        r.SetMediaTrackInfo_Value(source_track.pointer, "B_MAINSEND", 1)
         return send_idx
     end
 
@@ -146,8 +148,10 @@ local function find_or_create_midi_send(source_track, dest_track)
     if send_idx >= 0 then
         -- Enable MIDI on send (I_MIDIFLAGS: -1 = all channels)
         r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_MIDIFLAGS", -1)
-        -- Disable audio (set volume to 0 or mute)
+        -- Disable audio on this send (MIDI-only)
         r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "D_VOL", 0)
+        -- Ensure source track's main send to parent/master stays enabled
+        r.SetMediaTrackInfo_Value(source_track.pointer, "B_MAINSEND", 1)
         return send_idx
     end
 
