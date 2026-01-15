@@ -72,26 +72,26 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
 
         ctx:table_next_row()
 
-        -- Column 1: Drag handle + Collapse button
+        -- Column 1: Collapse button + Drag handle
         ctx:table_set_column_index(0)
         ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
         ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
         ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
+        if ctx:button("▼##collapse_" .. guid, 20, 20) then
+            if opts.device_collapsed then
+                opts.device_collapsed[state_guid] = true
+            end
+        end
+        if r.ImGui_IsItemHovered(ctx.ctx) then
+            ctx:set_tooltip("Collapse device")
+        end
+        ctx:same_line()
         if ctx:button("≡##drag_" .. guid, 20, 20) then
             -- Drag handle doesn't do anything on click
         end
-        if r.ImGui_IsItemHovered(ctx.ctx) then
-            ctx:set_tooltip("Drag to reorder")
-        end
-        ctx:same_line()
-        if ctx:button("▼##collapse_" .. guid, 20, 20) then
-            if opts.device_collapsed then
-                opts.device_collapsed[opts.state_guid] = true
-            end
-        end
         ctx:pop_style_color(3)
         if r.ImGui_IsItemHovered(ctx.ctx) then
-            ctx:set_tooltip("Collapse device")
+            ctx:set_tooltip("Drag to reorder")
         end
 
         -- Drag/drop handling
