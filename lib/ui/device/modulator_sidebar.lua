@@ -148,8 +148,8 @@ local function find_or_create_midi_send(source_track, dest_track)
     if send_idx >= 0 then
         -- Enable MIDI on send (I_MIDIFLAGS: -1 = all channels)
         r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_MIDIFLAGS", -1)
-        -- Disable audio on this send (MIDI-only)
-        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "D_VOL", 0)
+        -- Disable audio routing on this send (MIDI-only) by setting source channel to none
+        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_SRCCHAN", -1)
         -- Ensure source track's main send to parent/master stays enabled
         r.SetMediaTrackInfo_Value(source_track.pointer, "B_MAINSEND", 1)
         return send_idx
