@@ -19,6 +19,36 @@ local MODULATOR_TYPES = {
     {name = "Bezier LFO", jsfx = "SideFX_Modulator"}
 }
 
+-- Helper: Get project safely
+local function get_project()
+    local ok, project = pcall(function() return require('project')() end)
+    if ok and project then return project end
+    return nil
+end
+
+-- Helper: Find track by GUID
+local function find_track_by_guid(target_guid)
+    if not target_guid then return nil end
+
+    local project = get_project()
+    if not project then return nil end
+
+    local ok, count = pcall(function() return project:get_track_count() end)
+    if not ok or not count then return nil end
+
+    for i = 0, count - 1 do
+        local ok_track, track = pcall(function() return project:get_track(i) end)
+        if ok_track and track then
+            local ok_guid, track_guid = pcall(function() return track:get_guid() end)
+            if ok_guid and track_guid == target_guid then
+                return track
+            end
+        end
+    end
+
+    return nil
+end
+
 -- Helper: Get all tracks in project for source selection dropdown
 local function get_available_tracks(exclude_track)
     local tracks = {}
@@ -28,7 +58,7 @@ local function get_available_tracks(exclude_track)
         if ok then exclude_guid = guid end
     end
 
-    local project = require('project')()
+    local project = get_project()
     if not project then return tracks end
 
     local ok, count = pcall(function() return project:get_track_count() end)
@@ -764,14 +794,11 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
                 expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 0)
                 -- Remove any existing MIDI send when switching to internal
                 local mod_guid = expanded_modulator:get_guid()
-                if state.modulator_source_track and state.modulator_source_track[mod_guid] then
+                if state.modulator_source_track and state.modulator_source_track[mod_guid] and current_track then
                     local src_guid = state.modulator_source_track[mod_guid]
-                    local project = require('project')()
-                    if project and current_track then
-                        local src_track = project:find_track_by_guid(src_guid)
-                        if src_track then
-                            remove_send_to_track(src_track, current_track)
-                        end
+                    local src_track = find_track_by_guid(src_guid)
+                    if src_track then
+                        remove_send_to_track(src_track, current_track)
                     end
                     state.modulator_source_track[mod_guid] = nil
                 end
@@ -810,12 +837,9 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
                         if ctx:selectable(t.name .. "##" .. t.guid, is_selected) then
                             -- Remove old send if there was one
                             if selected_guid then
-                                local project = require('project')()
-                                if project then
-                                    local old_track = project:find_track_by_guid(selected_guid)
-                                    if old_track then
-                                        remove_send_to_track(old_track, current_track)
-                                    end
+                                local old_track = find_track_by_guid(selected_guid)
+                                if old_track then
+                                    remove_send_to_track(old_track, current_track)
                                 end
                             end
                             -- Create new MIDI send
@@ -851,14 +875,11 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
                 expanded_modulator:set_param_normalized(PARAM.PARAM_AUDIO_SOURCE, 0)
                 -- Remove any existing audio send when switching to internal
                 local mod_guid = expanded_modulator:get_guid()
-                if state.modulator_source_track and state.modulator_source_track[mod_guid] then
+                if state.modulator_source_track and state.modulator_source_track[mod_guid] and current_track then
                     local src_guid = state.modulator_source_track[mod_guid]
-                    local project = require('project')()
-                    if project and current_track then
-                        local src_track = project:find_track_by_guid(src_guid)
-                        if src_track then
-                            remove_send_to_track(src_track, current_track)
-                        end
+                    local src_track = find_track_by_guid(src_guid)
+                    if src_track then
+                        remove_send_to_track(src_track, current_track)
                     end
                     state.modulator_source_track[mod_guid] = nil
                 end
@@ -897,12 +918,9 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
                         if ctx:selectable(t.name .. "##" .. t.guid, is_selected) then
                             -- Remove old send if there was one
                             if selected_guid then
-                                local project = require('project')()
-                                if project then
-                                    local old_track = project:find_track_by_guid(selected_guid)
-                                    if old_track then
-                                        remove_send_to_track(old_track, current_track)
-                                    end
+                                local old_track = find_track_by_guid(selected_guid)
+                                if old_track then
+                                    remove_send_to_track(old_track, current_track)
                                 end
                             end
                             -- Create new audio sidechain send
