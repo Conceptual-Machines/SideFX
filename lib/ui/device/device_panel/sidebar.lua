@@ -97,7 +97,7 @@ local function draw_pan_control(ctx, utility, pan_val)
     ctx:spacing()
 
     local avail_w, _ = ctx:get_content_region_avail()
-    local pan_w = math.min(avail_w - 4, 50)
+    local pan_w = math.min(avail_w - 4, 40)
     local pan_offset = math.max(0, (avail_w - pan_w) / 2)
     ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + pan_offset)
     local pan_changed, new_pan = widgets.draw_pan_slider(ctx, "##utility_pan", pan_pct, pan_w)
@@ -124,15 +124,15 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
 
     ctx:spacing()
 
-    -- Fader with meter and scale (slimmer design)
-    local fader_w = 20
-    local meter_w = 10
-    local scale_w = 18
+    -- Fader with meter and scale (compact design)
+    local fader_w = 16
+    local meter_w = 8
+    local scale_w = 16
 
     local _, remaining_h = ctx:get_content_region_avail()
-    -- Leave room for phase controls below (80px for label + buttons + spacing) if enabled
+    -- Leave room for phase controls below (50px for label + buttons + spacing) if enabled
     local config = require('lib.core.config')
-    local phase_reserve = config.get('show_phase_controls') and 80 or 0
+    local phase_reserve = config.get('show_phase_controls') and 50 or 0
     local fader_h = remaining_h - phase_reserve
     fader_h = math.max(50, fader_h)
 
@@ -279,8 +279,8 @@ local function draw_phase_controls(ctx, utility, phase_l, phase_r, center_item_f
     ctx:text(phase_text)
     ctx:pop_style_color()
 
-    local phase_btn_w = 28
-    local phase_gap = 4
+    local phase_btn_w = 18
+    local phase_gap = 2
     local phase_total_w = phase_btn_w * 2 + phase_gap
     center_item_fn(phase_total_w)
 
@@ -291,7 +291,7 @@ local function draw_phase_controls(ctx, utility, phase_l, phase_r, center_item_f
     else
         ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
     end
-    if ctx:button(phase_l_on and "ØL" or "L", phase_btn_w, 20) then
+    if ctx:button(phase_l_on and "Ø" or "L", phase_btn_w, 16) then
         pcall(function() utility:set_param_normalized(2, phase_l_on and 0 or 1) end)
         interacted = true
     end
@@ -309,7 +309,7 @@ local function draw_phase_controls(ctx, utility, phase_l, phase_r, center_item_f
     else
         ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
     end
-    if ctx:button(phase_r_on and "ØR" or "R", phase_btn_w, 20) then
+    if ctx:button(phase_r_on and "Ø" or "R", phase_btn_w, 16) then
         pcall(function() utility:set_param_normalized(3, phase_r_on and 0 or 1) end)
         interacted = true
     end
