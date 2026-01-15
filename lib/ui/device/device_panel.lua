@@ -399,7 +399,7 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
     local is_device_collapsed = device_collapsed[state_guid] or false
 
     -- Fixed width for gain/pan column (right side of nested table)
-    local gain_pan_w = 100
+    local gain_pan_w = 70
 
     -- Outer table: dynamically 2 or 3 columns based on collapse state
     -- When expanded: 3 columns (modulators | device content | gain/pan)
@@ -445,7 +445,7 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
         if not is_device_collapsed then
             -- Expanded: show full device header
-            if header.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag_guid, enabled, opts, colors, state_guid) then
+            if header.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag_guid, enabled, opts, colors, state_guid, device_collapsed) then
                 interacted = true
             end
         else
@@ -588,7 +588,7 @@ local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg,
     local panel_height, panel_width, content_width, num_columns, params_per_column
 
     -- Fixed width for gain/pan column (right side of nested table)
-    local gain_pan_w = 100
+    local gain_pan_w = 70
 
     if is_panel_collapsed then
         -- Collapsed: full height but narrow width

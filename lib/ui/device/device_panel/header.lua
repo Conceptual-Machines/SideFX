@@ -9,7 +9,7 @@ local rename_active = {}
 local rename_buffer = {}
 
 --- Draw device name/path with mix/delta/UI buttons (left side of header)
-function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag_guid, enabled, opts, colors, state_guid)
+function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag_guid, enabled, opts, colors, state_guid, device_collapsed)
     local r = reaper
     local imgui = require('imgui')
     local drawing = require('lib.ui.common.drawing')
@@ -85,8 +85,8 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         end
         ctx:same_line(0, 2)  -- Minimal gap
         if ctx:button("▼##collapse_" .. guid, 20, 20) then
-            if opts.device_collapsed then
-                opts.device_collapsed[state_guid] = true
+            if device_collapsed then
+                device_collapsed[state_guid] = true
             end
         end
         ctx:pop_style_color(3)
