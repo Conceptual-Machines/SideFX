@@ -255,6 +255,7 @@
                     <li><a href="#installation">Installation</a></li>
                     <li><a href="#how-it-works">How It Works</a></li>
                     <li><a href="#quick-start">Quick Start</a></li>
+                    <li><a href="#browser">Plugin Browser</a></li>
                     <li><a href="#devices">Devices</a></li>
                     <li><a href="#racks">Racks &amp; Chains</a></li>
                     <li><a href="#modulators">Modulators</a></li>
@@ -458,15 +459,39 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
 
             <!-- ============================================================ -->
 
+            <h2 id="browser">Plugin Browser</h2>
+            <p>The plugin browser on the left side of SideFX lets you find and add plugins to your device chain.</p>
+
+            <h3>Searching Plugins</h3>
+            <ul>
+                <li><strong>Search box</strong> - Type to filter plugins by name or manufacturer</li>
+                <li><strong>Type filter</strong> - Filter by plugin type (Instruments, Effects, JSFX, etc.)</li>
+                <li>Results update as you type</li>
+            </ul>
+
+            <h3>Adding Plugins</h3>
+            <ul>
+                <li><strong>Double-click</strong> a plugin to add it at the end of the chain</li>
+                <li><strong>Drag and drop</strong> to add at a specific position</li>
+            </ul>
+
+            <h3>Selecting Parameters</h3>
+            <p>Right-click a device header and select <strong>Select Parameters</strong> to choose which parameters appear in the device panel. The parameter selector dialog lets you:</p>
+            <ul>
+                <li>Check/uncheck parameters to show or hide them</li>
+                <li>Set unit overrides (dB, Hz, ms, %, etc.) for each parameter</li>
+                <li>Search parameters by name</li>
+            </ul>
+
+            <figure class="screenshot">
+                <img src="images/param-selector.png" alt="Parameter selector dialog">
+                <figcaption>The parameter selector with unit override dropdowns</figcaption>
+            </figure>
+
+            <!-- ============================================================ -->
+
             <h2 id="devices">Devices</h2>
             <p>Devices are the building blocks of your FX chain. Each device wraps a plugin in a container with additional controls.</p>
-
-            <h3>Adding Devices</h3>
-            <ul>
-                <li><strong>Double-click</strong> a plugin in the browser to add it at the end</li>
-                <li><strong>Drag and drop</strong> from the browser to a specific position</li>
-                <li>Use the search box to filter plugins by name or manufacturer</li>
-            </ul>
 
             <h3>Device Controls</h3>
             <p>Each device panel shows:</p>
@@ -475,14 +500,6 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
                 <li><strong>Parameters</strong> - Configurable parameter sliders</li>
                 <li><strong>Sidebar</strong> - Mix (dry/wet), Delta (difference mode)</li>
             </ul>
-
-            <h3>Selecting Parameters</h3>
-            <p>Right-click a device header and select <strong>Select Parameters</strong> to choose which parameters appear in the device panel. You can also set unit overrides (dB, Hz, ms, etc.) for each parameter.</p>
-
-            <figure class="screenshot">
-                <img src="images/param-selector.png" alt="Parameter selector dialog">
-                <figcaption>The parameter selector with unit override dropdowns</figcaption>
-            </figure>
 
             <h3>Device Context Menu</h3>
             <p>Right-click a device header for options:</p>
