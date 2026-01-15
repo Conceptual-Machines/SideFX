@@ -176,38 +176,40 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local zero_y = screen_y + fader_h - (fader_h * zero_db_norm)
     r.ImGui_DrawList_AddLine(draw_list, fader_x, zero_y, fader_x + fader_w, zero_y, 0xFFFFFF44, 1)
 
-    -- Stereo meters
+    -- Stereo meters (mono meter from utility output level)
     local meter_l_x = meter_x
     local meter_r_x = meter_x + meter_w / 2 + 1
     local half_meter_w = meter_w / 2 - 1
     r.ImGui_DrawList_AddRectFilled(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
     r.ImGui_DrawList_AddRectFilled(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
 
-    -- Get track for meters
-    local sidefx_state = state_module.state
-    if sidefx_state.track and sidefx_state.track.pointer then
-        local peak_l = r.Track_GetPeakInfo(sidefx_state.track.pointer, 0)
-        local peak_r = r.Track_GetPeakInfo(sidefx_state.track.pointer, 1)
-        local function draw_meter_bar(x, w, peak)
-            if peak > 0 then
-                local peak_db = 20 * math.log(peak, 10)
-                peak_db = math.max(-60, math.min(24, peak_db))
-                local peak_norm = (peak_db + 60) / 84
-                local meter_fill_h = fader_h * peak_norm
-                if meter_fill_h > 1 then
-                    local meter_top = screen_y + fader_h - meter_fill_h
-                    local meter_color
-                    if peak_db > 0 then meter_color = 0xFF4444FF
-                    elseif peak_db > -6 then meter_color = 0xFFAA44FF
-                    elseif peak_db > -18 then meter_color = 0x44FF44FF
-                    else meter_color = 0x44AA44FF end
-                    r.ImGui_DrawList_AddRectFilled(draw_list, x, meter_top, x + w, screen_y + fader_h - 1, meter_color, 0)
-                end
+    -- Get output levels from utility's metering parameters (slider5/6 = param 4/5)
+    -- Note: slider range is 0-2 to allow headroom above 0dB, normalized value = raw/2
+    local ok_level_l, level_l_norm = pcall(function() return utility:get_param_normalized(4) end)
+    local ok_level_r, level_r_norm = pcall(function() return utility:get_param_normalized(5) end)
+    -- Convert from normalized (0-1 for 0-2 range) back to raw level (0-2)
+    local level_l = ok_level_l and level_l_norm * 2 or 0
+    local level_r = ok_level_r and level_r_norm * 2 or 0
+
+    local function draw_meter_bar(x, w, peak)
+        if peak > 0.001 then
+            local peak_db = 20 * math.log(peak, 10)
+            peak_db = math.max(-60, math.min(12, peak_db))
+            local peak_norm = (peak_db + 60) / 72  -- -60 to +12 dB range
+            local meter_fill_h = fader_h * peak_norm
+            if meter_fill_h > 1 then
+                local meter_top = screen_y + fader_h - meter_fill_h
+                local meter_color
+                if peak_db > 0 then meter_color = 0xFF4444FF
+                elseif peak_db > -6 then meter_color = 0xFFAA44FF
+                elseif peak_db > -18 then meter_color = 0x44FF44FF
+                else meter_color = 0x44AA44FF end
+                r.ImGui_DrawList_AddRectFilled(draw_list, x, meter_top, x + w, screen_y + fader_h - 1, meter_color, 0)
             end
         end
-        draw_meter_bar(meter_l_x + 1, half_meter_w - 1, peak_l)
-        draw_meter_bar(meter_r_x + 1, half_meter_w - 1, peak_r)
     end
+    draw_meter_bar(meter_l_x + 1, half_meter_w - 1, level_l)
+    draw_meter_bar(meter_r_x + 1, half_meter_w - 1, level_r)
 
     r.ImGui_DrawList_AddRect(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
     r.ImGui_DrawList_AddRect(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)

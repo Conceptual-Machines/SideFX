@@ -1,6 +1,6 @@
 desc:SideFX Chain Mixer
 author:Nomad Monad
-version:1.6
+version:1.7
 options:no_meter
 
 // Internal mixer for R-containers - sums parallel chain outputs to stereo
@@ -83,6 +83,42 @@ slider43:0<-100,100,1>-Chain 14 Pan
 slider44:0<-100,100,1>-Chain 15 Pan
 slider45:0<-100,100,1>-Chain 16 Pan
 
+// Per-chain mute (0=unmuted, 1=muted) - Hidden, controlled via SideFX
+slider50:0<0,1,1>-Chain 1 Mute
+slider51:0<0,1,1>-Chain 2 Mute
+slider52:0<0,1,1>-Chain 3 Mute
+slider53:0<0,1,1>-Chain 4 Mute
+slider54:0<0,1,1>-Chain 5 Mute
+slider55:0<0,1,1>-Chain 6 Mute
+slider56:0<0,1,1>-Chain 7 Mute
+slider57:0<0,1,1>-Chain 8 Mute
+slider58:0<0,1,1>-Chain 9 Mute
+slider59:0<0,1,1>-Chain 10 Mute
+slider60:0<0,1,1>-Chain 11 Mute
+slider61:0<0,1,1>-Chain 12 Mute
+slider62:0<0,1,1>-Chain 13 Mute
+slider63:0<0,1,1>-Chain 14 Mute
+slider64:0<0,1,1>-Chain 15 Mute
+slider65:0<0,1,1>-Chain 16 Mute
+
+// Per-chain solo (0=not soloed, 1=soloed) - Hidden, controlled via SideFX
+slider70:0<0,1,1>-Chain 1 Solo
+slider71:0<0,1,1>-Chain 2 Solo
+slider72:0<0,1,1>-Chain 3 Solo
+slider73:0<0,1,1>-Chain 4 Solo
+slider74:0<0,1,1>-Chain 5 Solo
+slider75:0<0,1,1>-Chain 6 Solo
+slider76:0<0,1,1>-Chain 7 Solo
+slider77:0<0,1,1>-Chain 8 Solo
+slider78:0<0,1,1>-Chain 9 Solo
+slider79:0<0,1,1>-Chain 10 Solo
+slider80:0<0,1,1>-Chain 11 Solo
+slider81:0<0,1,1>-Chain 12 Solo
+slider82:0<0,1,1>-Chain 13 Solo
+slider83:0<0,1,1>-Chain 14 Solo
+slider84:0<0,1,1>-Chain 15 Solo
+slider85:0<0,1,1>-Chain 16 Solo
+
 @init
 smooth_coeff = exp(-1 / (srate * 0.005));  // 5ms smoothing
 master_smooth = 1;
@@ -96,23 +132,48 @@ master = 10 ^ (slider1 / 20);
 master_bal_l = slider2 <= 0 ? 1 : (100 - slider2) / 100;
 master_bal_r = slider2 >= 0 ? 1 : (slider2 + 100) / 100;
 
-// Calculate per-chain gains (using same formula as IX mixer: 2^(dB/6))
-level1 = slider10 <= -60 ? 0 : 2 ^ (slider10 / 6);
-level2 = slider11 <= -60 ? 0 : 2 ^ (slider11 / 6);
-level3 = slider12 <= -60 ? 0 : 2 ^ (slider12 / 6);
-level4 = slider13 <= -60 ? 0 : 2 ^ (slider13 / 6);
-level5 = slider14 <= -60 ? 0 : 2 ^ (slider14 / 6);
-level6 = slider15 <= -60 ? 0 : 2 ^ (slider15 / 6);
-level7 = slider16 <= -60 ? 0 : 2 ^ (slider16 / 6);
-level8 = slider17 <= -60 ? 0 : 2 ^ (slider17 / 6);
-level9 = slider18 <= -60 ? 0 : 2 ^ (slider18 / 6);
-level10 = slider19 <= -60 ? 0 : 2 ^ (slider19 / 6);
-level11 = slider20 <= -60 ? 0 : 2 ^ (slider20 / 6);
-level12 = slider21 <= -60 ? 0 : 2 ^ (slider21 / 6);
-level13 = slider22 <= -60 ? 0 : 2 ^ (slider22 / 6);
-level14 = slider23 <= -60 ? 0 : 2 ^ (slider23 / 6);
-level15 = slider24 <= -60 ? 0 : 2 ^ (slider24 / 6);
-level16 = slider25 <= -60 ? 0 : 2 ^ (slider25 / 6);
+// Check if any chain is soloed
+any_solo = slider70 || slider71 || slider72 || slider73 || slider74 || slider75 ||
+           slider76 || slider77 || slider78 || slider79 || slider80 || slider81 ||
+           slider82 || slider83 || slider84 || slider85;
+
+// Calculate per-chain gains with mute/solo logic
+// Chain is audible if: not muted AND (no solo active OR this chain is soloed)
+// Using same formula as IX mixer: 2^(dB/6)
+
+active1 = !slider50 && (!any_solo || slider70);
+active2 = !slider51 && (!any_solo || slider71);
+active3 = !slider52 && (!any_solo || slider72);
+active4 = !slider53 && (!any_solo || slider73);
+active5 = !slider54 && (!any_solo || slider74);
+active6 = !slider55 && (!any_solo || slider75);
+active7 = !slider56 && (!any_solo || slider76);
+active8 = !slider57 && (!any_solo || slider77);
+active9 = !slider58 && (!any_solo || slider78);
+active10 = !slider59 && (!any_solo || slider79);
+active11 = !slider60 && (!any_solo || slider80);
+active12 = !slider61 && (!any_solo || slider81);
+active13 = !slider62 && (!any_solo || slider82);
+active14 = !slider63 && (!any_solo || slider83);
+active15 = !slider64 && (!any_solo || slider84);
+active16 = !slider65 && (!any_solo || slider85);
+
+level1 = active1 && slider10 > -60 ? 2 ^ (slider10 / 6) : 0;
+level2 = active2 && slider11 > -60 ? 2 ^ (slider11 / 6) : 0;
+level3 = active3 && slider12 > -60 ? 2 ^ (slider12 / 6) : 0;
+level4 = active4 && slider13 > -60 ? 2 ^ (slider13 / 6) : 0;
+level5 = active5 && slider14 > -60 ? 2 ^ (slider14 / 6) : 0;
+level6 = active6 && slider15 > -60 ? 2 ^ (slider15 / 6) : 0;
+level7 = active7 && slider16 > -60 ? 2 ^ (slider16 / 6) : 0;
+level8 = active8 && slider17 > -60 ? 2 ^ (slider17 / 6) : 0;
+level9 = active9 && slider18 > -60 ? 2 ^ (slider18 / 6) : 0;
+level10 = active10 && slider19 > -60 ? 2 ^ (slider19 / 6) : 0;
+level11 = active11 && slider20 > -60 ? 2 ^ (slider20 / 6) : 0;
+level12 = active12 && slider21 > -60 ? 2 ^ (slider21 / 6) : 0;
+level13 = active13 && slider22 > -60 ? 2 ^ (slider22 / 6) : 0;
+level14 = active14 && slider23 > -60 ? 2 ^ (slider23 / 6) : 0;
+level15 = active15 && slider24 > -60 ? 2 ^ (slider24 / 6) : 0;
+level16 = active16 && slider25 > -60 ? 2 ^ (slider25 / 6) : 0;
 
 // Calculate per-chain balance
 // -100 = full left, 0 = center (unity), +100 = full right

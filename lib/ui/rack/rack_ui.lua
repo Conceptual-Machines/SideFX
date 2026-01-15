@@ -572,16 +572,64 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
         end
     end
 
-    -- Column 2: Enable button (circle icon) - same size as X button
+    -- Column 1: Mute button (M)
     ctx:table_set_column_index(1)
+    if mixer then
+        local mute_param = 34 + (chain_idx - 1)  -- Params 34-49 are chain mutes
+        local ok_mute, mute_norm = pcall(function() return mixer:get_param_normalized(mute_param) end)
+        local is_muted = ok_mute and mute_norm > 0.5 or false
+        if is_muted then
+            ctx:push_style_color(imgui.Col.Button(), 0xCC4444FF)  -- Red when muted
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0xDD5555FF)
+        else
+            ctx:push_style_color(imgui.Col.Button(), 0x555555FF)  -- Grey when not muted
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x666666FF)
+        end
+        if ctx:button("M##mute_" .. chain_idx, 18, 18) then
+            pcall(function() mixer:set_param_normalized(mute_param, is_muted and 0 or 1) end)
+        end
+        ctx:pop_style_color(2)
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip(is_muted and "Unmute chain" or "Mute chain")
+        end
+    else
+        ctx:text_disabled("-")
+    end
+
+    -- Column 2: Solo button (S)
+    ctx:table_set_column_index(2)
+    if mixer then
+        local solo_param = 50 + (chain_idx - 1)  -- Params 50-65 are chain solos
+        local ok_solo, solo_norm = pcall(function() return mixer:get_param_normalized(solo_param) end)
+        local is_soloed = ok_solo and solo_norm > 0.5 or false
+        if is_soloed then
+            ctx:push_style_color(imgui.Col.Button(), 0xCCAA44FF)  -- Yellow/gold when soloed
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0xDDBB55FF)
+        else
+            ctx:push_style_color(imgui.Col.Button(), 0x555555FF)  -- Grey when not soloed
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x666666FF)
+        end
+        if ctx:button("S##solo_" .. chain_idx, 18, 18) then
+            pcall(function() mixer:set_param_normalized(solo_param, is_soloed and 0 or 1) end)
+        end
+        ctx:pop_style_color(2)
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip(is_soloed and "Unsolo chain" or "Solo chain")
+        end
+    else
+        ctx:text_disabled("-")
+    end
+
+    -- Column 3: Enable button (circle icon) - same size as X button
+    ctx:table_set_column_index(3)
     local bg_color_on = 0x44AA44FF  -- Green for ON
     local bg_color_off = 0xAA4444FF  -- Red for OFF
     if draw_on_off_circle(ctx, "##chain_on_off_" .. chain_guid, chain_enabled, 24, 20, bg_color_on, bg_color_off) then
         pcall(function() chain:set_enabled(not chain_enabled) end)
     end
 
-    -- Column 3: Delete button (same size as ON button)
-    ctx:table_set_column_index(2)
+    -- Column 4: Delete button (same size as ON button)
+    ctx:table_set_column_index(4)
     ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
     if ctx:button("×", 24, 20) then
         chain:delete()
@@ -591,8 +639,8 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
     end
     ctx:pop_style_color()
 
-    -- Column 4: Volume slider
-    ctx:table_set_column_index(3)
+    -- Column 5: Volume slider
+    ctx:table_set_column_index(5)
     if mixer then
         local vol_param = 2 + (chain_idx - 1)  -- Params 2-17 are channel volumes
         local ok_vol, vol_norm = pcall(function() return mixer:get_param_normalized(vol_param) end)
@@ -618,8 +666,8 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
         ctx:text_disabled("--")
     end
 
-    -- Column 5: Pan slider
-    ctx:table_set_column_index(4)
+    -- Column 6: Pan slider
+    ctx:table_set_column_index(6)
     if mixer then
         local pan_param = 18 + (chain_idx - 1)  -- Params 18-33 are channel pans
         local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(pan_param) end)

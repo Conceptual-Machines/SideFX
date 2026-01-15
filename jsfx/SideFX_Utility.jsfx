@@ -1,6 +1,6 @@
 desc:SideFX Utility
 author:Nomad Monad
-version:1.1
+version:1.2
 options:no_meter
 
 // Gain/Pan/Phase utility - controlled exclusively by SideFX UI
@@ -10,7 +10,8 @@ slider1:0<-24,24,0.1>-Gain (dB)
 slider2:0<-100,100,1>-Pan (%)
 slider3:0<0,1,1{Off,On}>-Phase Invert L
 slider4:0<0,1,1{Off,On}>-Phase Invert R
-slider5:1<0,1,0.01>-Output Level (for metering)
+slider5:0<0,2,0.01>-Output Level L (for metering)
+slider6:0<0,2,0.01>-Output Level R (for metering)
 
 @init
 // Smoothing coefficients
@@ -58,9 +59,9 @@ slider2 == 0 ? (
 spl0 *= phase_l;
 spl1 *= phase_r;
 
-// Output level for metering (RMS-ish, smoothed)
-level = max(abs(spl0), abs(spl1));
-slider5 = slider5 * 0.95 + level * 0.05;
+// Output levels for metering (smoothed peak)
+slider5 = slider5 * 0.95 + abs(spl0) * 0.05;
+slider6 = slider6 * 0.95 + abs(spl1) * 0.05;
 
 // No @gfx - controlled exclusively by SideFX UI
 

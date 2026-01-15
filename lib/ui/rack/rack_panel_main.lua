@@ -181,8 +181,10 @@ local function draw_chains_table(ctx, chains, rack, mixer, is_nested, state, get
         ctx:text_disabled("No chains yet")
         ctx:text_disabled("Drag plugins here to create chains")
     else
-        if ctx:begin_table("chains_table", 5, imgui.TableFlags.SizingStretchProp()) then
+        if ctx:begin_table("chains_table", 7, imgui.TableFlags.SizingStretchProp()) then
             ctx:table_setup_column("name", imgui.TableColumnFlags.WidthFixed(), 80)
+            ctx:table_setup_column("mute", imgui.TableColumnFlags.WidthFixed(), 20)
+            ctx:table_setup_column("solo", imgui.TableColumnFlags.WidthFixed(), 20)
             ctx:table_setup_column("enable", imgui.TableColumnFlags.WidthFixed(), 24)
             ctx:table_setup_column("delete", imgui.TableColumnFlags.WidthFixed(), 24)
             ctx:table_setup_column("volume", imgui.TableColumnFlags.WidthStretch(), 1)
