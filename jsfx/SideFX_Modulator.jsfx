@@ -1,7 +1,7 @@
 desc:SideFX Modulator
 author:Nomad Monad
-version:2.2
-options:no_meter want_all_kb
+version:2.3
+options:no_meter
 
 // Rate
 slider1:0<0,1,1{Free,Sync}>-Tempo Mode
@@ -444,8 +444,8 @@ trigger_mode == 0 ? ( env_value = 1; );
 trigger_mode == 1 ? ( triggered ? env_value = 1 : env_value = env_value * release_coeff; );
 trigger_mode == 2 ? ( triggered ? env_value = 1 : env_value = env_value * release_coeff; );
 trigger_mode == 3 ? (
-  // Audio source: 0 = Internal (spl0/spl1), 1 = External sidechain (spl2/spl3)
-  slider90 == 0 ? (
+  // Audio source: 0 = Internal (spl0/spl1 from utility output), 1 = External sidechain (spl2/spl3)
+  slider90 < 0.5 ? (
     input_level = max(abs(spl0), abs(spl1));
   ) : (
     input_level = max(abs(spl2), abs(spl3));
