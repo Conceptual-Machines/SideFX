@@ -283,8 +283,8 @@ local function draw_phase_controls(ctx, utility, phase_l, phase_r, center_item_f
         ctx:push_style_color(r.ImGui_Col_Button(), 0xCC4444FF)  -- Red when inverted
         ctx:push_style_color(r.ImGui_Col_Text(), 0xFFFFFFFF)
     else
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x333333FF)  -- Dark when normal
-        ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x555555FF)  -- Grey when normal
+        ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAAAAFF)
     end
     if ctx:button("Ø##phase_l", phase_btn_size, phase_btn_size) then
         pcall(function() utility:set_param_normalized(2, phase_l_on and 0 or 1) end)
@@ -303,8 +303,8 @@ local function draw_phase_controls(ctx, utility, phase_l, phase_r, center_item_f
         ctx:push_style_color(r.ImGui_Col_Button(), 0xCC4444FF)  -- Red when inverted
         ctx:push_style_color(r.ImGui_Col_Text(), 0xFFFFFFFF)
     else
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x333333FF)  -- Dark when normal
-        ctx:push_style_color(r.ImGui_Col_Text(), 0x888888FF)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x555555FF)  -- Grey when normal
+        ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAAAAFF)
     end
     if ctx:button("Ø##phase_r", phase_btn_size, phase_btn_size) then
         pcall(function() utility:set_param_normalized(3, phase_r_on and 0 or 1) end)
