@@ -58,6 +58,19 @@ Ableton/Bitwig-style FX rack management for REAPER 7+.
 
 See the [full documentation](https://conceptual-machines.github.io/SideFX/) for detailed guides.
 
+## Known Issues
+
+### Multiple Serum instances don't receive MIDI
+
+When using multiple Serum (or Serum 2) instances on the same track, only the first instance receives MIDI by default. This is because REAPER's VST instruments default to "Replace MIDI bus" mode instead of "Merge with MIDI bus".
+
+**Workaround:** For each additional Serum instance:
+1. Open the FX window for the Serum plugin
+2. Click the **I/O** button (routing)
+3. Under **MIDI Output**, select **"Merges with MIDI bus"**
+
+This setting is not exposed via REAPER's scripting API, so SideFX cannot set it automatically.
+
 ## Documentation
 
 📖 **[Online Manual](https://conceptual-machines.github.io/SideFX/)**

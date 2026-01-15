@@ -262,6 +262,7 @@
                     <li><a href="#presets">Presets</a></li>
                     <li><a href="#settings">Settings</a></li>
                     <li><a href="#shortcuts">Keyboard Shortcuts</a></li>
+                    <li><a href="#troubleshooting">Troubleshooting</a></li>
                 </ul>
             </nav>
         </aside>
@@ -348,6 +349,46 @@
                 <li><strong>Chains</strong> (<code>C1</code>, <code>C2</code>, etc.) - Containers for each parallel path within a rack</li>
             </ul>
             <p>This approach gives SideFX full control over the FX structure while leveraging REAPER's native container capabilities.</p>
+
+            <h3>Device Structure (D-containers)</h3>
+            <p>When you add a plugin through SideFX, it gets wrapped in a <strong>D-container</strong> with the following structure:</p>
+            <pre><code>D1: Plugin Name (Container)
+├── D1_FX: Plugin Name (your plugin)
+└── D1_Util (SideFX_Utility JSFX)</code></pre>
+            <p>The utility JSFX provides additional controls like pre/post gain and routing options that appear in the device sidebar.</p>
+
+            <h3>Rack Structure (R-containers)</h3>
+            <p>Racks enable parallel processing by splitting audio into multiple chains:</p>
+            <pre><code>R1 (Container)
+├── SideFX_Mixer (JSFX - mixes all chains)
+├── C1 (Chain container)
+│   └── D1: Effect A
+├── C2 (Chain container)
+│   └── D2: Effect B
+└── C3 (Chain container)
+    └── D3: Effect C</code></pre>
+            <p>Audio enters the rack, gets duplicated to each chain, processed independently, then mixed back together by the SideFX_Mixer.</p>
+
+            <h3>JSFX Plugins</h3>
+            <p>SideFX includes three custom JSFX plugins that power its features:</p>
+            <table>
+                <tr>
+                    <th>Plugin</th>
+                    <th>Purpose</th>
+                </tr>
+                <tr>
+                    <td><strong>SideFX_Utility</strong></td>
+                    <td>Added to every device. Provides pre-gain, post-gain, and the Mix (dry/wet) and Delta controls shown in the device sidebar.</td>
+                </tr>
+                <tr>
+                    <td><strong>SideFX_Mixer</strong></td>
+                    <td>Added to every rack. A 16-channel mixer that combines parallel chains with individual volume, pan, mute, and solo controls per chain.</td>
+                </tr>
+                <tr>
+                    <td><strong>SideFX_Modulator</strong></td>
+                    <td>The LFO engine. Contains the actual modulation logic including rate, curve interpolation, tempo sync, and parameter output. See the Modulators section for details.</td>
+                </tr>
+            </table>
 
             <h3>SideFX as Your FX Manager</h3>
             <p>SideFX is designed to be the <strong>primary interface</strong> for managing your track's effects. When you use SideFX, it takes ownership of the FX chain structure.</p>
@@ -474,6 +515,16 @@
 
             <h2 id="modulators">Modulators</h2>
             <p>Modulators add movement to your sound by automatically varying parameter values over time.</p>
+
+            <h3>How Modulators Work</h3>
+            <p>Each modulator is powered by the <strong>SideFX_Modulator</strong> JSFX plugin. The JSFX handles all the real-time modulation logic:</p>
+            <ul>
+                <li><strong>LFO generation</strong> - Produces the oscillating signal based on rate and curve shape</li>
+                <li><strong>Tempo sync</strong> - Locks to REAPER's tempo when sync is enabled</li>
+                <li><strong>Curve interpolation</strong> - Reads the bezier curve data and generates smooth output</li>
+                <li><strong>Parameter output</strong> - Outputs a 0-1 signal that REAPER's parameter linking system uses</li>
+            </ul>
+            <p>SideFX's UI controls the JSFX parameters and uses REAPER's native <strong>parameter linking</strong> (plink) system to connect the modulator output to your target parameters. This means modulation happens at the audio engine level, not in the script.</p>
 
             <h3>Adding a Modulator</h3>
             <ol>
@@ -657,6 +708,24 @@
                     <td>Open context menu</td>
                 </tr>
             </table>
+
+            <!-- ============================================================ -->
+
+            <h2 id="troubleshooting">Troubleshooting</h2>
+
+            <h3>Multiple Serum instances don't receive MIDI</h3>
+            <p>When using multiple Serum (or Serum 2) instances on the same track, only the first instance receives MIDI by default. This is because REAPER's VST instruments default to "Replace MIDI bus" mode instead of "Merge with MIDI bus".</p>
+
+            <p><strong>Workaround:</strong> For each additional Serum instance:</p>
+            <ol>
+                <li>Open the FX window for the Serum plugin (double-click the device header)</li>
+                <li>Click the <strong>I/O</strong> button (routing)</li>
+                <li>Under <strong>MIDI Output</strong>, select <strong>"Merges with MIDI bus"</strong></li>
+            </ol>
+
+            <div class="tip">
+                <strong>Note:</strong> This setting is not exposed via REAPER's scripting API, so SideFX cannot set it automatically. This affects any instrument plugin that needs to pass MIDI to subsequent plugins.
+            </div>
 
         </main>
     </div>

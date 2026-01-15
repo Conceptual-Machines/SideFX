@@ -155,7 +155,7 @@ local function collect_top_level_fx_for_conversion(track)
     local top_level_fx = {}
     local has_containers = false
     local has_nested_fx = false
-    
+
     local ok_iter = pcall(function()
         for fx in track:iter_track_fx_chain() do
             local parent = fx:get_parent_container()
@@ -164,7 +164,7 @@ local function collect_top_level_fx_for_conversion(track)
                 local ok_name, fx_name = pcall(function() return fx:get_name() end)
                 local ok_guid, fx_guid = pcall(function() return fx:get_guid() end)
                 local ok_is_container, is_container = pcall(function() return fx:is_container() end)
-                
+
                 if ok_name and ok_guid and fx_name and fx_guid then
                     -- Check if it's a container (could be non-SideFX container)
                     if ok_is_container and is_container then
@@ -181,15 +181,15 @@ local function collect_top_level_fx_for_conversion(track)
                             has_nested_fx = true
                         end
                     end
-                    
+
                     -- Skip SideFX JSFX plugins (they shouldn't be top-level anyway)
                     local name_lower = fx_name:lower()
-                    if not name_lower:find("sidefx_mixer") and 
-                       not name_lower:find("sidefx_utility") and 
+                    if not name_lower:find("sidefx_mixer") and
+                       not name_lower:find("sidefx_utility") and
                        not name_lower:find("sidefx_modulator") then
                         -- Skip if already in a SideFX container (check naming pattern)
-                        local is_sidefx_container = fx_name:match("^D%d+") or 
-                                                   fx_name:match("^R%d+") or 
+                        local is_sidefx_container = fx_name:match("^D%d+") or
+                                                   fx_name:match("^R%d+") or
                                                    fx_name:match("^C%d+")
                         if not is_sidefx_container then
                             table.insert(top_level_fx, {
@@ -207,11 +207,11 @@ local function collect_top_level_fx_for_conversion(track)
             end
         end
     end)
-    
+
     if not ok_iter then
         return nil, false, false
     end
-    
+
     return top_level_fx, has_containers, has_nested_fx
 end
 
@@ -340,7 +340,7 @@ function M.convert_track_to_sidefx()
 
     -- Get all top-level FX
     local top_level_fx, has_containers, has_nested_fx = collect_top_level_fx_for_conversion(state.track)
-    
+
     if not top_level_fx then
         r.ShowMessageBox("Can't convert to SideFX - error reading track FX.", "SideFX", 0)
         return false
@@ -366,7 +366,7 @@ function M.convert_track_to_sidefx()
     -- Convert each FX
     for _, fx_info in ipairs(top_level_fx) do
         local success = convert_single_fx_to_device(fx_info, device_idx)
-        
+
         if not success then
             -- Check if it was a container with children (specific error case)
             if fx_info.is_container then
@@ -378,7 +378,7 @@ function M.convert_track_to_sidefx()
                     return false
                 end
             end
-            
+
             -- Generic failure - clean up and abort
             r.PreventUIRefresh(-1)
             r.Undo_EndBlock("SideFX: Convert Track to SideFX (failed)", -1)
