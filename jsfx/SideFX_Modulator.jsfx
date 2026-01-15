@@ -1,7 +1,15 @@
 desc:SideFX Modulator
 author:Nomad Monad
-version:2.0
+version:2.1
 options:no_meter
+
+// Pin declarations for main input + sidechain input
+in_pin:input L
+in_pin:input R
+in_pin:sidechain L
+in_pin:sidechain R
+out_pin:output L
+out_pin:output R
 
 // Rate
 slider1:0<0,1,1{Free,Sync}>-Tempo Mode
@@ -88,6 +96,10 @@ slider87:0<0,1,0.001>-Playhead Position
 // Offset and Bipolar mode
 slider88:0<0,1,0.01>-Offset
 slider89:0<0,1,1{Unipolar,Bipolar}>-Bipolar Mode
+
+// Audio source selection (for Audio trigger mode)
+// 0 = Internal (main input spl0/spl1), 1 = External (sidechain spl2/spl3)
+slider90:0<0,1,1{Internal,External}>-Audio Source
 
 @init
 MAX_NODES = 16;
@@ -440,7 +452,12 @@ trigger_mode == 0 ? ( env_value = 1; );
 trigger_mode == 1 ? ( triggered ? env_value = 1 : env_value = env_value * release_coeff; );
 trigger_mode == 2 ? ( triggered ? env_value = 1 : env_value = env_value * release_coeff; );
 trigger_mode == 3 ? (
-  input_level = max(abs(spl0), abs(spl1));
+  // Audio source: 0 = Internal (spl0/spl1), 1 = External sidechain (spl2/spl3)
+  slider90 == 0 ? (
+    input_level = max(abs(spl0), abs(spl1));
+  ) : (
+    input_level = max(abs(spl2), abs(spl3));
+  );
   input_level > slider23 ? (
     triggered = 1;
     env_value = env_value * attack_coeff + (1 - attack_coeff);

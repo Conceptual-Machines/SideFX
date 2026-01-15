@@ -46,6 +46,9 @@ M.PARAM_PLAYHEAD_POSITION = 64    -- slider87: Current phase position (0-1)
 M.PARAM_OFFSET = 65               -- slider88: Offset (0-1)
 M.PARAM_BIPOLAR = 66              -- slider89: Bipolar mode (0=Unipolar, 1=Bipolar)
 
+-- Audio source selection (slider90)
+M.PARAM_AUDIO_SOURCE = 67         -- slider90: Audio Source (0=Internal, 1=External)
+
 -- Helper: Max segments (16 points = 15 segments)
 M.MAX_SEGMENTS = 15
 

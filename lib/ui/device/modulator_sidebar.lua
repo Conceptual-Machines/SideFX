@@ -19,6 +19,132 @@ local MODULATOR_TYPES = {
     {name = "Bezier LFO", jsfx = "SideFX_Modulator"}
 }
 
+-- Helper: Get all tracks in project for source selection dropdown
+local function get_available_tracks(exclude_track)
+    local tracks = {}
+    local exclude_guid = nil
+    if exclude_track then
+        local ok, guid = pcall(function() return exclude_track:get_guid() end)
+        if ok then exclude_guid = guid end
+    end
+
+    local project = require('project')()
+    if not project then return tracks end
+
+    local ok, count = pcall(function() return project:get_track_count() end)
+    if not ok or not count then return tracks end
+
+    for i = 0, count - 1 do
+        local ok_track, track = pcall(function() return project:get_track(i) end)
+        if ok_track and track then
+            local ok_guid, track_guid = pcall(function() return track:get_guid() end)
+            if ok_guid and (not exclude_guid or track_guid ~= exclude_guid) then
+                local ok_name, track_name = pcall(function() return track:get_name() end)
+                local name = (ok_name and track_name and track_name ~= "") and track_name or ("Track " .. (i + 1))
+                table.insert(tracks, {
+                    track = track,
+                    guid = track_guid,
+                    name = name,
+                    index = i
+                })
+            end
+        end
+    end
+
+    return tracks
+end
+
+-- Helper: Find or create audio sidechain send (channels 3/4)
+local function find_or_create_audio_sidechain_send(source_track, dest_track)
+    if not source_track or not dest_track then return nil end
+
+    -- Check if send already exists
+    local ok_count, send_count = pcall(function() return source_track:get_num_sends() end)
+    if ok_count and send_count then
+        for i = 0, send_count - 1 do
+            local ok_dest, send_dest = pcall(function()
+                return r.GetTrackSendInfo_Value(source_track.pointer, 0, i, "P_DESTTRACK")
+            end)
+            if ok_dest and send_dest == dest_track.pointer then
+                -- Check if it's routing to channels 3/4
+                local ok_chan, dest_chan = pcall(function()
+                    return r.GetTrackSendInfo_Value(source_track.pointer, 0, i, "I_DSTCHAN")
+                end)
+                if ok_chan and dest_chan == 2 then  -- Channel index 2 = channels 3/4
+                    return i  -- Send already exists and configured correctly
+                end
+            end
+        end
+    end
+
+    -- Create new send
+    local send_idx = r.CreateTrackSend(source_track.pointer, dest_track.pointer)
+    if send_idx >= 0 then
+        -- Configure send to output to channels 3/4 (dest channel index 2)
+        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_DSTCHAN", 2)
+        -- Set to post-fader
+        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_SENDMODE", 0)
+        return send_idx
+    end
+
+    return nil
+end
+
+-- Helper: Find or create MIDI send
+local function find_or_create_midi_send(source_track, dest_track)
+    if not source_track or not dest_track then return nil end
+
+    -- Check if MIDI send already exists
+    local ok_count, send_count = pcall(function() return source_track:get_num_sends() end)
+    if ok_count and send_count then
+        for i = 0, send_count - 1 do
+            local ok_dest, send_dest = pcall(function()
+                return r.GetTrackSendInfo_Value(source_track.pointer, 0, i, "P_DESTTRACK")
+            end)
+            if ok_dest and send_dest == dest_track.pointer then
+                -- Check if MIDI is enabled on this send
+                local ok_midi, midi_flags = pcall(function()
+                    return r.GetTrackSendInfo_Value(source_track.pointer, 0, i, "I_MIDIFLAGS")
+                end)
+                -- MIDI flags: 0 = all MIDI disabled, non-zero = some MIDI enabled
+                if ok_midi and midi_flags and midi_flags ~= 0 then
+                    return i  -- MIDI send already exists
+                end
+            end
+        end
+    end
+
+    -- Create new send
+    local send_idx = r.CreateTrackSend(source_track.pointer, dest_track.pointer)
+    if send_idx >= 0 then
+        -- Enable MIDI on send (I_MIDIFLAGS: -1 = all channels)
+        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_MIDIFLAGS", -1)
+        -- Disable audio (set volume to 0 or mute)
+        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "D_VOL", 0)
+        return send_idx
+    end
+
+    return nil
+end
+
+-- Helper: Remove send if it exists
+local function remove_send_to_track(source_track, dest_track)
+    if not source_track or not dest_track then return end
+
+    local ok_count, send_count = pcall(function() return source_track:get_num_sends() end)
+    if not ok_count or not send_count then return end
+
+    -- Find and remove sends in reverse order to avoid index shifting
+    for i = send_count - 1, 0, -1 do
+        local ok_dest, send_dest = pcall(function()
+            return r.GetTrackSendInfo_Value(source_track.pointer, 0, i, "P_DESTTRACK")
+        end)
+        if ok_dest and send_dest == dest_track.pointer then
+            r.RemoveTrackSend(source_track.pointer, 0, i)
+        end
+    end
+end
+
 -- Helper function to get modulators for a device
 local function get_device_modulators(device_container)
     local modulators = {}
@@ -614,30 +740,95 @@ local function draw_link_param_dropdown(ctx, guid, fx, expanded_modulator, exist
 end
 
 -- Helper: Draw advanced settings popup
-local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, advanced_popup_id, ok_trig, PARAM)
+local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, advanced_popup_id, ok_trig, PARAM, opts)
     local interacted = false
-    
-    r.ImGui_SetNextWindowSize(ctx.ctx, 250, 0, imgui.Cond.FirstUseEver())
+    local state = state_module.state
+
+    r.ImGui_SetNextWindowSize(ctx.ctx, 280, 0, imgui.Cond.FirstUseEver())
     if r.ImGui_BeginPopup(ctx.ctx, advanced_popup_id) then
         ctx:text("Advanced Settings")
         ctx:separator()
-        
+
+        -- Get current track for send management
+        local current_track = opts and opts.track
+
         if ok_trig and trig_idx == 2 then
             -- MIDI trigger mode
             ctx:text("MIDI Source")
+
+            -- Use MIDI_SOURCE param: 0 = Internal, 1 = External
             local midi_src = expanded_modulator:get_param(PARAM.PARAM_MIDI_SOURCE)
-            if midi_src then
-                if ctx:radio_button("This Track##midi_src_" .. guid, midi_src < 0.5) then
-                    expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 0)
-                    interacted = true
+            local is_external = midi_src and midi_src >= 0.5
+
+            if ctx:radio_button("Internal##midi_src_" .. guid, not is_external) then
+                expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 0)
+                -- Remove any existing MIDI send when switching to internal
+                local mod_guid = expanded_modulator:get_guid()
+                if state.modulator_source_track and state.modulator_source_track[mod_guid] then
+                    local src_guid = state.modulator_source_track[mod_guid]
+                    local project = require('project')()
+                    if project and current_track then
+                        local src_track = project:find_track_by_guid(src_guid)
+                        if src_track then
+                            remove_send_to_track(src_track, current_track)
+                        end
+                    end
+                    state.modulator_source_track[mod_guid] = nil
                 end
-                ctx:same_line()
-                if ctx:radio_button("MIDI Bus##midi_src_" .. guid, midi_src >= 0.5) then
-                    expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 1)
-                    interacted = true
+                interacted = true
+            end
+            ctx:same_line()
+            if ctx:radio_button("External##midi_src_" .. guid, is_external) then
+                expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 1)
+                interacted = true
+            end
+
+            -- Show track dropdown when external is selected
+            if is_external and current_track then
+                ctx:spacing()
+                ctx:text("Source Track")
+                local available_tracks = get_available_tracks(current_track)
+
+                -- Get currently selected source track
+                state.modulator_source_track = state.modulator_source_track or {}
+                local mod_guid = expanded_modulator:get_guid()
+                local selected_guid = state.modulator_source_track[mod_guid]
+
+                -- Find selected track name for preview
+                local preview_name = "Select track..."
+                for _, t in ipairs(available_tracks) do
+                    if t.guid == selected_guid then
+                        preview_name = t.name
+                        break
+                    end
+                end
+
+                ctx:set_next_item_width(180)
+                if ctx:begin_combo("##midi_track_" .. guid, preview_name) then
+                    for _, t in ipairs(available_tracks) do
+                        local is_selected = (t.guid == selected_guid)
+                        if ctx:selectable(t.name .. "##" .. t.guid, is_selected) then
+                            -- Remove old send if there was one
+                            if selected_guid then
+                                local project = require('project')()
+                                if project then
+                                    local old_track = project:find_track_by_guid(selected_guid)
+                                    if old_track then
+                                        remove_send_to_track(old_track, current_track)
+                                    end
+                                end
+                            end
+                            -- Create new MIDI send
+                            find_or_create_midi_send(t.track, current_track)
+                            state.modulator_source_track[mod_guid] = t.guid
+                            interacted = true
+                        end
+                    end
+                    ctx:end_combo()
                 end
             end
 
+            ctx:spacing()
             local ok_note, midi_note = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_MIDI_NOTE) end)
             if ok_note then
                 ctx:set_next_item_width(150)
@@ -650,6 +841,81 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
             end
         elseif ok_trig and trig_idx == 3 then
             -- Audio trigger mode
+            ctx:text("Audio Source")
+
+            -- Use AUDIO_SOURCE param: 0 = Internal, 1 = External
+            local ok_src, audio_src = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_AUDIO_SOURCE) end)
+            local is_external = ok_src and audio_src and audio_src >= 0.5
+
+            if ctx:radio_button("Internal##audio_src_" .. guid, not is_external) then
+                expanded_modulator:set_param_normalized(PARAM.PARAM_AUDIO_SOURCE, 0)
+                -- Remove any existing audio send when switching to internal
+                local mod_guid = expanded_modulator:get_guid()
+                if state.modulator_source_track and state.modulator_source_track[mod_guid] then
+                    local src_guid = state.modulator_source_track[mod_guid]
+                    local project = require('project')()
+                    if project and current_track then
+                        local src_track = project:find_track_by_guid(src_guid)
+                        if src_track then
+                            remove_send_to_track(src_track, current_track)
+                        end
+                    end
+                    state.modulator_source_track[mod_guid] = nil
+                end
+                interacted = true
+            end
+            ctx:same_line()
+            if ctx:radio_button("External##audio_src_" .. guid, is_external) then
+                expanded_modulator:set_param_normalized(PARAM.PARAM_AUDIO_SOURCE, 1)
+                interacted = true
+            end
+
+            -- Show track dropdown when external is selected
+            if is_external and current_track then
+                ctx:spacing()
+                ctx:text("Source Track")
+                local available_tracks = get_available_tracks(current_track)
+
+                -- Get currently selected source track
+                state.modulator_source_track = state.modulator_source_track or {}
+                local mod_guid = expanded_modulator:get_guid()
+                local selected_guid = state.modulator_source_track[mod_guid]
+
+                -- Find selected track name for preview
+                local preview_name = "Select track..."
+                for _, t in ipairs(available_tracks) do
+                    if t.guid == selected_guid then
+                        preview_name = t.name
+                        break
+                    end
+                end
+
+                ctx:set_next_item_width(180)
+                if ctx:begin_combo("##audio_track_" .. guid, preview_name) then
+                    for _, t in ipairs(available_tracks) do
+                        local is_selected = (t.guid == selected_guid)
+                        if ctx:selectable(t.name .. "##" .. t.guid, is_selected) then
+                            -- Remove old send if there was one
+                            if selected_guid then
+                                local project = require('project')()
+                                if project then
+                                    local old_track = project:find_track_by_guid(selected_guid)
+                                    if old_track then
+                                        remove_send_to_track(old_track, current_track)
+                                    end
+                                end
+                            end
+                            -- Create new audio sidechain send
+                            find_or_create_audio_sidechain_send(t.track, current_track)
+                            state.modulator_source_track[mod_guid] = t.guid
+                            interacted = true
+                        end
+                    end
+                    ctx:end_combo()
+                end
+            end
+
+            ctx:spacing()
             local ok_thresh, audio_thresh = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD) end)
             if ok_thresh then
                 ctx:set_next_item_width(150)
@@ -691,15 +957,15 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
                 end
             end
         end
-        
+
         if ok_trig and trig_idx == 0 then
             ctx:text_colored(0x888888FF, "Select a trigger mode")
             ctx:text_colored(0x888888FF, "to see more options")
         end
-        
+
         r.ImGui_EndPopup(ctx.ctx)
     end
-    
+
     return interacted
 end
 
@@ -1070,7 +1336,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     end
                     
                     -- Advanced popup modal
-                    if draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, advanced_popup_id, ok_trig, PARAM) then
+                    if draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, advanced_popup_id, ok_trig, PARAM, opts) then
                         interacted = true
                     end
                     
