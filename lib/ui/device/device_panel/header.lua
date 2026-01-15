@@ -299,16 +299,18 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
     local imgui = require('imgui')
     local interacted = false
 
-    -- 2 columns: on | x (same size)
-    if ctx:begin_table("header_right_" .. state_guid, 2, 0) then
-        ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 22)
-        ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 22)
+    local btn_size = 20
+
+    -- Use table with SizingFixedFit to center the buttons
+    if ctx:begin_table("header_right_" .. state_guid, 2, r.ImGui_TableFlags_SizingFixedFit()) then
+        ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), btn_size + 4)
+        ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), btn_size + 4)
 
         ctx:table_next_row()
 
         -- Column: ON/OFF toggle
         ctx:table_set_column_index(0)
-        if drawing.draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, 20, 20, colors.bypass_on, colors.bypass_off) then
+        if drawing.draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, btn_size, btn_size, colors.bypass_on, colors.bypass_off) then
             if container then
             container:set_enabled(not enabled)
             else
@@ -325,7 +327,7 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
         ctx:table_set_column_index(1)
         ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
         ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x884444FF)
-        if ctx:button("×##delete_" .. state_guid, 20, 20) then
+        if ctx:button("×##delete_" .. state_guid, btn_size, btn_size) then
             if opts.on_delete then
                 opts.on_delete(fx)
             else
