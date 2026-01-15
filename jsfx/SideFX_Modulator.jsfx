@@ -1,6 +1,6 @@
 desc:SideFX Modulator
 author:Nomad Monad
-version:2.8
+version:2.9
 options:no_meter gmem=SideFX
 
 // Rate
@@ -98,6 +98,9 @@ slider91:0<0,24,0.1>-Audio Input Gain (dB)
 
 // Debug: shows input level being received after gain (read-only)
 slider92:0<0,1,0.001>-Input Level (Debug)
+
+// Triggered state (read-only, for UI indicator)
+slider93:0<0,1,1>-Triggered
 
 @init
 MAX_NODES = 16;
@@ -522,4 +525,5 @@ raw_lfo = eval_spline(phase);
 // The env_value still applies for attack/release envelope
 slider4 = raw_lfo * env_value;
 slider87 = phase;  // Expose current playhead position for UI (read-only, no automate)
+slider93 = triggered;  // Expose triggered state for UI indicator
 slider_automate(slider4);

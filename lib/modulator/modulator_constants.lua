@@ -55,6 +55,9 @@ M.PARAM_AUDIO_INPUT_GAIN = 68     -- slider91: Audio Input Gain (0-24 dB)
 -- Debug: Input level (slider92)
 M.PARAM_INPUT_LEVEL_DEBUG = 69    -- slider92: Input Level (read-only debug)
 
+-- Triggered state (slider93, read-only for UI)
+M.PARAM_TRIGGERED = 70            -- slider93: Triggered state (0 or 1)
+
 -- Helper: Max segments (16 points = 15 segments)
 M.MAX_SEGMENTS = 15
 

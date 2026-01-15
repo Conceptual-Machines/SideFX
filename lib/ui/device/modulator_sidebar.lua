@@ -589,10 +589,23 @@ local function draw_trigger_and_advanced_button(ctx, guid, expanded_modulator, o
     local interacted = false
     local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_TRIGGER_MODE) end)
     local trig_idx = nil
-    
+
     if ok_trig then
         local trigger_modes = {"Free", "Transport", "MIDI", "Audio"}
         trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
+
+        -- Draw trigger indicator dot (for MIDI/Audio modes)
+        if trig_idx >= 2 then  -- MIDI or Audio mode
+            local ok_triggered, triggered_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_TRIGGERED) end)
+            local is_triggered = ok_triggered and triggered_val and triggered_val > 0.5
+            local dot_color = is_triggered and 0x00FF00FF or 0x444444FF  -- Green when triggered, grey otherwise
+            local dot_x, dot_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+            r.ImGui_DrawList_AddCircleFilled(draw_list, dot_x + 6, dot_y + 10, 4, dot_color)
+            r.ImGui_Dummy(ctx.ctx, 14, 0)
+            ctx:same_line()
+        end
+
         ctx:set_next_item_width(80)
         if ctx:begin_combo("##trigger_mode_" .. guid, trigger_modes[trig_idx + 1] or "Free") then
             for i, mode_name in ipairs(trigger_modes) do
@@ -607,8 +620,18 @@ local function draw_trigger_and_advanced_button(ctx, guid, expanded_modulator, o
             ctx:set_tooltip("Trigger Mode")
         end
     end
-    
+
     ctx:same_line()
+
+    -- Check if external mode is active (MIDI or Audio source set to External)
+    local is_external_mode = false
+    if trig_idx == 2 then  -- MIDI mode
+        local ok_src, midi_src = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_MIDI_SOURCE) end)
+        is_external_mode = ok_src and midi_src and midi_src >= 0.5
+    elseif trig_idx == 3 then  -- Audio mode
+        local ok_src, audio_src = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_AUDIO_SOURCE) end)
+        is_external_mode = ok_src and audio_src and audio_src >= 0.5
+    end
 
     -- Advanced button with gear icon
     local constants = require('lib.core.constants')
@@ -619,16 +642,32 @@ local function draw_trigger_and_advanced_button(ctx, guid, expanded_modulator, o
     if opts.icon_font then
         ctx:push_font(opts.icon_font, 14)
     end
+
+    -- Highlight gear button when external mode is active
+    if is_external_mode then
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x336699FF)
+        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x4477AAFF)
+    end
+
     if ctx:button(gear_icon .. "##adv_btn_" .. guid, 24, 0) then
         r.ImGui_OpenPopup(ctx.ctx, advanced_popup_id)
     end
+
+    if is_external_mode then
+        ctx:pop_style_color(2)
+    end
+
     if opts.icon_font then
         ctx:pop_font()
     end
     if ctx:is_item_hovered() then
-        ctx:set_tooltip("Advanced Settings")
+        local tooltip = "Advanced Settings"
+        if is_external_mode then
+            tooltip = tooltip .. " (External source active)"
+        end
+        ctx:set_tooltip(tooltip)
     end
-    
+
     return interacted, ok_trig, trig_idx, advanced_popup_id
 end
 
