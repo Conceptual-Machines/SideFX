@@ -536,24 +536,54 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
                 end
             end
         end
-        opts.mod_links = mod_links
-        opts.state = state  -- Pass state so params can update link_baselines
-        opts.fx_guid = guid  -- Pass guid for building link keys
-        -- opts.plugin_name is set in M.draw before this function is called
 
         -- Get modulators for right-click linking in params
+        -- Also find the container-local index of the selected modulator for filtering
         local modulators = {}
+        local selected_mod_container_idx = nil  -- Container-local index of the selected modulator
+        local selected_slot = state.expanded_mod_slot and state.expanded_mod_slot[state_guid]
         if container then
+            local container_idx = 0
             local ok_iter, iter = pcall(function() return container:iter_container_children() end)
             if ok_iter and iter then
+                local mod_slot = 0
                 for child in iter do
                     local ok_name, child_name = pcall(function() return child:get_name() end)
                     if ok_name and child_name and child_name:match("SideFX[_ ]Modulator") then
                         table.insert(modulators, child)
+                        -- Check if this is the selected modulator
+                        if selected_slot ~= nil and mod_slot == selected_slot then
+                            selected_mod_container_idx = container_idx
+                        end
+                        mod_slot = mod_slot + 1
                     end
+                    container_idx = container_idx + 1
                 end
             end
         end
+
+        -- Keep unfiltered links for baseline values (so slider doesn't jump when switching LFOs)
+        local all_mod_links = mod_links
+
+        -- Filter mod_links to only show UI indicators for selected modulator (if one is selected)
+        if selected_mod_container_idx ~= nil then
+            local filtered_links = {}
+            for param_idx, link_info in pairs(mod_links) do
+                if link_info.effect == selected_mod_container_idx then
+                    filtered_links[param_idx] = link_info
+                end
+            end
+            mod_links = filtered_links
+        end
+
+        -- Set opts AFTER filtering
+        -- mod_links = filtered (for modulation UI indicators)
+        -- all_mod_links = unfiltered (for baseline values)
+        opts.mod_links = mod_links
+        opts.all_mod_links = all_mod_links
+        opts.state = state  -- Pass state so params can update link_baselines
+        opts.fx_guid = guid  -- Pass guid for building link keys
+        -- opts.plugin_name is set in M.draw before this function is called
         opts.modulators = modulators
         opts.track = state.track  -- Pass track for bake operations
         opts.state_guid = state_guid  -- Pass state_guid to look up selected LFO slot

@@ -18,7 +18,10 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
     local r = reaper
     local imgui = require('imgui')
 
+    -- mod_links = filtered links for selected modulator only (for UI indicators)
+    -- all_mod_links = all links regardless of modulator (for baseline values)
     local mod_links = opts and opts.mod_links
+    local all_mod_links = opts and opts.all_mod_links or mod_links
     local state = opts and opts.state
     local fx_guid = opts and opts.fx_guid
     local plugin_name = opts and opts.plugin_name
@@ -32,18 +35,20 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
     if ok_name and ok_val then
         param_val = param_val or 0
 
-        -- Check if this param has modulation
+        -- Check if this param has modulation from the SELECTED modulator (for UI indicators)
         local link = mod_links and mod_links[param_idx]
+        -- Check if this param has modulation from ANY modulator (for baseline value)
+        local any_link = all_mod_links and all_mod_links[param_idx]
 
         -- Check if link is disabled
         local link_key = fx_guid and (fx_guid .. "_" .. param_idx) or nil
         local is_link_disabled = link and link_key and state and state.link_disabled and state.link_disabled[link_key]
 
-        -- Param name (truncated) - highlight if modulated, grey if disabled
+        -- Param name (truncated) - highlight if modulated by SELECTED LFO, grey if disabled
         if is_link_disabled then
             ctx:push_style_color(imgui.Col.Text(), 0x666688FF)  -- Grey-blue for disabled modulation
         elseif link then
-            ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)  -- Blue for modulated
+            ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)  -- Blue for modulated by selected LFO
         else
             ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
         end
@@ -84,14 +89,15 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
         
         -- Unipolar uses: baseline + (lfo * scale)
         -- baseline = initial value, scale = depth
+        -- Use any_link (from ANY modulator) for baseline so slider stays stable when switching LFOs
         local base_val = param_val  -- Default: actual current value
-        if link then
-            local baseline = link.baseline or 0
+        if any_link then
+            local baseline = any_link.baseline or 0
             base_val = baseline
         end
-        
-        -- Draw the slider with the BASELINE value if modulated, otherwise current value
-        local display_val = link and base_val or param_val
+
+        -- Draw the slider with the BASELINE value if modulated by ANY LFO, otherwise current value
+        local display_val = any_link and base_val or param_val
 
         -- Check for user override first, otherwise auto-detect
         local unit_override, range_min, range_max
@@ -228,8 +234,8 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
                 text_input_enabled = false  -- No conversion available
             end
 
-            -- When modulated, hide slider text (we'll overlay baseline for computable units)
-            if link then
+            -- When modulated by ANY LFO, hide slider text (we'll overlay baseline for computable units)
+            if any_link then
                 slider_format = "##"
             end
 
@@ -237,21 +243,21 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
             changed, new_val, slider_in_text_mode = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, slider_format, nil, slider_mult, nil, text_input_enabled)
 
             -- Overlay text on slider (only when not in text input mode)
-            -- When linked: show static baseline, but show live value while dragging
+            -- When linked by ANY LFO: show static baseline, but show live value while dragging
             -- When not linked: show plugin's current formatted value
             if not slider_in_text_mode then
                 local overlay_text = nil
                 local is_dragging = r.ImGui_IsItemActive(ctx.ctx)
-                if link then
+                if any_link then
                     if is_dragging and ok_fmt and param_formatted then
                         -- User is dragging: show live value as they adjust baseline
                         overlay_text = param_formatted
-                    elseif link.baseline_formatted then
+                    elseif any_link.baseline_formatted then
                         -- Not dragging: show cached baseline formatted value (static)
-                        overlay_text = link.baseline_formatted
+                        overlay_text = any_link.baseline_formatted
                     else
                         -- Fallback: compute from baseline if we have a computable unit
-                        local baseline = link.baseline or 0
+                        local baseline = any_link.baseline or 0
                         if unit_info and not unit_info.use_plugin_format then
                             local display_mult = unit_info.display_mult or 1
                             local fmt = unit_info.format or "%.1f"
@@ -503,8 +509,8 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
             ctx:pop_style_color()
         end
         if changed then
-            if link then
-                -- If modulated, update baseline in both REAPER and UI state
+            if any_link then
+                -- If modulated by ANY LFO, update baseline in both REAPER and UI state
                 local mod_prefix = string.format("param.%d.mod.", param_idx)
                 fx:set_named_config_param(mod_prefix .. "baseline", tostring(new_val))
                 -- Also update UI state so restore works correctly
@@ -518,8 +524,8 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
             end
             interacted = true
         end
-        
-        -- Draw modulation indicator overlay on top of slider
+
+        -- Draw modulation indicator overlay on top of slider (only for SELECTED LFO's links)
         if link then
             local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
             local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
