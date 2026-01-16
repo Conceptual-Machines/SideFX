@@ -937,6 +937,29 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
                     interacted = true
                 end
             end
+
+            -- MIDI Gate Mode toggle
+            ctx:spacing()
+            ctx:text("Note Behavior")
+            local ok_gate, gate_mode = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_MIDI_GATE_MODE) end)
+            if ok_gate then
+                local is_gate = gate_mode and gate_mode >= 0.5
+                if ctx:radio_button("Trigger##gate_" .. guid, not is_gate) then
+                    expanded_modulator:set_param(PARAM.PARAM_MIDI_GATE_MODE, 0)
+                    interacted = true
+                end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip("LFO runs continuously after note-on\n(Good for sidechain)")
+                end
+                ctx:same_line()
+                if ctx:radio_button("Gate##gate_" .. guid, is_gate) then
+                    expanded_modulator:set_param(PARAM.PARAM_MIDI_GATE_MODE, 1)
+                    interacted = true
+                end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip("LFO stops when note is released\n(Good for envelope-style modulation)")
+                end
+            end
         elseif ok_trig and trig_idx == 3 then
             -- Audio trigger mode
             ctx:text("Audio Source")

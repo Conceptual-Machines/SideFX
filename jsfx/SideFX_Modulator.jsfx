@@ -15,6 +15,8 @@ slider6:1<0,1,0.01>-Depth
 slider20:0<0,3,1{Free,Transport,MIDI,Audio}>-Trigger Mode
 slider21:0<0,1,1{This Track,MIDI Bus}>-MIDI Source
 slider22:0<0,127,1>-MIDI Note (0=any)
+// MIDI Gate Mode: 0=Trigger (runs continuously after note-on), 1=Gate (stops on note-off)
+slider94:0<0,1,1{Trigger,Gate}>-MIDI Gate Mode
 slider23:0.5<0,1,0.01>-Audio Threshold
 slider24:100<1,2000,1>-Attack (ms)
 slider25:500<1,5000,1>-Release (ms)
@@ -446,6 +448,9 @@ trigger_mode == 2 ? (
   ext_midi_bus = -1;  // Receive all buses when not in MIDI mode
 );
 
+// Read MIDI gate mode
+midi_gate_mode = slider94;
+
 while (midirecv(offset, msg1, msg2, msg3)) (
   trigger_mode == 2 ? (
     status = msg1 & 0xF0;
@@ -460,8 +465,8 @@ while (midirecv(offset, msg1, msg2, msg3)) (
         trigger_pulse_counter = 10;  // Flash for ~10 blocks
       );
     );
-    // Note off - decrement note count
-    (status == 0x80 || (status == 0x90 && velocity == 0)) ? (
+    // Note off - only handle in Gate mode (slider94 == 1)
+    midi_gate_mode && (status == 0x80 || (status == 0x90 && velocity == 0)) ? (
       (midi_note == 0 || note == midi_note) ? (
         midi_notes_held = max(0, midi_notes_held - 1);
         midi_notes_held == 0 ? triggered = 0;

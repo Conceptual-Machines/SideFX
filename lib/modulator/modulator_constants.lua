@@ -58,6 +58,9 @@ M.PARAM_INPUT_LEVEL_DEBUG = 69    -- slider92: Input Level (read-only debug)
 -- Triggered state (slider93, read-only for UI)
 M.PARAM_TRIGGERED = 70            -- slider93: Triggered state (0 or 1)
 
+-- MIDI Gate Mode (slider94)
+M.PARAM_MIDI_GATE_MODE = 71       -- slider94: MIDI Gate Mode (0=Trigger, 1=Gate)
+
 -- Helper: Max segments (16 points = 15 segments)
 M.MAX_SEGMENTS = 15
 
