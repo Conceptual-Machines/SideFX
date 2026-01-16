@@ -1,6 +1,6 @@
 desc:SideFX Chain Mixer
 author:Nomad Monad
-version:1.7
+version:1.9
 options:no_meter
 
 // Internal mixer for R-containers - sums parallel chain outputs to stereo
@@ -124,6 +124,11 @@ smooth_coeff = exp(-1 / (srate * 0.005));  // 5ms smoothing
 master_smooth = 1;
 master_bal_l_smooth = 1;
 master_bal_r_smooth = 1;
+
+// Initialize all gain values to unity (1.0) until @slider calculates proper values
+master = 1;
+level1 = level2 = level3 = level4 = level5 = level6 = level7 = level8 = 1;
+level9 = level10 = level11 = level12 = level13 = level14 = level15 = level16 = 1;
 
 @slider
 master = 10 ^ (slider1 / 20);
@@ -255,3 +260,9 @@ spl1 = (spl3 * level1 * bal_r_1) +
 // Apply master gain and balance
 spl0 *= master_smooth * master_bal_l_smooth;
 spl1 *= master_smooth * master_bal_r_smooth;
+
+// Zero out all sideband channels to prevent pass-through
+spl2 = spl3 = spl4 = spl5 = spl6 = spl7 = 0;
+spl8 = spl9 = spl10 = spl11 = spl12 = spl13 = spl14 = spl15 = 0;
+spl16 = spl17 = spl18 = spl19 = spl20 = spl21 = spl22 = spl23 = 0;
+spl24 = spl25 = spl26 = spl27 = spl28 = spl29 = spl30 = spl31 = 0;

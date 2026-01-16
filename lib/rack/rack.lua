@@ -109,18 +109,13 @@ local function create_rack_container(rack_idx, position)
         if mixer_inside then
             mixer_inside:set_named_config_param("renamed_name", naming.build_mixer_name(rack_idx))
 
-            -- Initialize master and chain params
-            local master_0db_norm = (0 + 24) / 36  -- 0.667
-            local pan_center_norm = 0.5
-            local vol_0db_norm = (0 + 60) / 72  -- 0.833
+            -- Set explicit output pin mappings to prevent REAPER from auto-routing
+            -- Mixer outputs stereo (pins 0/1) to rack channels 0/1 only
+            mixer_inside:set_pin_mappings(1, 0, 1, 0)  -- output pin 0 -> channel 0
+            mixer_inside:set_pin_mappings(1, 1, 2, 0)  -- output pin 1 -> channel 1
 
-            pcall(function() mixer_inside:set_param_normalized(0, master_0db_norm) end)
-            pcall(function() mixer_inside:set_param_normalized(1, pan_center_norm) end)
-
-            for i = 1, 16 do
-                pcall(function() mixer_inside:set_param_normalized(1 + i, vol_0db_norm) end)
-                pcall(function() mixer_inside:set_param_normalized(17 + i, pan_center_norm) end)
-            end
+            -- Note: Don't initialize mixer params - JSFX defaults (0dB) are correct
+            -- Previous code was setting wrong param indices, causing +8dB gain
         else
             -- Mixer was added but move failed - clean up and fail
             r.ShowConsoleMsg("SideFX: Failed to move mixer into rack container. Cleaning up...\n")
@@ -280,7 +275,15 @@ function M.add_rack(parent_rack, position)
         if chain_inside then
             chain_inside:set_container_channels(64)
 
-            -- Set output channel routing
+            -- Clear all default output pin mappings first (pins 0-7)
+            -- This prevents default pin->channel mappings from conflicting
+            -- with our custom mappings (e.g., default pin 2->channel 2 conflicting
+            -- with our custom pin 0->channel 2)
+            for pin = 0, 7 do
+                chain_inside:set_pin_mappings(1, pin, 0, 0)
+            end
+
+            -- Set custom output channel routing
             local out_channel = chain_idx * 2
             local left_bits = math.floor(2 ^ out_channel)
             local right_bits = math.floor(2 ^ (out_channel + 1))
@@ -289,17 +292,8 @@ function M.add_rack(parent_rack, position)
             chain_inside:set_pin_mappings(1, 1, right_bits, 0)
         end
 
-        -- Set parent rack mixer volume for this chain to 0dB
-        local parent_mixer = fx_utils.get_rack_mixer(parent_rack)
-        if parent_mixer then
-            local vol_param = M.get_mixer_chain_volume_param(chain_idx)
-            local normalized_0db = 60 / 72  -- 0.833...
-
-            parent_mixer:set_param_normalized(vol_param, normalized_0db)
-
-            local pan_param = M.get_mixer_chain_pan_param(chain_idx)
-            parent_mixer:set_param_normalized(pan_param, 0.5)
-        end
+        -- Note: Don't initialize mixer chain params - JSFX defaults (0dB) are correct
+        -- Setting params here was causing gain issues due to incorrect param indices
 
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Rack", -1)
@@ -464,7 +458,15 @@ function M.add_empty_chain_to_rack(rack)
     if chain_inside then
         chain_inside:set_container_channels(64)
 
-        -- Set output channel routing
+        -- Clear all default output pin mappings first (pins 0-7)
+        -- This prevents default pin->channel mappings from conflicting
+        -- with our custom mappings (e.g., default pin 2->channel 2 conflicting
+        -- with our custom pin 0->channel 2)
+        for pin = 0, 7 do
+            chain_inside:set_pin_mappings(1, pin, 0, 0)
+        end
+
+        -- Set custom output channel routing
         local out_channel = chain_idx * 2
         local left_bits = math.floor(2 ^ out_channel)
         local right_bits = math.floor(2 ^ (out_channel + 1))
@@ -473,17 +475,7 @@ function M.add_empty_chain_to_rack(rack)
         chain_inside:set_pin_mappings(1, 1, right_bits, 0)
     end
 
-    -- Set mixer volume for this chain to 0dB
-    local mixer = fx_utils.get_rack_mixer(rack)
-    if mixer then
-        local vol_param = M.get_mixer_chain_volume_param(chain_idx)
-        local normalized_0db = 60 / 72  -- 0.833...
-        mixer:set_param_normalized(vol_param, normalized_0db)
-
-        -- Also set pan to center (normalized 0.5)
-        local pan_param = M.get_mixer_chain_pan_param(chain_idx)
-        mixer:set_param_normalized(pan_param, 0.5)
-    end
+    -- Note: Don't initialize mixer chain params - JSFX defaults (0dB) are correct
 
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Add Empty Chain", -1)
@@ -696,7 +688,15 @@ function M.add_chain_to_rack(rack, plugin)
         if chain_inside then
             chain_inside:set_container_channels(64)
 
-            -- Set output channel routing
+            -- Clear all default output pin mappings first (pins 0-7)
+            -- This prevents default pin->channel mappings from conflicting
+            -- with our custom mappings (e.g., default pin 2->channel 2 conflicting
+            -- with our custom pin 0->channel 2)
+            for pin = 0, 7 do
+                chain_inside:set_pin_mappings(1, pin, 0, 0)
+            end
+
+            -- Set custom output channel routing
             local out_channel = chain_idx * 2
             local left_bits = math.floor(2 ^ out_channel)
             local right_bits = math.floor(2 ^ (out_channel + 1))
@@ -705,17 +705,7 @@ function M.add_chain_to_rack(rack, plugin)
             chain_inside:set_pin_mappings(1, 1, right_bits, 0)
         end
 
-        -- Set mixer volume for this chain to 0dB
-        local mixer = fx_utils.get_rack_mixer(rack)
-        if mixer then
-            local vol_param = M.get_mixer_chain_volume_param(chain_idx)
-            local normalized_0db = 60 / 72  -- 0.833...
-            mixer:set_param_normalized(vol_param, normalized_0db)
-
-            -- Also set pan to center (normalized 0.5)
-            local pan_param = M.get_mixer_chain_pan_param(chain_idx)
-            mixer:set_param_normalized(pan_param, 0.5)
-        end
+        -- Note: Don't initialize mixer chain params - JSFX defaults (0dB) are correct
     end
 
     r.PreventUIRefresh(-1)
