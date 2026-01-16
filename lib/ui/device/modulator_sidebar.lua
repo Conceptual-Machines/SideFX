@@ -1146,11 +1146,14 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
 
                 -- Column 2: Uni/Bi buttons
                 ctx:table_set_column_index(1)
+                if is_disabled then
+                    r.ImGui_BeginDisabled(ctx.ctx)
+                end
                 if not is_bipolar and not is_disabled then
                     ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                 end
                 if ctx:button("U##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
-                    if is_bipolar then
+                    if is_bipolar and not is_disabled then
                         state.link_bipolar[link_key] = false
                         fx:set_named_config_param(plink_prefix .. "offset", "0")
                         interacted = true
@@ -1169,7 +1172,7 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                     ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                 end
                 if ctx:button("B##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
-                    if not is_bipolar then
+                    if not is_bipolar and not is_disabled then
                         state.link_bipolar[link_key] = true
                         fx:set_named_config_param(plink_prefix .. "offset", "-0.5")
                         interacted = true
@@ -1180,6 +1183,9 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                 end
                 if ctx:is_item_hovered() then
                     ctx:set_tooltip("Bipolar")
+                end
+                if is_disabled then
+                    r.ImGui_EndDisabled(ctx.ctx)
                 end
 
                 -- Column 3: Depth slider (use 0-1 internal range, scale to -1 to 1)
@@ -1207,7 +1213,8 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                 local depth_text_x = depth_slider_x + (depth_avail_w - depth_text_w) / 2
                 local depth_text_y = depth_slider_y + (depth_slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
                 local depth_draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-                r.ImGui_DrawList_AddText(depth_draw_list, depth_text_x, depth_text_y, 0xFFFFFFFF, depth_text)
+                local depth_text_color = is_disabled and 0x666666FF or 0xFFFFFFFF
+                r.ImGui_DrawList_AddText(depth_draw_list, depth_text_x, depth_text_y, depth_text_color, depth_text)
 
                 if changed and not is_disabled then
                     local new_depth = new_depth_norm * 2 - 1  -- Convert back to -1 to 1
