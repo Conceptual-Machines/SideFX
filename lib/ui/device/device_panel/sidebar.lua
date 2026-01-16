@@ -218,6 +218,44 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     r.ImGui_DrawList_AddRect(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
     r.ImGui_DrawList_AddRect(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
 
+    -- Invisible button for meter hover detection
+    r.ImGui_SetCursorScreenPos(ctx.ctx, meter_l_x, screen_y)
+    ctx:invisible_button("##meter_hover", meter_w, fader_h)
+    if r.ImGui_IsItemHovered(ctx.ctx) then
+        -- Calculate peak dB values
+        local peak_db_l = level_l > 0.001 and (20 * math.log(level_l, 10)) or -60
+        local peak_db_r = level_r > 0.001 and (20 * math.log(level_r, 10)) or -60
+        peak_db_l = math.max(DB_MIN, math.min(DB_MAX, peak_db_l))
+        peak_db_r = math.max(DB_MIN, math.min(DB_MAX, peak_db_r))
+
+        -- Smooth the display values (store in state)
+        local state = state_module.state
+        state.meter_display_l = state.meter_display_l or peak_db_l
+        state.meter_display_r = state.meter_display_r or peak_db_r
+        -- Fast attack, slow release for readable display
+        if peak_db_l > state.meter_display_l then
+            state.meter_display_l = peak_db_l
+        else
+            state.meter_display_l = state.meter_display_l * 0.92 + peak_db_l * 0.08
+        end
+        if peak_db_r > state.meter_display_r then
+            state.meter_display_r = peak_db_r
+        else
+            state.meter_display_r = state.meter_display_r * 0.92 + peak_db_r * 0.08
+        end
+
+        -- Format display strings (compact)
+        local l_val = state.meter_display_l
+        local r_val = state.meter_display_r
+        local l_str = l_val <= DB_MIN and "-∞" or string.format("%.0f", l_val)
+        local r_str = r_val <= DB_MIN and "-∞" or string.format("%.0f", r_val)
+
+        -- Show as tooltip with smaller font
+        r.ImGui_PushFont(ctx.ctx, nil, 10)  -- Small font size
+        ctx:set_tooltip(string.format("L %s | R %s dB", l_str, r_str))
+        r.ImGui_PopFont(ctx.ctx)
+    end
+
     -- Invisible slider for fader interaction
     -- Features: Shift+drag for fine control, Ctrl/Cmd+click to reset to 0dB, double-click for text input
     r.ImGui_SetCursorScreenPos(ctx.ctx, fader_x, screen_y)
@@ -232,8 +270,24 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
         interacted = true
     end
     ctx:pop_style_color(5)
-    if r.ImGui_IsItemHovered(ctx.ctx) then
-        ctx:set_tooltip(string.format("Gain: %.1f dB\nShift+drag: Fine control\nCtrl+click: Reset to 0 dB\nDouble-click value: Text input", gain_db))
+
+    -- Show gain value prominently on hover
+    local is_fader_hovered = r.ImGui_IsItemHovered(ctx.ctx)
+    if is_fader_hovered then
+        -- Draw floating value box next to fader
+        local hover_label = string.format("%.1f dB", gain_db)
+        local hover_text_w = r.ImGui_CalcTextSize(ctx.ctx, hover_label)
+        local hover_box_w = hover_text_w + 8
+        local hover_box_h = 18
+        local hover_x = fader_x - hover_box_w - 4
+        local mouse_x, mouse_y = r.ImGui_GetMousePos(ctx.ctx)
+        local hover_y = mouse_y - hover_box_h / 2
+        -- Clamp to fader bounds
+        hover_y = math.max(screen_y, math.min(screen_y + fader_h - hover_box_h, hover_y))
+
+        r.ImGui_DrawList_AddRectFilled(draw_list, hover_x, hover_y, hover_x + hover_box_w, hover_y + hover_box_h, 0x222222EE, 3)
+        r.ImGui_DrawList_AddRect(draw_list, hover_x, hover_y, hover_x + hover_box_w, hover_y + hover_box_h, 0x888888FF, 3)
+        r.ImGui_DrawList_AddText(draw_list, hover_x + 4, hover_y + 2, 0xFFFFFFFF, hover_label)
     end
 
     -- dB label below fader
