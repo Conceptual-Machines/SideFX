@@ -33,6 +33,16 @@ local BUTTON_HEIGHT = 24  -- Match icon button height
 --   - on_add_rack: () -> nil
 --   - on_collapse_from_depth: (depth) -> nil
 function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks)
+    local r = reaper
+
+    -- Helper to draw vertical separator (matching button height)
+    local function draw_separator()
+        local x, y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+        local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+        r.ImGui_Dummy(ctx.ctx, 8, 28)
+        r.ImGui_DrawList_AddLine(draw_list, x + 4, y + 4, x + 4, y + 24, 0x666666FF, 1)
+    end
+
     -- Use table with 2 columns: left content and right buttons
     if ctx:begin_table("toolbar", 2, imgui.TableFlags.SizingStretchProp()) then
         ctx:table_setup_column("left", imgui.TableColumnFlags.WidthStretch())
@@ -116,7 +126,7 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         -- Track name (if enabled) - styled as breadcrumb button
         if config.get('show_track_name') then
             ctx:same_line()
-            ctx:text_disabled("|")
+            draw_separator()
             ctx:same_line()
             draw_breadcrumb_button(ctx, state.track_name, "track_name")
         end
@@ -194,6 +204,8 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
             ctx:set_tooltip(has_spectrum and "Remove spectrum analyzer" or "Add spectrum analyzer at end of chain")
         end
 
+        ctx:same_line()
+        draw_separator()
         ctx:same_line()
 
         -- Preset button
