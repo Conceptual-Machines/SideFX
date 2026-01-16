@@ -11,8 +11,8 @@ Requirements (install via ReaPack):
 - RPP-Parser (ReaTeam Scripts > Development)]]></description>
         <link rel="homepage">https://github.com/Conceptual-Machines/SideFX</link>
       </metadata>
-      <version name="0.3.0" author="Nomad Monad" time="2026-01-16T00:00:00Z">
-        <changelog><![CDATA[v0.3.0 (2026-01-16)
+      <version name="0.2.0" author="Nomad Monad" time="2026-01-16T00:00:00Z">
+        <changelog><![CDATA[v0.2.0 (2026-01-16)
   + Replace EmojImGui with native PNG icons
   + New icons module (lib/ui/common/icons.lua)
   + 25 PNG icons in assets/icons/
@@ -84,6 +84,8 @@ Requirements (install via ReaPack):
         <source file="assets/icons/on.png">assets/icons/on.png</source>
         <source file="assets/icons/oneshot.png">assets/icons/oneshot.png</source>
         <source file="assets/icons/oscilloscope.png">assets/icons/oscilloscope.png</source>
+        <source file="assets/icons/pause.png">assets/icons/pause.png</source>
+        <source file="assets/icons/pop-out.png">assets/icons/pop-out.png</source>
         <source file="assets/icons/plug.png">assets/icons/plug.png</source>
         <source file="assets/icons/rack.png">assets/icons/rack.png</source>
         <source file="assets/icons/refresh.png">assets/icons/refresh.png</source>

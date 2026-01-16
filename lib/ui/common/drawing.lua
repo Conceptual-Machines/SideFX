@@ -488,7 +488,7 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
     local color_r = 0xFF80FFFF  -- Light magenta for right
 
     -- Background
-    r.ImGui_DrawList_AddRectFilled(draw_list, x, y, x + width, y + height, 0x1A1A1AFF, 4)
+    r.ImGui_DrawList_AddRectFilled(draw_list, x, y, x + width, y + height, 0x1A1A1AFF, 0)
 
     -- Center line (silence / -48dB threshold)
     local center_y = y + height/2
@@ -498,6 +498,7 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
     -- Display range: 0dB at edge, -48dB at center
     local db_range = 48
     local db_marks = {0, -12, -24, -36, -48}  -- Fewer marks for cleaner look
+    local label_dim = 0x666666FF  -- Dimmer label color for grid
     for _, db in ipairs(db_marks) do
         -- Map dB to normalized position (0dB=1, -48dB=0)
         local normalized = (db + db_range) / db_range
@@ -505,16 +506,16 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
         -- Upper and lower lines (positive and negative amplitude)
         r.ImGui_DrawList_AddLine(draw_list, x, center_y - offset, x + width, center_y - offset, grid_color, 1)
         r.ImGui_DrawList_AddLine(draw_list, x, center_y + offset, x + width, center_y + offset, grid_color, 1)
-        -- Labels on both sides (bipolar)
+        -- Labels inside grid (position below line to avoid clipping at edges)
         local label_text = string.format("%d", db)
         if offset > 5 then  -- Only show if not at center
-            -- Upper label (positive amplitude side)
-            r.ImGui_DrawList_AddText(draw_list, x + 1, center_y - offset - 9, label_color, label_text)
-            -- Lower label (negative amplitude side) - same dB since it's magnitude
-            r.ImGui_DrawList_AddText(draw_list, x + 1, center_y + offset + 1, label_color, label_text)
+            -- Upper label (positive amplitude side) - position below line
+            r.ImGui_DrawList_AddText(draw_list, x + 4, center_y - offset + 2, label_dim, label_text)
+            -- Lower label (negative amplitude side) - position above line
+            r.ImGui_DrawList_AddText(draw_list, x + 4, center_y + offset - 11, label_dim, label_text)
         else
             -- At center, just show the dB value once
-            r.ImGui_DrawList_AddText(draw_list, x + 1, center_y - offset - 9, label_color, label_text)
+            r.ImGui_DrawList_AddText(draw_list, x + 4, center_y - offset + 2, label_dim, label_text)
         end
     end
 
@@ -523,7 +524,7 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
     for i = 1, num_x_divs - 1 do
         local line_x = x + (width * i / num_x_divs)
         r.ImGui_DrawList_AddLine(draw_list, line_x, y, line_x, y + height, grid_color, 1)
-        -- Time label (shorter format)
+        -- Time label (shorter format) - inside grid
         local t = view_msec * (1 - i / num_x_divs)  -- Time ago from right
         local label_text
         if t >= 1000 then
@@ -531,7 +532,7 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
         else
             label_text = string.format("%.0f", t)
         end
-        r.ImGui_DrawList_AddText(draw_list, line_x + 2, y + height - 11, label_color, label_text)
+        r.ImGui_DrawList_AddText(draw_list, line_x + 3, y + height - 13, label_dim, label_text)
     end
 
     -- Helper: convert linear amplitude to logarithmic display position
@@ -621,8 +622,11 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
     r.ImGui_DrawList_AddText(draw_list, text_x, y + 4, color_l, string.format("L: %s / %s", l_pos_str, l_neg_str))
     r.ImGui_DrawList_AddText(draw_list, text_x, y + 16, color_r, string.format("R: %s / %s", r_pos_str, r_neg_str))
 
-    -- Border
-    r.ImGui_DrawList_AddRect(draw_list, x, y, x + width, y + height, 0x444444FF, 4, 0, 1)
+    -- Border (3 sides - no top to avoid double line with header)
+    local border_color = 0x444444FF
+    r.ImGui_DrawList_AddLine(draw_list, x, y, x, y + height, border_color, 1)  -- left
+    r.ImGui_DrawList_AddLine(draw_list, x, y + height, x + width, y + height, border_color, 1)  -- bottom
+    r.ImGui_DrawList_AddLine(draw_list, x + width, y, x + width, y + height, border_color, 1)  -- right
 
     -- Invisible button for interaction
     r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
@@ -682,16 +686,19 @@ function M.draw_spectrum(ctx, label, width, height, slot)
     end
 
     -- Background
-    r.ImGui_DrawList_AddRectFilled(draw_list, x, y, x + width, y + height, 0x1A1A1AFF, 4)
+    r.ImGui_DrawList_AddRectFilled(draw_list, x, y, x + width, y + height, 0x1A1A1AFF, 0)
 
     -- Y-axis grid (dB levels) - adapt to floor setting, fewer marks
+    local label_dim = 0x666666FF  -- Dimmer label color for grid
     local db_levels = {0, -12, -24, -36, -48, -60}
     for _, db in ipairs(db_levels) do
         if db >= floor_db then
             local norm = (db - floor_db) / (-floor_db)
             local line_y = y + height - norm * height
             r.ImGui_DrawList_AddLine(draw_list, x, line_y, x + width, line_y, grid_color, 1)
-            r.ImGui_DrawList_AddText(draw_list, x + 1, line_y - 9, label_color, string.format("%d", db))
+            -- Position label below line to stay inside grid
+            local label_y = db == 0 and line_y + 2 or line_y - 11
+            r.ImGui_DrawList_AddText(draw_list, x + 4, label_y, label_dim, string.format("%d", db))
         end
     end
 
@@ -703,7 +710,7 @@ function M.draw_spectrum(ctx, label, width, height, slot)
             if line_x > x + 5 and line_x < x + width - 5 then
                 r.ImGui_DrawList_AddLine(draw_list, line_x, y, line_x, y + height, grid_color, 1)
                 local label_text = hz >= 1000 and string.format("%dk", hz/1000) or string.format("%d", hz)
-                r.ImGui_DrawList_AddText(draw_list, line_x + 2, y + 2, label_color, label_text)
+                r.ImGui_DrawList_AddText(draw_list, line_x + 3, y + 4, label_dim, label_text)
             end
         end
     end
@@ -807,8 +814,11 @@ function M.draw_spectrum(ctx, label, width, height, slot)
         r.ImGui_DrawList_AddLine(draw_list, p1.x, p1.y, p2.x, p2.y, line_color, 2.0)
     end
 
-    -- Border
-    r.ImGui_DrawList_AddRect(draw_list, x, y, x + width, y + height, 0x444444FF, 4, 0, 1)
+    -- Border (3 sides - no top to avoid double line with header)
+    local border_color = 0x444444FF
+    r.ImGui_DrawList_AddLine(draw_list, x, y, x, y + height, border_color, 1)  -- left
+    r.ImGui_DrawList_AddLine(draw_list, x, y + height, x + width, y + height, border_color, 1)  -- bottom
+    r.ImGui_DrawList_AddLine(draw_list, x + width, y, x + width, y + height, border_color, 1)  -- right
 
     -- Invisible button for interaction
     r.ImGui_InvisibleButton(ctx.ctx, label, width, height)

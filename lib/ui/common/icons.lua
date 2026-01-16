@@ -41,6 +41,8 @@ M.Names = {
     refresh = "refresh",
     loop = "loop",
     oneshot = "oneshot",
+    pause = "pause",
+    popout = "pop-out",
 
     -- Audio
     speaker_on = "speaker-on",

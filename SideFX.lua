@@ -1,6 +1,6 @@
 -- @description SideFX - Smart FX Container Manager
 -- @author Nomad Monad
--- @version 0.3.0
+-- @version 0.2.0
 -- @provides
 --   [nomain] lib/*.lua
 --   [nomain] lib/ui/*.lua
@@ -692,17 +692,18 @@ local DEFAULT_ANALYZER_W = 600
 local DEFAULT_ANALYZER_H = 200
 
 --- Draw analyzer visualizations (scope/spectrum) at end of chain
---- Draw scope controls (shared between inline and popout)
+--- Draw scope controls (shared between inline and popout) - single row
 -- @param suffix string Optional suffix for widget IDs (e.g., "_pop" for popout)
 local function draw_scope_controls(ctx, scope_fx, analyzer_w, suffix)
     suffix = suffix or ""
-    local half_w = (analyzer_w - 8) / 2
+    local ch_w = 50  -- Smaller width for channel selector
+    local ctrl_w = (analyzer_w - 20 - ch_w) / 4  -- 4 main controls + smaller channel
 
     -- Time window slider (param 0) - 1-500 ms
-    ctx:push_item_width(half_w)
+    ctx:push_item_width(ctrl_w)
     local time_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 0)
     local time_ms = 1 + time_val * 499
-    local changed, new_time = r.ImGui_SliderDouble(ctx.ctx, "##scope_time" .. suffix, time_ms, 1, 500, "%.0f ms")
+    local changed, new_time = r.ImGui_SliderDouble(ctx.ctx, "##scope_time" .. suffix, time_ms, 1, 500, "%.0fms")
     if changed then
         r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 0, (new_time - 1) / 499)
     end
@@ -712,24 +713,23 @@ local function draw_scope_controls(ctx, scope_fx, analyzer_w, suffix)
     ctx:same_line()
 
     -- Gain slider (param 1) - -24 to +24 dB
-    ctx:push_item_width(half_w)
+    ctx:push_item_width(ctrl_w)
     local gain_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 1)
     local gain_db = -24 + gain_val * 48
-    local gain_changed, new_gain = r.ImGui_SliderDouble(ctx.ctx, "##scope_gain" .. suffix, gain_db, -24, 24, "%.1f dB")
+    local gain_changed, new_gain = r.ImGui_SliderDouble(ctx.ctx, "##scope_gain" .. suffix, gain_db, -24, 24, "%.0fdB")
     if gain_changed then
         r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 1, (new_gain + 24) / 48)
     end
     if ctx:is_item_hovered() then ctx:set_tooltip("Gain") end
     ctx:pop_item_width()
 
-    -- Controls row 2
-    local third_w = (analyzer_w - 16) / 3
+    ctx:same_line()
 
     -- Trigger mode combo (param 2)
-    ctx:push_item_width(third_w)
+    ctx:push_item_width(ctrl_w)
     local trig_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 2)
     local trig_mode = math.floor(trig_val * 2 + 0.5)
-    local trig_changed, new_trig = r.ImGui_Combo(ctx.ctx, "##scope_trig" .. suffix, trig_mode, "Auto\0Rising\0Falling\0")
+    local trig_changed, new_trig = r.ImGui_Combo(ctx.ctx, "##scope_trig" .. suffix, trig_mode, "Auto\0Rise\0Fall\0")
     if trig_changed then
         r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 2, new_trig / 2)
     end
@@ -739,7 +739,7 @@ local function draw_scope_controls(ctx, scope_fx, analyzer_w, suffix)
     ctx:same_line()
 
     -- Trigger level slider (param 3) - -1 to +1
-    ctx:push_item_width(third_w)
+    ctx:push_item_width(ctrl_w)
     local level_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 3)
     local level = -1 + level_val * 2
     local level_changed, new_level = r.ImGui_SliderDouble(ctx.ctx, "##scope_level" .. suffix, level, -1, 1, "%.2f")
@@ -751,11 +751,11 @@ local function draw_scope_controls(ctx, scope_fx, analyzer_w, suffix)
 
     ctx:same_line()
 
-    -- Channel combo (param 4)
-    ctx:push_item_width(third_w)
+    -- Channel combo (param 4) - smaller
+    ctx:push_item_width(ch_w)
     local ch_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 4)
     local ch_mode = math.floor(ch_val * 2 + 0.5)
-    local ch_changed, new_ch = r.ImGui_Combo(ctx.ctx, "##scope_ch" .. suffix, ch_mode, "Stereo\0Left\0Right\0")
+    local ch_changed, new_ch = r.ImGui_Combo(ctx.ctx, "##scope_ch" .. suffix, ch_mode, "St\0L\0R\0")
     if ch_changed then
         r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 4, new_ch / 2)
     end
@@ -763,19 +763,19 @@ local function draw_scope_controls(ctx, scope_fx, analyzer_w, suffix)
     ctx:pop_item_width()
 end
 
---- Draw spectrum controls (shared between inline and popout)
+--- Draw spectrum controls (shared between inline and popout) - single row
 -- @param suffix string Optional suffix for widget IDs (e.g., "_pop" for popout)
 local function draw_spectrum_controls(ctx, spectrum_fx, analyzer_w, suffix)
     suffix = suffix or ""
-    local half_w = (analyzer_w - 8) / 2
+    local ch_w = 50  -- Smaller width for channel selector
+    local ctrl_w = (analyzer_w - 20 - ch_w) / 4  -- 4 main controls + smaller channel
 
     -- FFT size combo (param 0) - 0-8 maps to 64-16384
-    ctx:push_item_width(half_w)
+    ctx:push_item_width(ctrl_w)
     local fft_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 0)
     local fft_idx = math.floor(fft_val * 8 + 0.5)
-    -- Build FFT options string with explicit null separators (double null at end)
-    local n = "\x00"  -- null character
-    local fft_options = "64"..n.."128"..n.."256"..n.."512"..n.."1024"..n.."2048"..n.."4096"..n.."8192"..n.."16384"..n..n
+    local n = "\x00"
+    local fft_options = "64"..n.."128"..n.."256"..n.."512"..n.."1k"..n.."2k"..n.."4k"..n.."8k"..n.."16k"..n..n
     local fft_changed, new_fft = r.ImGui_Combo(ctx.ctx, "##spec_fft" .. suffix, fft_idx, fft_options)
     if fft_changed then
         r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 0, new_fft / 8)
@@ -786,21 +786,20 @@ local function draw_spectrum_controls(ctx, spectrum_fx, analyzer_w, suffix)
     ctx:same_line()
 
     -- Floor dB slider (param 1) - -90 to -12 dB
-    ctx:push_item_width(half_w)
+    ctx:push_item_width(ctrl_w)
     local floor_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 1)
     local floor_db = -90 + floor_val * 78
-    local floor_changed, new_floor = r.ImGui_SliderDouble(ctx.ctx, "##spec_floor" .. suffix, floor_db, -90, -12, "%.0f dB")
+    local floor_changed, new_floor = r.ImGui_SliderDouble(ctx.ctx, "##spec_floor" .. suffix, floor_db, -90, -12, "%.0fdB")
     if floor_changed then
         r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 1, (new_floor + 90) / 78)
     end
     if ctx:is_item_hovered() then ctx:set_tooltip("Floor level") end
     ctx:pop_item_width()
 
-    -- Controls row 2
-    local third_w = (analyzer_w - 16) / 3
+    ctx:same_line()
 
     -- Smoothing slider (param 2) - 0 to 0.95
-    ctx:push_item_width(third_w)
+    ctx:push_item_width(ctrl_w)
     local smooth_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 2)
     local smooth = smooth_val * 0.95
     local smooth_changed, new_smooth = r.ImGui_SliderDouble(ctx.ctx, "##spec_smooth" .. suffix, smooth * 100, 0, 95, "%.0f%%")
@@ -813,10 +812,10 @@ local function draw_spectrum_controls(ctx, spectrum_fx, analyzer_w, suffix)
     ctx:same_line()
 
     -- Slope slider (param 3) - 0 to 12 dB/oct
-    ctx:push_item_width(third_w)
+    ctx:push_item_width(ctrl_w)
     local slope_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 3)
     local slope = slope_val * 12
-    local slope_changed, new_slope = r.ImGui_SliderDouble(ctx.ctx, "##spec_slope" .. suffix, slope, 0, 12, "%.1f dB/oct")
+    local slope_changed, new_slope = r.ImGui_SliderDouble(ctx.ctx, "##spec_slope" .. suffix, slope, 0, 12, "%.0f/oct")
     if slope_changed then
         r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 3, new_slope / 12)
     end
@@ -825,11 +824,11 @@ local function draw_spectrum_controls(ctx, spectrum_fx, analyzer_w, suffix)
 
     ctx:same_line()
 
-    -- Channel combo (param 4)
-    ctx:push_item_width(third_w)
+    -- Channel combo (param 4) - smaller
+    ctx:push_item_width(ch_w)
     local ch_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 4)
     local ch_mode = math.floor(ch_val * 2 + 0.5)
-    local ch_changed, new_ch = r.ImGui_Combo(ctx.ctx, "##spec_ch" .. suffix, ch_mode, "Stereo\0Left\0Right\0")
+    local ch_changed, new_ch = r.ImGui_Combo(ctx.ctx, "##spec_ch" .. suffix, ch_mode, "St\0L\0R\0")
     if ch_changed then
         r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 4, new_ch / 2)
     end
@@ -990,7 +989,7 @@ local function draw_analyzers(ctx, avail_height)
 
     -- Get sizes from state or use defaults
     local analyzer_w = state.analyzer_width or DEFAULT_ANALYZER_W
-    local controls_h = 50  -- Two rows of controls
+    local controls_h = 26  -- Single row of controls
     local header_h = 26
     local padding = 16
     local analyzer_h = avail_height - controls_h - header_h - padding
@@ -1005,8 +1004,16 @@ local function draw_analyzers(ctx, avail_height)
         local scope_fx = find_analyzer_fx(state.track, SCOPE_PATTERN)
 
         ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1AFF)
-        if ctx:begin_child("scope_panel", analyzer_w + 12, panel_h, imgui.ChildFlags.Border()) then
-            -- Header row with title and freeze button
+        local no_scroll = r.ImGui_WindowFlags_NoScrollbar() | r.ImGui_WindowFlags_NoScrollWithMouse()
+        if ctx:begin_child("scope_panel", analyzer_w + 12, panel_h, imgui.ChildFlags.Border(), no_scroll) then
+            -- Header background
+            local hdr_x, hdr_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+            r.ImGui_DrawList_AddRectFilled(draw_list, hdr_x - 4, hdr_y - 4, hdr_x + analyzer_w + 8, hdr_y + 20, 0x252525FF, 0)
+
+            -- Header row with icon, title, and controls
+            icons.image(ctx, icons.Names.oscilloscope, 14)
+            ctx:same_line()
             ctx:text("Scope")
 
             if scope_fx then
@@ -1014,28 +1021,27 @@ local function draw_analyzers(ctx, avail_height)
                 ctx:same_line()
                 local freeze_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 5)
                 local is_frozen = freeze_val > 0.5
-                ctx:push_style_color(imgui.Col.Button(), is_frozen and 0x4488FFFF or 0x444444FF)
-                if ctx:button(is_frozen and "||" or ">", 24, 20) then
+                local freeze_tint = is_frozen and 0x4488FFFF or 0xCCCCCCFF
+                if icons.button(ctx, "freeze_scope", icons.Names.pause, 16, freeze_tint) then
                     r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 5, is_frozen and 0 or 1)
                 end
-                ctx:pop_style_color()
                 if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
             end
 
             -- Popout button
             ctx:same_line(analyzer_w - 36)
-            if ctx:button("^##popout_scope", 20, 20) then
+            if icons.button(ctx, "popout_scope", icons.Names.popout, 16) then
                 state.scope_popout = true
             end
             if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
 
             ctx:same_line()
-            ctx:push_style_color(imgui.Col.Button(), 0x663333FF)
-            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x884444FF)
-            if ctx:button("x##del_scope", 20, 20) then
+            if icons.button(ctx, "del_scope", icons.Names.cancel, 16, 0xFF6666FF) then
                 toggle_scope()
             end
-            ctx:pop_style_color(2)
+
+            -- Spacing after header
+            ctx:dummy(0, 4)
 
             -- Visualization
             local scope_hovered = drawing.draw_oscilloscope(ctx, "##scope_viz", analyzer_w, analyzer_h, slot)
@@ -1060,8 +1066,16 @@ local function draw_analyzers(ctx, avail_height)
         local spectrum_fx = find_analyzer_fx(state.track, SPECTRUM_PATTERN)
 
         ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1AFF)
-        if ctx:begin_child("spectrum_panel", analyzer_w + 12, panel_h, imgui.ChildFlags.Border()) then
-            -- Header row with title and freeze button
+        local no_scroll = r.ImGui_WindowFlags_NoScrollbar() | r.ImGui_WindowFlags_NoScrollWithMouse()
+        if ctx:begin_child("spectrum_panel", analyzer_w + 12, panel_h, imgui.ChildFlags.Border(), no_scroll) then
+            -- Header background
+            local hdr_x, hdr_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+            r.ImGui_DrawList_AddRectFilled(draw_list, hdr_x - 4, hdr_y - 4, hdr_x + analyzer_w + 8, hdr_y + 20, 0x252525FF, 0)
+
+            -- Header row with icon, title, and controls
+            icons.image(ctx, icons.Names.spectrum, 14)
+            ctx:same_line()
             ctx:text("Spectrum")
 
             if spectrum_fx then
@@ -1069,28 +1083,27 @@ local function draw_analyzers(ctx, avail_height)
                 ctx:same_line()
                 local freeze_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 5)
                 local is_frozen = freeze_val > 0.5
-                ctx:push_style_color(imgui.Col.Button(), is_frozen and 0x4488FFFF or 0x444444FF)
-                if ctx:button(is_frozen and "||" or ">", 24, 20) then
+                local freeze_tint = is_frozen and 0x4488FFFF or 0xCCCCCCFF
+                if icons.button(ctx, "freeze_spectrum", icons.Names.pause, 16, freeze_tint) then
                     r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 5, is_frozen and 0 or 1)
                 end
-                ctx:pop_style_color()
                 if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
             end
 
             -- Popout button
             ctx:same_line(analyzer_w - 36)
-            if ctx:button("^##popout_spectrum", 20, 20) then
+            if icons.button(ctx, "popout_spectrum", icons.Names.popout, 16) then
                 state.spectrum_popout = true
             end
             if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
 
             ctx:same_line()
-            ctx:push_style_color(imgui.Col.Button(), 0x663333FF)
-            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x884444FF)
-            if ctx:button("x##del_spectrum", 20, 20) then
+            if icons.button(ctx, "del_spectrum", icons.Names.cancel, 16, 0xFF6666FF) then
                 toggle_spectrum()
             end
-            ctx:pop_style_color(2)
+
+            -- Spacing after header
+            ctx:dummy(0, 4)
 
             -- Visualization
             local spectrum_hovered = drawing.draw_spectrum(ctx, "##spectrum_viz", analyzer_w, analyzer_h, slot)

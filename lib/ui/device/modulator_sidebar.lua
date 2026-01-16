@@ -334,7 +334,7 @@ local function draw_modulator_grid(ctx, guid, modulators, expanded_slot_idx, slo
     return interacted
 end
 
--- Helper: Draw preset dropdown, save button, and UI icon
+-- Helper: Draw preset dropdown, save button, and curve editor icons
 local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor_key, cfg, state, opts)
     local interacted = false
     local mod_guid = expanded_modulator:get_guid()
@@ -370,13 +370,13 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
         current_preset_name = cached_names[0] or "Sine"
     end
 
-    -- Use table for preset row: Preset (stretch) | Save (fixed) | UI (fixed)
+    -- Use table for preset row: Preset (stretch) | Save | Curve
     local table_flags = r.ImGui_TableFlags_SizingFixedFit()
     local icon_btn_size = 24
     if ctx:begin_table("preset_row_" .. guid, 3, table_flags) then
         r.ImGui_TableSetupColumn(ctx.ctx, "Preset", r.ImGui_TableColumnFlags_WidthStretch(), 1)
         r.ImGui_TableSetupColumn(ctx.ctx, "Save", r.ImGui_TableColumnFlags_WidthFixed(), icon_btn_size)
-        r.ImGui_TableSetupColumn(ctx.ctx, "UI", r.ImGui_TableColumnFlags_WidthFixed(), icon_btn_size)
+        r.ImGui_TableSetupColumn(ctx.ctx, "Curve", r.ImGui_TableColumnFlags_WidthFixed(), icon_btn_size)
 
         ctx:table_next_row()
 
@@ -438,7 +438,7 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
             ctx:set_tooltip("Save Preset")
         end
 
-        -- Column 3: UI button (curve editor popup)
+        -- Column 3: Curve editor button
         ctx:table_set_column_index(2)
         if icons.button_bordered(ctx, "curve_editor_" .. guid, icons.Names.curve, 18) then
             state.curve_editor_popup = state.curve_editor_popup or {}
@@ -490,15 +490,39 @@ local function draw_curve_editor_section(ctx, expanded_modulator, editor_key, st
     return interacted
 end
 
--- Helper: Draw Free/Sync and Rate controls
-local function draw_rate_controls(ctx, guid, expanded_modulator)
+-- Helper: Draw rate and trigger controls in a table layout
+-- Columns: Free/Sync | Rate slider/dropdown (stretch) | Trigger dropdown | Gear | Monitor dot
+local function draw_rate_and_trigger_row(ctx, guid, expanded_modulator, opts, advanced_popup_id)
     local interacted = false
+    local ok_trig, trig_idx = false, nil
+    local open_advanced_popup = false
+
     local tempo_mode = expanded_modulator:get_param(PARAM.PARAM_TEMPO_MODE)
+    if not tempo_mode then
+        return interacted, ok_trig, trig_idx
+    end
 
-    if tempo_mode then
-        local is_free = tempo_mode < 0.5
+    local is_free = tempo_mode < 0.5
 
-        -- Free button
+    -- Get trigger mode for monitor dot column
+    local trigger_mode_val
+    ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_TRIGGER_MODE) end)
+    if ok_trig then
+        trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
+    end
+
+    local table_flags = r.ImGui_TableFlags_SizingFixedFit()
+    if ctx:begin_table("rate_trigger_row_" .. guid, 5, table_flags) then
+        r.ImGui_TableSetupColumn(ctx.ctx, "FreeSyncBtns", r.ImGui_TableColumnFlags_WidthFixed(), 44)
+        r.ImGui_TableSetupColumn(ctx.ctx, "Rate", r.ImGui_TableColumnFlags_WidthStretch(), 1)
+        r.ImGui_TableSetupColumn(ctx.ctx, "Trigger", r.ImGui_TableColumnFlags_WidthFixed(), 58)
+        r.ImGui_TableSetupColumn(ctx.ctx, "Gear", r.ImGui_TableColumnFlags_WidthFixed(), 22)
+        r.ImGui_TableSetupColumn(ctx.ctx, "Monitor", r.ImGui_TableColumnFlags_WidthFixed(), 18)
+
+        ctx:table_next_row()
+
+        -- Column 1: Free/Sync buttons
+        ctx:table_set_column_index(0)
         local free_tint = is_free and 0x88FF88FF or 0x888888FF
         if icons.button_bordered(ctx, "free_" .. guid, icons.Names.free, 18, free_tint) then
             expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 0)
@@ -508,9 +532,8 @@ local function draw_rate_controls(ctx, guid, expanded_modulator)
             ctx:set_tooltip("Free running (Hz)")
         end
 
-        ctx:same_line(0, 4)
+        ctx:same_line(0, 2)
 
-        -- Sync button
         local sync_tint = (not is_free) and 0x88FF88FF or 0x888888FF
         if icons.button_bordered(ctx, "sync_" .. guid, icons.Names.sync, 18, sync_tint) then
             expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 1)
@@ -520,29 +543,25 @@ local function draw_rate_controls(ctx, guid, expanded_modulator)
             ctx:set_tooltip("Tempo sync")
         end
 
-        ctx:same_line()
-
-        -- Rate slider/dropdown - fill remaining width
+        -- Column 2: Rate slider/dropdown (stretches)
+        ctx:table_set_column_index(1)
+        local rate_avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
         if tempo_mode < 0.5 then
-            -- Free mode - show Hz slider using normalized 0-1 range for fine control
+            -- Free mode - show Hz slider
             local ok_rate, rate_norm = pcall(function() return expanded_modulator:get_param_normalized(1) end)
             if ok_rate then
-                -- Get slider position BEFORE drawing
                 local slider_x, slider_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-                local avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
                 ctx:set_next_item_width(-1)
 
-                -- Use normalized 0-1 for slider (like FX params), display as space, overlay Hz text
-                -- Default: 1Hz = (1 - 0.01) / 9.99 ≈ 0.099
                 local default_norm = (1.0 - 0.01) / 9.99
                 local changed, new_norm = drawing.slider_double_fine(ctx, "##rate_" .. guid, rate_norm, 0.0, 1.0, " ", nil, 1, default_norm)
 
                 -- Overlay Hz value on slider
                 local rate_hz = 0.01 + rate_norm * 9.99
-                local hz_text = string.format("%.2f Hz", rate_hz)
+                local hz_text = string.format("%.1fHz", rate_hz)
                 local text_w = r.ImGui_CalcTextSize(ctx.ctx, hz_text)
                 local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
-                local text_x = slider_x + (avail_w - text_w) / 2
+                local text_x = slider_x + (rate_avail_w - text_w) / 2
                 local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
                 local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
                 r.ImGui_DrawList_AddText(draw_list, text_x, text_y, 0xFFFFFFFF, hz_text)
@@ -573,87 +592,60 @@ local function draw_rate_controls(ctx, guid, expanded_modulator)
                 end
             end
         end
-    end
 
-    return interacted
-end
-
--- Helper: Draw trigger mode dropdown and advanced button
-local function draw_trigger_and_advanced_button(ctx, guid, expanded_modulator, opts)
-    local interacted = false
-    local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_TRIGGER_MODE) end)
-    local trig_idx = nil
-
-    if ok_trig then
-        local trigger_modes = {"Free", "Transport", "MIDI", "Audio"}
-        trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
-
-        -- Draw trigger indicator dot (for MIDI/Audio modes) - flashes on trigger
-        if trig_idx >= 2 then  -- MIDI or Audio mode
-            local ok_triggered, triggered_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_TRIGGERED) end)
-            -- JSFX outputs 1 for ~100ms on trigger, then 0
-            local show_flash = ok_triggered and triggered_val and triggered_val > 0.5
-
-            local dot_color = show_flash and 0x00FF00FF or 0x444444FF  -- Green flash, grey otherwise
-            local dot_x, dot_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-            r.ImGui_DrawList_AddCircleFilled(draw_list, dot_x + 6, dot_y + 10, 4, dot_color)
-            r.ImGui_Dummy(ctx.ctx, 14, 0)
-            ctx:same_line()
+        -- Column 3: Trigger dropdown
+        ctx:table_set_column_index(2)
+        if ok_trig then
+            local trigger_modes = {"Free", "Trnsp", "MIDI", "Audio"}
+            r.ImGui_PushStyleVar(ctx.ctx, r.ImGui_StyleVar_FramePadding(), 4, 2)
+            ctx:set_next_item_width(-1)
+            if ctx:begin_combo("##trigger_mode_" .. guid, trigger_modes[trig_idx + 1] or "Free") then
+                for i, mode_name in ipairs(trigger_modes) do
+                    if ctx:selectable(mode_name, i - 1 == trig_idx) then
+                        expanded_modulator:set_param_normalized(PARAM.PARAM_TRIGGER_MODE, (i - 1) / 3)
+                        interacted = true
+                    end
+                end
+                ctx:end_combo()
+            end
+            r.ImGui_PopStyleVar(ctx.ctx)
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("Trigger Mode")
+            end
         end
 
-        ctx:set_next_item_width(80)
-        if ctx:begin_combo("##trigger_mode_" .. guid, trigger_modes[trig_idx + 1] or "Free") then
-            for i, mode_name in ipairs(trigger_modes) do
-                if ctx:selectable(mode_name, i - 1 == trig_idx) then
-                    expanded_modulator:set_param_normalized(PARAM.PARAM_TRIGGER_MODE, (i - 1) / 3)
-                    interacted = true
-                end
-            end
-            ctx:end_combo()
+        -- Column 4: Gear button (opens advanced settings)
+        ctx:table_set_column_index(3)
+        if icons.button_bordered(ctx, "advanced_" .. guid, icons.Names.gear, 18) then
+            open_advanced_popup = true
+            interacted = true
         end
         if ctx:is_item_hovered() then
-            ctx:set_tooltip("Trigger Mode")
+            ctx:set_tooltip("Advanced Settings")
         end
+
+        -- Column 5: Monitor dot (only for MIDI/Audio modes) - all the way right
+        ctx:table_set_column_index(4)
+        if ok_trig and trig_idx >= 2 then
+            local ok_triggered, triggered_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_TRIGGERED) end)
+            local show_flash = ok_triggered and triggered_val and triggered_val > 0.5
+
+            local dot_color = show_flash and 0x00FF00FF or 0x444444FF
+            local dot_x, dot_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+            r.ImGui_DrawList_AddCircleFilled(draw_list, dot_x + 8, dot_y + 10, 4, dot_color)
+            r.ImGui_Dummy(ctx.ctx, 16, 0)
+        end
+
+        ctx:end_table()
     end
 
-    ctx:same_line()
-
-    -- Check if external mode is active (MIDI or Audio source set to External)
-    local is_external_mode = false
-    if trig_idx == 2 then  -- MIDI mode
-        local ok_src, midi_src = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_MIDI_SOURCE) end)
-        is_external_mode = ok_src and midi_src and midi_src >= 0.5
-    elseif trig_idx == 3 then  -- Audio mode
-        local ok_src, audio_src = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_AUDIO_SOURCE) end)
-        is_external_mode = ok_src and audio_src and audio_src >= 0.5
-    end
-
-    -- Advanced button
-    local advanced_popup_id = "Advanced##adv_popup_" .. guid
-
-    -- Highlight button when external mode is active
-    if is_external_mode then
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x336699FF)
-        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x4477AAFF)
-    end
-
-    if ctx:button("*##adv_btn_" .. guid, 24, 0) then
+    -- Open popup after table ends (must be at same level as BeginPopup)
+    if open_advanced_popup then
         r.ImGui_OpenPopup(ctx.ctx, advanced_popup_id)
     end
 
-    if is_external_mode then
-        ctx:pop_style_color(2)
-    end
-    if ctx:is_item_hovered() then
-        local tooltip = "Advanced Settings"
-        if is_external_mode then
-            tooltip = tooltip .. " (External source active)"
-        end
-        ctx:set_tooltip(tooltip)
-    end
-
-    return interacted, ok_trig, trig_idx, advanced_popup_id
+    return interacted, ok_trig, trig_idx
 end
 
 -- Helper: Get existing parameter links for a modulator
@@ -1492,45 +1484,34 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                 if ok and param_count and param_count > 0 then
                     ctx:separator()
                     ctx:spacing()
-                    
+
                     local editor_key = "curve_" .. guid .. "_" .. expanded_slot_idx
-                    
-                    -- Preset and UI icon row
+                    local advanced_popup_id = "Advanced##adv_popup_" .. guid
+
+                    -- Preset row (Preset | Save | Curve)
                     if draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor_key, cfg, state, opts) then
                         interacted = true
                     end
-                    
+
                     ctx:spacing()
 
                     -- Curve Editor section
                     if draw_curve_editor_section(ctx, expanded_modulator, editor_key, state, state.track) then
                         interacted = true
                     end
-                    
+
                     ctx:spacing()
-                    
-                    -- Rate controls: Free/Sync, Rate, Phase
-                    if draw_rate_controls(ctx, guid, expanded_modulator) then
+
+                    -- Combined row: Rate + Trigger + Gear controls in table layout
+                    local row_interacted, ok_trig, trig_idx = draw_rate_and_trigger_row(ctx, guid, expanded_modulator, opts, advanced_popup_id)
+                    if row_interacted then
                         interacted = true
                     end
-                    
-                    ctx:spacing()
-                    
-                    -- Trigger and Advanced controls
-                    local trig_interacted, ok_trig, trig_idx, advanced_popup_id = draw_trigger_and_advanced_button(ctx, guid, expanded_modulator, opts)
-                    if trig_interacted then
-                        interacted = true
-                    end
-                    
+
                     -- Get existing parameter links
                     local existing_links = get_existing_param_links(fx, expanded_modulator, PARAM)
-                    
-                    -- Link Parameter dropdown
-                    if draw_link_param_dropdown(ctx, guid, fx, expanded_modulator, existing_links, state, PARAM) then
-                        interacted = true
-                    end
-                    
-                    -- Advanced popup modal
+
+                    -- Advanced popup modal (opened by gear button in header)
                     if draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, advanced_popup_id, ok_trig, PARAM, opts) then
                         interacted = true
                     end

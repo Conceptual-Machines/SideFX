@@ -39,8 +39,8 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
     local function draw_separator()
         local x, y = r.ImGui_GetCursorScreenPos(ctx.ctx)
         local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-        r.ImGui_Dummy(ctx.ctx, 8, 28)
-        r.ImGui_DrawList_AddLine(draw_list, x + 4, y + 4, x + 4, y + 24, 0x666666FF, 1)
+        r.ImGui_Dummy(ctx.ctx, 8, 26)
+        r.ImGui_DrawList_AddLine(draw_list, x + 4, y + 3, x + 4, y + 23, 0x666666FF, 1)
     end
 
     -- Use table with 2 columns: left content and right buttons
@@ -54,7 +54,7 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         ctx:table_set_column_index(0)
 
         -- Refresh button
-        if icons.button_bordered(ctx, "refresh_btn", icons.Names.refresh, 28) then
+        if icons.button_bordered(ctx, "refresh_btn", icons.Names.refresh, 26) then
             callbacks.on_refresh()
             -- Set status message
             local plugin_count = state.browser and state.browser.plugins and #state.browser.plugins or 0
@@ -82,7 +82,7 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         -- Browser toggle button
         local browser_visible = state.browser and state.browser.visible
         local browser_tint = browser_visible and 0x88FF88FF or 0xCCCCCCFF
-        if icons.button_bordered(ctx, "browser_btn", icons.Names.plug, 28, browser_tint) then
+        if icons.button_bordered(ctx, "browser_btn", icons.Names.plug, 26, browser_tint) then
             if state.browser then
                 state.browser.visible = not state.browser.visible
             end
@@ -94,7 +94,7 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         ctx:same_line()
 
         -- Add Rack button (also draggable)
-        if icons.button_bordered(ctx, "rack_btn", icons.Names.rack, 28, 0x88AAFFFF) then
+        if icons.button_bordered(ctx, "rack_btn", icons.Names.rack, 26, 0x88AAFFFF) then
             if state.track then
                 callbacks.on_add_rack()
             end
@@ -181,7 +181,7 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         -- Scope button (singleton - toggles on/off)
         local has_scope = state.has_scope or false
         local scope_tint = has_scope and 0x88FF88FF or 0xCCCCCCFF
-        if icons.button_bordered(ctx, "scope_btn", icons.Names.oscilloscope, 28, scope_tint) then
+        if icons.button_bordered(ctx, "scope_btn", icons.Names.oscilloscope, 26, scope_tint) then
             if state.track and callbacks.on_toggle_scope then
                 callbacks.on_toggle_scope()
             end
@@ -195,7 +195,7 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         -- Spectrum button (singleton - toggles on/off)
         local has_spectrum = state.has_spectrum or false
         local spectrum_tint = has_spectrum and 0x88FF88FF or 0xCCCCCCFF
-        if icons.button_bordered(ctx, "spectrum_btn", icons.Names.spectrum, 28, spectrum_tint) then
+        if icons.button_bordered(ctx, "spectrum_btn", icons.Names.spectrum, 26, spectrum_tint) then
             if state.track and callbacks.on_toggle_spectrum then
                 callbacks.on_toggle_spectrum()
             end
@@ -209,7 +209,7 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         ctx:same_line()
 
         -- Preset button
-        if icons.button_bordered(ctx, "preset_btn", icons.Names.save, 28) then
+        if icons.button_bordered(ctx, "preset_btn", icons.Names.save, 26) then
             if callbacks.on_preset then
                 callbacks.on_preset()
             end
@@ -219,7 +219,7 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         ctx:same_line()
 
         -- Config button
-        if icons.button_bordered(ctx, "config_btn", icons.Names.gear, 28) then
+        if icons.button_bordered(ctx, "config_btn", icons.Names.gear, 26) then
             if callbacks.on_config then
                 callbacks.on_config()
             end
