@@ -647,7 +647,7 @@ function M.draw_spectrum(ctx, label, width, height, slot)
     local sample_rate = r.gmem_read(fft_base + 514) or 44100
     local fft_size = r.gmem_read(fft_base + 516) or 512
 
-    num_bins = math.max(1, math.floor(num_bins))
+    num_bins = math.max(1, math.min(256, math.floor(num_bins)))  -- Cap at 256 (GMEM limit)
     if sample_rate <= 0 then sample_rate = 44100 end
 
     local x, y = r.ImGui_GetCursorScreenPos(ctx.ctx)

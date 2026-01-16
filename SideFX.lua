@@ -778,7 +778,9 @@ local function draw_spectrum_controls(ctx, spectrum_fx, analyzer_w, suffix)
     ctx:push_item_width(half_w)
     local fft_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 0)
     local fft_idx = math.floor(fft_val * 8 + 0.5)
-    local fft_options = "64" .. "\0" .. "128" .. "\0" .. "256" .. "\0" .. "512" .. "\0" .. "1024" .. "\0" .. "2048" .. "\0" .. "4096" .. "\0" .. "8192" .. "\0" .. "16384" .. "\0"
+    -- Build FFT options string with explicit null separators (double null at end)
+    local n = "\x00"  -- null character
+    local fft_options = "64"..n.."128"..n.."256"..n.."512"..n.."1024"..n.."2048"..n.."4096"..n.."8192"..n.."16384"..n..n
     local fft_changed, new_fft = r.ImGui_Combo(ctx.ctx, "##spec_fft" .. suffix, fft_idx, fft_options)
     if fft_changed then
         r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 0, new_fft / 8)

@@ -66,7 +66,7 @@ window_built != current_fft_size ? (
 );
 
 // Store metadata in GMEM
-gmem[fft_base + 512] = current_fft_size / 2;  // num bins
+gmem[fft_base + 512] = min(current_fft_size / 2, 256);  // num bins (capped at 256)
 gmem[fft_base + 513] = floor_db;
 gmem[fft_base + 514] = srate;
 gmem[fft_base + 516] = current_fft_size;
