@@ -370,13 +370,14 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
         current_preset_name = cached_names[0] or "Sine"
     end
 
-    -- Use table for preset row: Preset (stretch) | Save | Curve
+    -- Use table for preset row: Preset (stretch) | Save | Curve | Matrix
     local table_flags = r.ImGui_TableFlags_SizingFixedFit()
     local icon_btn_size = 24
-    if ctx:begin_table("preset_row_" .. guid, 3, table_flags) then
+    if ctx:begin_table("preset_row_" .. guid, 4, table_flags) then
         r.ImGui_TableSetupColumn(ctx.ctx, "Preset", r.ImGui_TableColumnFlags_WidthStretch(), 1)
         r.ImGui_TableSetupColumn(ctx.ctx, "Save", r.ImGui_TableColumnFlags_WidthFixed(), icon_btn_size)
         r.ImGui_TableSetupColumn(ctx.ctx, "Curve", r.ImGui_TableColumnFlags_WidthFixed(), icon_btn_size)
+        r.ImGui_TableSetupColumn(ctx.ctx, "Matrix", r.ImGui_TableColumnFlags_WidthFixed(), icon_btn_size)
 
         ctx:table_next_row()
 
@@ -448,6 +449,18 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
         end
         if ctx:is_item_hovered() then
             ctx:set_tooltip("Open Curve Editor")
+        end
+
+        -- Column 4: Mod Matrix button
+        ctx:table_set_column_index(3)
+        if icons.button_bordered(ctx, "mod_matrix_" .. guid, icons.Names.matrix, 18) then
+            if opts.on_mod_matrix then
+                opts.on_mod_matrix()
+            end
+            interacted = true
+        end
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip("Mod Matrix")
         end
 
         ctx:end_table()
@@ -1382,86 +1395,11 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                         interacted = true
                     end
 
-                    -- Get existing parameter links
-                    local existing_links = get_existing_param_links(fx, expanded_modulator, PARAM)
-
                     -- Advanced popup modal (opened by gear button in header)
                     if draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, advanced_popup_id, ok_trig, PARAM, opts) then
                         interacted = true
                     end
-                    
-                    -- Show existing parameter links
-                    ctx:spacing()
-                    if draw_existing_links(ctx, guid, fx, existing_links, state, expanded_modulator, opts) then
-                        interacted = true
-                    end
-
-                    -- Bake All button (opens modal or uses default range)
-                    if #existing_links > 0 then
-                        ctx:spacing()
-                        ctx:separator()
-                        ctx:spacing()
-
-                        local can_bake = state.track ~= nil
-                        if not can_bake then
-                            r.ImGui_BeginDisabled(ctx.ctx)
-                        end
-                        if ctx:button("Bake All##bake_all_" .. guid, -1, 0) then
-                            if can_bake then
-                                -- Check config: show picker or use default?
-                                if config.get('bake_show_range_picker') then
-                                    -- Open bake modal for all links
-                                    state.bake_modal = state.bake_modal or {}
-                                    state.bake_modal[guid] = {
-                                        open = true,
-                                        link = nil,  -- nil = all links
-                                        links = existing_links,
-                                        modulator = expanded_modulator,
-                                        fx = fx
-                                    }
-                                else
-                                    -- Use default range directly
-                                    local bake_options = {
-                                        range_mode = config.get('bake_default_range_mode'),
-                                        disable_link = config.get('bake_disable_link_after')
-                                    }
-                                    -- Save current scales before bake (in case we're disabling)
-                                    local saved_scales = {}
-                                    for _, lnk in ipairs(existing_links) do
-                                        saved_scales[lnk.param_idx] = lnk.scale
-                                    end
-                                    local ok, result, msg = pcall(function()
-                                        return modulator_bake.bake_all_links(state.track, expanded_modulator, fx, existing_links, bake_options)
-                                    end)
-                                    if ok and result then
-                                        r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
-                                        -- If disable_link was set, update state for all links
-                                        if bake_options.disable_link then
-                                            state.link_saved_scale = state.link_saved_scale or {}
-                                            state.link_disabled = state.link_disabled or {}
-                                            for _, lnk in ipairs(existing_links) do
-                                                local link_key = guid .. "_" .. lnk.param_idx
-                                                state.link_saved_scale[link_key] = saved_scales[lnk.param_idx]
-                                                state.link_disabled[link_key] = true
-                                            end
-                                            state_module.save_link_scales()
-                                        end
-                                    elseif not ok then
-                                        r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
-                                    else
-                                        r.ShowConsoleMsg("SideFX: " .. tostring(msg or "No parameters to bake") .. "\n")
-                                    end
-                                end
-                                interacted = true
-                            end
-                        end
-                        if not can_bake then
-                            r.ImGui_EndDisabled(ctx.ctx)
-                        end
-                        if ctx:is_item_hovered() then
-                            ctx:set_tooltip("Bake all linked parameters to automation")
-                        end
-                    end
+                    -- Note: Parameter links are now shown in the Mod Matrix (toolbar button)
                 end
             end
         end

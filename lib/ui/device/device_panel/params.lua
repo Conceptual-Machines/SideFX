@@ -94,8 +94,11 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
         local display_val = link and base_val or param_val
 
         -- Check for user override first, otherwise auto-detect
-        local unit_override = plugin_name and state_module.get_param_unit_override(plugin_name, param_idx)
-        local unit_info = unit_override and unit_detector.get_unit_info(unit_override)
+        local unit_override, range_min, range_max
+        if plugin_name then
+            unit_override, range_min, range_max = state_module.get_param_unit_override(plugin_name, param_idx)
+        end
+        local unit_info = unit_override and unit_detector.get_unit_info(unit_override, range_min, range_max)
         local is_percentage = ok_fmt and param_formatted and param_formatted:match("%%$")
 
         local changed, new_val = false, display_val
@@ -109,18 +112,29 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
                 new_val = is_on and 1.0 or 0.0
                 changed = true
             end
-        -- Handle bipolar type: -50 to +50
+        -- Handle bipolar type: range centered around 0
         elseif unit_info and unit_info.is_bipolar then
-            local bipolar_val = (display_val - 0.5) * 100  -- Convert 0-1 to -50 to +50
-            local slider_changed, new_bipolar = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, bipolar_val, -50, 50, "%+.0f", nil, 1)
+            -- Get range from unit_info or calculate from display_mult
+            local half_range = unit_info.display_mult / 2
+            local min_display = unit_info.min or -half_range
+            local max_display = unit_info.max or half_range
+            local range = max_display - min_display
+            local bipolar_val = min_display + display_val * range  -- Convert 0-1 to min..max
+            local slider_format = unit_info.format or "%+.0f"
+            local slider_changed, new_bipolar = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, bipolar_val, min_display, max_display, slider_format, nil, 1, nil, true)
             if slider_changed then
-                new_val = (new_bipolar / 100) + 0.5  -- Convert back to 0-1
+                new_val = (new_bipolar - min_display) / range  -- Convert back to 0-1
                 changed = true
             end
         else
             -- Check if Shift is held for mod depth adjustment (not when link is disabled)
+            -- Only activate when mouse is hovering over this slider's area
             local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
-            local is_mod_depth_mode = link and shift_held and not is_link_disabled
+            local mouse_x, mouse_y = r.ImGui_GetMousePos(ctx.ctx)
+            local slider_h_check = r.ImGui_GetFrameHeight(ctx.ctx)
+            local is_hovering_slider = mouse_x >= slider_x and mouse_x <= slider_x + slider_w
+                                   and mouse_y >= slider_y and mouse_y <= slider_y + slider_h_check
+            local is_mod_depth_mode = link and shift_held and is_hovering_slider and not is_link_disabled
 
             if is_mod_depth_mode then
                 -- Shift+drag: adjust modulation depth instead of parameter value
@@ -160,19 +174,21 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
                 ctx:push_style_color(r.ImGui_Col_SliderGrab(), grab_color)
                 ctx:push_style_color(r.ImGui_Col_SliderGrabActive(), grab_active)
 
-                local depth_changed, new_depth_norm = drawing.slider_double_fine(ctx, "##depth_" .. param_name .. "_" .. param_idx, depth_norm, 0.0, 1.0, "##", nil, 1)
+                local depth_changed, new_depth_norm, depth_in_text_mode = drawing.slider_double_fine(ctx, "##depth_" .. param_name .. "_" .. param_idx, depth_norm, 0.0, 1.0, "##", nil, 1)
 
-                -- Overlay depth text with mode indicator
-                local depth_display = current_depth * 100
-                local mode_indicator = is_bipolar and "B" or "U"
-                local depth_text = string.format("%s %.0f%%", mode_indicator, depth_display)
-                local text_w = r.ImGui_CalcTextSize(ctx.ctx, depth_text)
-                local text_x = slider_x + (slider_w - text_w) / 2
-                local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
-                local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
-                local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-                local text_color = is_bipolar and 0xCC88FFFF or 0x88CCFFFF
-                r.ImGui_DrawList_AddText(draw_list, text_x, text_y, text_color, depth_text)
+                -- Overlay depth text with mode indicator (only when not in text input mode)
+                if not depth_in_text_mode then
+                    local depth_display = current_depth * 100
+                    local mode_indicator = is_bipolar and "B" or "U"
+                    local depth_text = string.format("%s %.0f%%", mode_indicator, depth_display)
+                    local text_w = r.ImGui_CalcTextSize(ctx.ctx, depth_text)
+                    local text_x = slider_x + (slider_w - text_w) / 2
+                    local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
+                    local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
+                    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                    local text_color = is_bipolar and 0xCC88FFFF or 0x88CCFFFF
+                    r.ImGui_DrawList_AddText(draw_list, text_x, text_y, text_color, depth_text)
+                end
 
                 ctx:pop_style_color(5)
 
@@ -191,6 +207,8 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
             else
                 -- Normal slider
                 local slider_format, slider_mult
+                local text_input_enabled = false  -- Only enable for user-defined units or percentage
+
                 if unit_info then
                     slider_format = unit_info.format
                     slider_mult = unit_info.display_mult
@@ -198,13 +216,17 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
                     if unit_info.use_plugin_format then
                         slider_format = "##"
                     end
+                    -- Enable text input for user-defined units (they explicitly set the conversion)
+                    text_input_enabled = true
                 elseif is_percentage then
                     slider_format = "%.1f%%"
                     slider_mult = 100
+                    text_input_enabled = true  -- Percentage has known conversion
                 else
                     -- Non-percentage: hide slider text, overlay plugin's value
                     slider_format = "##"
                     slider_mult = 1
+                    text_input_enabled = false  -- No conversion available
                 end
 
                 -- When modulated, hide slider text (we'll overlay baseline for computable units)
@@ -212,68 +234,47 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
                     slider_format = "##"
                 end
 
-                changed, new_val = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, slider_format, nil, slider_mult)
+                local slider_in_text_mode
+                changed, new_val, slider_in_text_mode = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, slider_format, nil, slider_mult, nil, text_input_enabled)
 
-            -- Overlay text on slider
-            -- When modulated: show cached baseline formatted value (static)
-            -- When not modulated: show plugin's current formatted value
-            local overlay_text = nil
-            if link then
-                -- Prefer cached baseline formatted value (static, doesn't change with modulation)
-                if link.baseline_formatted then
-                    overlay_text = link.baseline_formatted
-                else
-                    -- Fallback: compute from baseline if we have a computable unit
-                    local baseline = link.baseline or 0
-                    if unit_info and not unit_info.use_plugin_format then
-                        local display_mult = unit_info.display_mult or 1
-                        local fmt = unit_info.format or "%.1f"
-                        overlay_text = string.format(fmt, baseline * display_mult)
+            -- Overlay text on slider (only when not in text input mode)
+            -- When linked: show static baseline, but show live value while dragging
+            -- When not linked: show plugin's current formatted value
+            if not slider_in_text_mode then
+                local overlay_text = nil
+                local is_dragging = r.ImGui_IsItemActive(ctx.ctx)
+                if link then
+                    if is_dragging and ok_fmt and param_formatted then
+                        -- User is dragging: show live value as they adjust baseline
+                        overlay_text = param_formatted
+                    elseif link.baseline_formatted then
+                        -- Not dragging: show cached baseline formatted value (static)
+                        overlay_text = link.baseline_formatted
                     else
-                        -- Last resort: show as percentage
-                        overlay_text = string.format("%.1f%%", baseline * 100)
+                        -- Fallback: compute from baseline if we have a computable unit
+                        local baseline = link.baseline or 0
+                        if unit_info and not unit_info.use_plugin_format then
+                            local display_mult = unit_info.display_mult or 1
+                            local fmt = unit_info.format or "%.1f"
+                            overlay_text = string.format(fmt, baseline * display_mult)
+                        else
+                            -- Last resort: show as percentage
+                            overlay_text = string.format("%.1f%%", baseline * 100)
+                        end
                     end
+                elseif ok_fmt and param_formatted then
+                    -- Not modulated: show plugin's formatted value
+                    overlay_text = param_formatted
                 end
-            elseif ok_fmt and param_formatted then
-                -- Not modulated: show plugin's formatted value
-                overlay_text = param_formatted
-            end
 
-            if overlay_text then
-                local text_w = r.ImGui_CalcTextSize(ctx.ctx, overlay_text)
-                local text_x = slider_x + (slider_w - text_w) / 2
-                local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
-                local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
-                local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-                r.ImGui_DrawList_AddText(draw_list, text_x, text_y, 0xFFFFFFFF, overlay_text)
-            end
-
-            -- Tooltip showing modulation range when hovering (not when disabled)
-            -- TODO: Show range in actual units (Hz, dB, etc.) instead of percentage.
-            -- This requires caching formatted values for lower/upper bounds, which gets
-            -- complicated when bipolar mode changes. Need to either:
-            -- 1. Cache on-demand when tooltip is shown (temporarily set param, get format, restore)
-            -- 2. Invalidate cache properly when baseline/scale/bipolar changes
-            -- 3. Store formatted bounds when modulation link is created in modulator.lua
-            if link and not is_link_disabled and r.ImGui_IsItemHovered(ctx.ctx) then
-                local baseline = link.baseline or 0
-                local scale = link.scale or 0.5
-                local tooltip
-
-                if link.is_bipolar then
-                    -- Bipolar: centered on baseline, ± half range
-                    local half_range = math.abs(scale) / 2
-                    local lower = math.max(0, baseline - half_range) * 100
-                    local upper = math.min(1, baseline + half_range) * 100
-                    tooltip = string.format("Mod range: %.0f%% <-> %.0f%% (center: %.0f%%)",
-                        lower, upper, baseline * 100)
-                else
-                    -- Unipolar: baseline to baseline+scale
-                    local lower = math.max(0, math.min(baseline, baseline + scale)) * 100
-                    local upper = math.min(1, math.max(baseline, baseline + scale)) * 100
-                    tooltip = string.format("Mod range: %.0f%% -> %.0f%%", lower, upper)
+                if overlay_text then
+                    local text_w = r.ImGui_CalcTextSize(ctx.ctx, overlay_text)
+                    local text_x = slider_x + (slider_w - text_w) / 2
+                    local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
+                    local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
+                    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                    r.ImGui_DrawList_AddText(draw_list, text_x, text_y, 0xFFFFFFFF, overlay_text)
                 end
-                ctx:set_tooltip(tooltip)
             end
             end  -- end of normal slider else branch
         end
@@ -373,48 +374,102 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
 
             -- Link to modulator options
             if #modulators > 0 then
-                ctx:text_disabled("Link to Modulator")
-                ctx:separator()
-                for i, mod in ipairs(modulators) do
-                    local mod_name = "LFO " .. i
-                    if ctx:menu_item(mod_name) then
-                        -- Check modifier keys for link options
-                        local shift = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
-                        local ctrl = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Ctrl())
-                        local alt = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Alt())
+                -- Get selected LFO slot (0-based index)
+                local state_guid = opts and opts.state_guid
+                local selected_lfo_slot = state_guid and state and state.expanded_mod_slot and state.expanded_mod_slot[state_guid]
 
-                        -- Determine depth: Shift=100%, Alt=inverted, default=50%
-                        local depth = 0.5
-                        if shift then depth = 1.0 end
-                        if alt then depth = -depth end
+                -- Find which modulator this param is linked to (if any)
+                local linked_mod_idx = nil
+                if link and link.effect ~= nil then
+                    linked_mod_idx = link.effect
+                end
 
-                        -- Determine bipolar: Ctrl=bipolar
-                        local is_bipolar = ctrl
+                -- Helper function to create a link
+                local function create_link_to_mod(mod)
+                    local shift = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+                    local ctrl = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Ctrl())
+                    local alt = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Alt())
 
-                        local PARAM_OUTPUT = 3  -- slider4 output
-                        local initial_value = fx:get_param_normalized(param_idx) or 0
-                        local success = fx:create_param_link(mod, PARAM_OUTPUT, param_idx, depth)
-                        if success then
-                            -- Store baseline and initialize link state
-                            local plink_prefix = string.format("param.%d.plink.", param_idx)
-                            local mod_prefix = string.format("param.%d.mod.", param_idx)
-                            fx:set_named_config_param(mod_prefix .. "baseline", tostring(initial_value))
+                    local depth = 0.5
+                    if shift then depth = 1.0 end
+                    if alt then depth = -depth end
+                    local is_bipolar = ctrl
 
-                            -- Set offset for bipolar mode
-                            local offset = is_bipolar and "-0.5" or "0"
-                            fx:set_named_config_param(plink_prefix .. "offset", offset)
+                    local PARAM_OUTPUT = 3
+                    local initial_value = fx:get_param_normalized(param_idx) or 0
+                    local success = fx:create_param_link(mod, PARAM_OUTPUT, param_idx, depth)
+                    if success then
+                        local plink_prefix = string.format("param.%d.plink.", param_idx)
+                        local mod_prefix = string.format("param.%d.mod.", param_idx)
+                        fx:set_named_config_param(mod_prefix .. "baseline", tostring(initial_value))
+                        local offset = is_bipolar and "-0.5" or "0"
+                        fx:set_named_config_param(plink_prefix .. "offset", offset)
 
-                            local link_key = fx_guid .. "_" .. param_idx
-                            if state then
-                                state.link_baselines = state.link_baselines or {}
-                                state.link_baselines[link_key] = initial_value
-                                state.link_bipolar = state.link_bipolar or {}
-                                state.link_bipolar[link_key] = is_bipolar
+                        local link_key = fx_guid .. "_" .. param_idx
+                        if state then
+                            state.link_baselines = state.link_baselines or {}
+                            state.link_baselines[link_key] = initial_value
+                            state.link_bipolar = state.link_bipolar or {}
+                            state.link_bipolar[link_key] = is_bipolar
+                        end
+                        return true
+                    end
+                    return false
+                end
+
+                -- Show currently selected LFO at top (if one is selected)
+                if selected_lfo_slot ~= nil then
+                    local selected_mod = modulators[selected_lfo_slot + 1]  -- Convert to 1-based
+                    if selected_mod then
+                        local is_linked = (linked_mod_idx == selected_lfo_slot)
+                        local label = is_linked and "● LFO " or "Link to LFO "
+                        label = label .. (selected_lfo_slot + 1)
+
+                        if is_linked then
+                            r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_Text(), 0x88CCFFFF)
+                        end
+
+                        if ctx:menu_item(label) then
+                            if create_link_to_mod(selected_mod) then
+                                interacted = true
                             end
-                            interacted = true
+                        end
+
+                        if is_linked then
+                            r.ImGui_PopStyleColor(ctx.ctx)
                         end
                     end
                 end
+
+                -- Show other LFOs in submenu (if more than one modulator)
+                if #modulators > 1 then
+                    if ctx:begin_menu("Other LFOs") then
+                        for i, mod in ipairs(modulators) do
+                            local mod_slot_idx = i - 1
+                            -- Skip the selected one (already shown above)
+                            if mod_slot_idx ~= selected_lfo_slot then
+                                local is_linked = (linked_mod_idx == mod_slot_idx)
+                                local label = is_linked and ("● LFO " .. i) or ("LFO " .. i)
+
+                                if is_linked then
+                                    r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_Text(), 0x88CCFFFF)
+                                end
+
+                                if ctx:menu_item(label) then
+                                    if create_link_to_mod(mod) then
+                                        interacted = true
+                                    end
+                                end
+
+                                if is_linked then
+                                    r.ImGui_PopStyleColor(ctx.ctx)
+                                end
+                            end
+                        end
+                        ctx:end_menu()
+                    end
+                end
+
                 ctx:separator()
                 ctx:text_disabled("Shift: 100%  Ctrl: Bipolar  Alt: Invert")
             else

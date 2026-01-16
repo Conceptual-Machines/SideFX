@@ -561,6 +561,7 @@ local is_modulator_fx = fx_utils.is_modulator_fx
 -- Settings and Preset dialogs
 local settings_dialog = require('lib.ui.settings.settings_dialog')
 local preset_dialog = require('lib.ui.presets.preset_dialog')
+local mod_matrix = require('lib.ui.modulator.mod_matrix')
 local presets_mod = require('lib.utils.presets')
 
 local function draw_toolbar(ctx, icon_font_ref)
@@ -579,6 +580,7 @@ local function draw_toolbar(ctx, icon_font_ref)
         on_collapse_from_depth = collapse_from_depth,
         on_config = function() settings_dialog.open(ctx) end,
         on_preset = function() preset_dialog.open(ctx) end,
+        on_mod_matrix = function() mod_matrix.open() end,
         on_toggle_scope = toggle_scope,
         on_toggle_spectrum = toggle_spectrum,
     })
@@ -684,6 +686,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height, icon_f
         header_font = header_font_ref and header_font_ref.value or nil,
         draw_selected_chain_column_if_expanded = draw_selected_chain_column_if_expanded,
         draw_rack_panel = draw_rack_panel,
+        on_mod_matrix = function() mod_matrix.open() end,
     })
 end
 
@@ -1187,6 +1190,7 @@ local function main()
         icon_font_ref = icon_font_ref,
         settings_dialog = settings_dialog,
         preset_dialog = preset_dialog,
+        mod_matrix = mod_matrix,
     })
 
     Window.run({

@@ -61,6 +61,9 @@ M.Names = {
     lock_open = "lock-open",
     on = "on",
     cancel = "cancel",
+
+    -- Modulation
+    matrix = "matrix",
 }
 
 --------------------------------------------------------------------------------

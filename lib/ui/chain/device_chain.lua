@@ -91,6 +91,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         get_device_utility = get_device_utility,
         draw_selected_chain_column_if_expanded = draw_selected_chain_column_if_expanded,
         draw_rack_panel = draw_rack_panel,
+        on_mod_matrix = opts.on_mod_matrix,
     })
 
     -- Build display list - handles D-containers and legacy FX

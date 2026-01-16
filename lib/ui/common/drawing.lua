@@ -4,9 +4,13 @@
 local M = {}
 local r = reaper
 
--- Track when a slider is being dragged with fine control (Shift held)
--- This is used by curve_editor to avoid Shift key conflicts
+-- Track when a slider is being dragged with fine control (Alt held)
+-- This is used by curve_editor to avoid key conflicts
 M.slider_fine_active = false
+
+-- Track text input state for sliders (keyed by label)
+M.slider_text_input = {}
+M.slider_text_input_buffer = {}
 
 --- Draw a UI icon (wrench icon button)
 -- @param ctx ImGui context
@@ -193,31 +197,33 @@ function M.draw_fader(ctx, label, value, min_val, max_val, width, height, format
 end
 
 --------------------------------------------------------------------------------
--- Fine Control Slider Functions (Shift key for precision)
+-- Fine Control Slider Functions (Alt key for precision)
 --------------------------------------------------------------------------------
 
---- Check if Shift key is held
--- @param ctx ImGui context (raw or wrapper) - not used, kept for API compatibility
--- @return boolean True if Shift is held
-function M.is_shift_held(ctx)
-    -- Use REAPER's GetMouseState which returns modifier keys in the bitmask
-    -- Bit 8 (value 8) = Shift key held
-    local mouse_state = r.JS_Mouse_GetState and r.JS_Mouse_GetState(0) or 0
-    if (mouse_state & 8) ~= 0 then
-        return true
-    end
-    -- Fallback to ImGui detection
+--- Check if Alt/Option key is held
+-- @param ctx ImGui context (raw or wrapper)
+-- @return boolean True if Alt is held
+function M.is_alt_held(ctx)
     local raw_ctx = ctx.ctx or ctx
-    local left_shift = r.ImGui_IsKeyDown(raw_ctx, r.ImGui_Key_LeftShift())
-    local right_shift = r.ImGui_IsKeyDown(raw_ctx, r.ImGui_Key_RightShift())
-    return left_shift or right_shift
+    local left_alt = r.ImGui_IsKeyDown(raw_ctx, r.ImGui_Key_LeftAlt())
+    local right_alt = r.ImGui_IsKeyDown(raw_ctx, r.ImGui_Key_RightAlt())
+    return left_alt or right_alt
 end
 
---- Horizontal slider with fine control and double-click reset
+--- Check if Ctrl/Cmd key is held
+-- @param ctx ImGui context (raw or wrapper)
+-- @return boolean True if Ctrl (Windows/Linux) or Cmd (macOS) is held
+function M.is_ctrl_held(ctx)
+    local raw_ctx = ctx.ctx or ctx
+    -- ImGui_Key_ModCtrl handles Cmd on macOS automatically
+    return r.ImGui_IsKeyDown(raw_ctx, r.ImGui_Mod_Ctrl())
+end
+
+--- Horizontal slider with fine control, text input, and double-click reset
 -- Features:
---   - Shift+drag for fine control (10% sensitivity)
+--   - Alt+drag for fine control (10% sensitivity)
 --   - Double-click to reset to default value
---   - Ctrl/Cmd+click uses ImGui's built-in text input mode
+--   - Ctrl/Cmd+click to enter value as text (when text_input_enabled)
 -- @param ctx ImGui context wrapper
 -- @param label string Slider label
 -- @param value number Current value
@@ -227,11 +233,15 @@ end
 -- @param fine_factor number Fine control multiplier (default 0.1)
 -- @param display_mult number Multiplier for display value (e.g., 100 for percentage)
 -- @param default_value number Default value for double-click reset (optional)
--- @return boolean changed, number new_value
-function M.slider_double_fine(ctx, label, value, min, max, format, fine_factor, display_mult, default_value)
+-- @param text_input_enabled boolean Whether Ctrl+click text input is enabled (default true)
+-- @return boolean changed, number new_value, boolean in_text_mode
+function M.slider_double_fine(ctx, label, value, min, max, format, fine_factor, display_mult, default_value, text_input_enabled)
     fine_factor = fine_factor or 0.1
     display_mult = display_mult or 1
-    local shift_held = M.is_shift_held(ctx)
+    -- Default to true for backwards compatibility, but can be disabled
+    if text_input_enabled == nil then text_input_enabled = true end
+    local alt_held = M.is_alt_held(ctx)
+    local ctrl_held = M.is_ctrl_held(ctx)
 
     local changed = false
     local new_value = value
@@ -241,49 +251,120 @@ function M.slider_double_fine(ctx, label, value, min, max, format, fine_factor, 
     local display_min = min * display_mult
     local display_max = max * display_mult
 
-    -- Use raw ImGui API with NoRoundToFormat flag for better precision
     local raw_ctx = ctx.ctx or ctx
-    local flags = r.ImGui_SliderFlags_NoRoundToFormat()
-    local slider_changed, new_display_value = r.ImGui_SliderDouble(raw_ctx, label, display_value, display_min, display_max, format or "%.3f", flags)
+    -- Use format for slider display, but always use proper format for text input
+    local display_format = format or "%.3f"
+    local text_input_format = "%.3f"  -- Always use proper format for text entry
 
-    -- Track if this slider is actively being dragged with Shift (for curve_editor conflict avoidance)
-    local is_active = r.ImGui_IsItemActive(raw_ctx)
-    if is_active and shift_held then
-        M.slider_fine_active = true
-    elseif not is_active then
-        -- Only clear when no slider is active (will be set again if another slider is active)
-        M.slider_fine_active = false
-    end
-
-    local is_hovered = r.ImGui_IsItemHovered(raw_ctx)
+    -- Check cursor position BEFORE drawing anything
+    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(raw_ctx)
+    local item_w = r.ImGui_CalcItemWidth(raw_ctx)
+    local item_h = r.ImGui_GetFrameHeight(raw_ctx)
+    local mouse_x, mouse_y = r.ImGui_GetMousePos(raw_ctx)
+    local is_mouse_over = mouse_x >= cursor_x and mouse_x <= cursor_x + item_w and
+                          mouse_y >= cursor_y and mouse_y <= cursor_y + item_h
+    local mouse_clicked = r.ImGui_IsMouseClicked(raw_ctx, 0)
     local mouse_double_clicked = r.ImGui_IsMouseDoubleClicked(raw_ctx, 0)
 
-    -- Check for double-click to reset to default
-    if is_hovered and mouse_double_clicked and default_value ~= nil then
-        new_value = default_value
-        changed = true
-    -- Normal slider change with optional fine control
-    elseif slider_changed then
-        new_value = new_display_value / display_mult
+    -- Check if we're in text input mode for this slider
+    local in_text_mode = M.slider_text_input[label]
 
-        if shift_held then
-            -- Apply fine control: reduce the delta
-            local delta = new_value - value
-            new_value = value + delta * fine_factor
-        end
-        -- Clamp to range
-        new_value = math.max(min, math.min(max, new_value))
-        changed = true
+    -- Ctrl+click to enter text input mode (only if text input is enabled)
+    if text_input_enabled and is_mouse_over and mouse_clicked and ctrl_held and not in_text_mode then
+        M.slider_text_input[label] = true
+        M.slider_text_input_buffer[label] = string.format(text_input_format, display_value)
+        in_text_mode = true
     end
 
-    return changed, new_value
+    -- Double-click reset (only when not in text mode)
+    if not in_text_mode and is_mouse_over and mouse_double_clicked and default_value ~= nil then
+        new_value = default_value
+        changed = true
+        display_value = default_value * display_mult
+    end
+
+    if in_text_mode then
+        -- Text input mode - use InputText and parse the number
+        local input_flags = r.ImGui_InputTextFlags_AutoSelectAll()
+
+        -- Focus the input on first frame
+        if M.slider_text_input[label] == true then
+            r.ImGui_SetKeyboardFocusHere(raw_ctx)
+            M.slider_text_input[label] = "active"
+        end
+
+        local _, new_text = r.ImGui_InputText(raw_ctx, label, M.slider_text_input_buffer[label], input_flags)
+
+        -- Update buffer with whatever user typed
+        M.slider_text_input_buffer[label] = new_text
+
+        -- Check if user finished editing (clicked away or pressed Enter)
+        local should_apply = r.ImGui_IsItemDeactivatedAfterEdit(raw_ctx)
+        local enter_pressed = r.ImGui_IsKeyPressed(raw_ctx, r.ImGui_Key_Enter()) or
+                              r.ImGui_IsKeyPressed(raw_ctx, r.ImGui_Key_KeypadEnter())
+
+        if should_apply or enter_pressed then
+            -- Parse the value - handle both period and comma as decimal separator
+            if new_text and #new_text > 0 then
+                -- Trim whitespace and normalize decimal separator
+                local text_to_parse = new_text:match("^%s*(.-)%s*$") or ""
+                text_to_parse = text_to_parse:gsub(",", ".")
+                local parsed = tonumber(text_to_parse)
+
+                if parsed then
+                    -- Clamp to range
+                    local clamped = math.max(display_min, math.min(display_max, parsed))
+                    new_value = clamped / display_mult
+                    changed = true
+                end
+            end
+            -- Exit text mode (always, even if parsing failed)
+            M.slider_text_input[label] = nil
+            M.slider_text_input_buffer[label] = nil
+        end
+
+        -- Escape to cancel
+        if r.ImGui_IsKeyPressed(raw_ctx, r.ImGui_Key_Escape()) then
+            M.slider_text_input[label] = nil
+            M.slider_text_input_buffer[label] = nil
+        end
+    else
+        -- Normal slider mode
+        local flags = r.ImGui_SliderFlags_NoRoundToFormat() | r.ImGui_SliderFlags_AlwaysClamp()
+
+        local slider_changed, new_display_value = r.ImGui_SliderDouble(raw_ctx, label, display_value, display_min, display_max, display_format, flags)
+
+        -- Track if this slider is actively being dragged with Alt
+        local is_active = r.ImGui_IsItemActive(raw_ctx)
+        if is_active and alt_held then
+            M.slider_fine_active = true
+        elseif not is_active then
+            M.slider_fine_active = false
+        end
+
+        -- Normal slider change with optional fine control (if not already reset by double-click)
+        if slider_changed and not changed then
+            new_value = new_display_value / display_mult
+
+            if alt_held then
+                -- Apply fine control: reduce the delta
+                local delta = new_value - value
+                new_value = value + delta * fine_factor
+            end
+            -- Clamp to range
+            new_value = math.max(min, math.min(max, new_value))
+            changed = true
+        end
+    end
+
+    return changed, new_value, in_text_mode
 end
 
---- Vertical slider with fine control and double-click reset
+--- Vertical slider with fine control, text input, and double-click reset
 -- Features:
---   - Shift+drag for fine control (10% sensitivity)
+--   - Alt+drag for fine control (10% sensitivity)
 --   - Double-click to reset to default value
---   - Ctrl/Cmd+click uses ImGui's built-in text input mode
+--   - Ctrl/Cmd+click to enter value as text
 -- @param ctx ImGui context wrapper
 -- @param label string Slider label
 -- @param width number Slider width
@@ -299,7 +380,7 @@ end
 function M.v_slider_double_fine(ctx, label, width, height, value, min, max, format, fine_factor, display_mult, default_value)
     fine_factor = fine_factor or 0.1
     display_mult = display_mult or 1
-    local shift_held = M.is_shift_held(ctx)
+    local alt_held = M.is_alt_held(ctx)
 
     local changed = false
     local new_value = value
@@ -309,31 +390,44 @@ function M.v_slider_double_fine(ctx, label, width, height, value, min, max, form
     local display_min = min * display_mult
     local display_max = max * display_mult
 
-    -- Use raw ImGui API with NoRoundToFormat flag for better precision
     local raw_ctx = ctx.ctx or ctx
-    local flags = r.ImGui_SliderFlags_NoRoundToFormat()
-    local slider_changed, new_display_value = r.ImGui_VSliderDouble(raw_ctx, label, width, height, display_value, display_min, display_max, format or "%.3f", flags)
 
-    -- Track if this slider is actively being dragged with Shift (for curve_editor conflict avoidance)
+    -- Check for double-click to reset BEFORE drawing slider (to capture the event first)
+    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(raw_ctx)
+    local mouse_x, mouse_y = r.ImGui_GetMousePos(raw_ctx)
+    local is_mouse_over = mouse_x >= cursor_x and mouse_x <= cursor_x + width and
+                          mouse_y >= cursor_y and mouse_y <= cursor_y + height
+    local mouse_double_clicked = r.ImGui_IsMouseDoubleClicked(raw_ctx, 0)
+
+    -- Double-click reset (check before slider consumes the event)
+    if is_mouse_over and mouse_double_clicked and default_value ~= nil then
+        new_value = default_value
+        changed = true
+        -- Still draw slider but with the reset value
+        display_value = default_value * display_mult
+    end
+
+    -- Use raw ImGui API with flags
+    -- AlwaysClamp ensures input values stay in range
+    -- Ctrl+click enables text input mode (ImGui built-in behavior)
+    local flags = r.ImGui_SliderFlags_NoRoundToFormat() | r.ImGui_SliderFlags_AlwaysClamp()
+    local display_format = format or "%.3f"
+
+    local slider_changed, new_display_value = r.ImGui_VSliderDouble(raw_ctx, label, width, height, display_value, display_min, display_max, display_format, flags)
+
+    -- Track if this slider is actively being dragged with Alt (for curve_editor conflict avoidance)
     local is_active = r.ImGui_IsItemActive(raw_ctx)
-    if is_active and shift_held then
+    if is_active and alt_held then
         M.slider_fine_active = true
     elseif not is_active then
         M.slider_fine_active = false
     end
 
-    local is_hovered = r.ImGui_IsItemHovered(raw_ctx)
-    local mouse_double_clicked = r.ImGui_IsMouseDoubleClicked(raw_ctx, 0)
-
-    -- Check for double-click to reset to default
-    if is_hovered and mouse_double_clicked and default_value ~= nil then
-        new_value = default_value
-        changed = true
-    -- Normal slider change with optional fine control
-    elseif slider_changed then
+    -- Normal slider change with optional fine control (if not already reset by double-click)
+    if slider_changed and not changed then
         new_value = new_display_value / display_mult
 
-        if shift_held then
+        if alt_held then
             -- Apply fine control: reduce the delta
             local delta = new_value - value
             new_value = value + delta * fine_factor

@@ -141,9 +141,11 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
 
         local is_renaming = rename_active[guid] or false
 
-        -- Use bold header font for device name
+        -- Use bold header font for device name (with safety check)
+        local font_pushed = false
         if opts.header_font then
-            r.ImGui_PushFont(ctx.ctx, opts.header_font, 14)
+            local ok = pcall(r.ImGui_PushFont, ctx.ctx, opts.header_font, 14)
+            font_pushed = ok
         end
 
         if is_renaming then
@@ -176,7 +178,7 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
             end
         end
 
-        if opts.header_font then
+        if font_pushed then
             r.ImGui_PopFont(ctx.ctx)
         end
 

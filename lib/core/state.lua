@@ -957,19 +957,34 @@ function M.load_param_unit_overrides()
     end
 end
 
+--- Normalize override data (handles both old string format and new table format)
+-- @param override string|table The stored override
+-- @return string|nil unit_id, number|nil min, number|nil max
+local function normalize_override(override)
+    if not override then return nil, nil, nil end
+    if type(override) == "string" then
+        -- Old format: just the unit ID
+        return override, nil, nil
+    elseif type(override) == "table" then
+        -- New format: { unit = "id", min = n, max = n }
+        return override.unit, override.min, override.max
+    end
+    return nil, nil, nil
+end
+
 --- Get unit override for a specific parameter
 -- Tries multiple name variations (exact match, clean name, prefix variations)
 -- @param plugin_name string The plugin name
 -- @param param_idx number The parameter index
--- @return string|nil Unit ID or nil for auto-detect
+-- @return string|nil unit_id, number|nil min, number|nil max
 function M.get_param_unit_override(plugin_name, param_idx)
-    if not plugin_name or not param_idx then return nil end
-    if not state.param_unit_overrides then return nil end
+    if not plugin_name or not param_idx then return nil, nil, nil end
+    if not state.param_unit_overrides then return nil, nil, nil end
 
     -- Try exact match first
     if state.param_unit_overrides[plugin_name] then
         local override = state.param_unit_overrides[plugin_name][param_idx]
-        if override then return override end
+        if override then return normalize_override(override) end
     end
 
     -- Try with stripped prefixes
@@ -978,25 +993,27 @@ function M.get_param_unit_override(plugin_name, param_idx)
 
     if clean_name ~= plugin_name and state.param_unit_overrides[clean_name] then
         local override = state.param_unit_overrides[clean_name][param_idx]
-        if override then return override end
+        if override then return normalize_override(override) end
     end
 
     -- Try matching stored keys against clean name
     for key, overrides in pairs(state.param_unit_overrides) do
         local key_clean = naming.strip_sidefx_prefixes(key)
         if key_clean == clean_name and overrides[param_idx] then
-            return overrides[param_idx]
+            return normalize_override(overrides[param_idx])
         end
     end
 
-    return nil
+    return nil, nil, nil
 end
 
 --- Set unit override for a specific parameter
 -- @param plugin_name string The plugin full name
 -- @param param_idx number The parameter index
 -- @param unit_id string|nil Unit ID or nil/auto for auto-detect
-function M.set_param_unit_override(plugin_name, param_idx, unit_id)
+-- @param range_min number|nil Custom minimum value (optional)
+-- @param range_max number|nil Custom maximum value (optional)
+function M.set_param_unit_override(plugin_name, param_idx, unit_id, range_min, range_max)
     if not plugin_name or not param_idx then return end
 
     -- Normalize "auto" to nil (no override)
@@ -1010,8 +1027,20 @@ function M.set_param_unit_override(plugin_name, param_idx, unit_id)
         state.param_unit_overrides[plugin_name] = {}
     end
 
+    -- Build override value
+    local override_value = nil
+    if unit_id then
+        if range_min or range_max then
+            -- Use new table format with custom range
+            override_value = { unit = unit_id, min = range_min, max = range_max }
+        else
+            -- Use simple string format (backwards compatible)
+            override_value = unit_id
+        end
+    end
+
     -- Set or clear the override
-    state.param_unit_overrides[plugin_name][param_idx] = unit_id
+    state.param_unit_overrides[plugin_name][param_idx] = override_value
 
     -- Clean up empty plugin tables
     if next(state.param_unit_overrides[plugin_name]) == nil then

@@ -250,10 +250,8 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
         local l_str = l_val <= DB_MIN and "-∞" or string.format("%.0f", l_val)
         local r_str = r_val <= DB_MIN and "-∞" or string.format("%.0f", r_val)
 
-        -- Show as tooltip with smaller font
-        r.ImGui_PushFont(ctx.ctx, nil, 10)  -- Small font size
+        -- Show as tooltip (font size is controlled by ImGui style, not PushFont)
         ctx:set_tooltip(string.format("L %s | R %s dB", l_str, r_str))
-        r.ImGui_PopFont(ctx.ctx)
     end
 
     -- Invisible slider for fader interaction

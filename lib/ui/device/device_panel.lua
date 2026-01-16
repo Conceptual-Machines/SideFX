@@ -556,6 +556,7 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         end
         opts.modulators = modulators
         opts.track = state.track  -- Pass track for bake operations
+        opts.state_guid = state_guid  -- Pass state_guid to look up selected LFO slot
 
         if device_column.draw(ctx, is_device_collapsed, params_column, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts, name, fx_naming, draw_sidebar_column, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, colors) then
             interacted = true

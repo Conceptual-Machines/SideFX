@@ -22,6 +22,7 @@ local add_rack_to_track
 local get_device_utility
 local draw_selected_chain_column_if_expanded
 local draw_rack_panel
+local on_mod_matrix
 
 --- Initialize with dependencies
 function M.init(deps)
@@ -36,6 +37,7 @@ function M.init(deps)
     get_device_utility = deps.get_device_utility
     draw_selected_chain_column_if_expanded = deps.draw_selected_chain_column_if_expanded
     draw_rack_panel = deps.draw_rack_panel
+    on_mod_matrix = deps.on_mod_matrix
 end
 
 --- Draw fallback device panel UI (when device_panel module not loaded)
@@ -260,6 +262,7 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
                     callbacks.on_rack_drop(container and container.pointer or insert_before_idx)
                 end
             end,
+            on_mod_matrix = on_mod_matrix,
         })
     else
         -- Fallback UI with on_select callback

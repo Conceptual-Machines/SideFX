@@ -439,8 +439,10 @@ function M.create_callbacks(opts)
 
                         -- Draw the horizontal device chain (includes modulators)
                         -- Use smaller font for chain content
+                        local font_pushed = false
                         if default_font_ref.value then
-                            r.ImGui_PushFont(ctx.ctx, default_font_ref.value, 12)
+                            local ok = pcall(r.ImGui_PushFont, ctx.ctx, default_font_ref.value, 12)
+                            font_pushed = ok
                         end
                         draw_device_chain(ctx, filtered_fx, chain_w, avail_h, icon_font_ref, header_font_ref)
 
@@ -448,7 +450,7 @@ function M.create_callbacks(opts)
                         if draw_analyzers then
                             draw_analyzers(ctx, avail_h)
                         end
-                        if default_font_ref.value then
+                        if font_pushed then
                             r.ImGui_PopFont(ctx.ctx)
                         end
                     end
@@ -481,12 +483,15 @@ function M.create_callbacks(opts)
                 state.last_save_frame = ctx.frame_count
             end
             
-            -- Draw modal dialogs (settings, presets, etc.)
+            -- Draw modal dialogs (settings, presets, mod matrix, etc.)
             if opts.settings_dialog then
                 opts.settings_dialog.draw(ctx)
             end
             if opts.preset_dialog then
                 opts.preset_dialog.draw(ctx)
+            end
+            if opts.mod_matrix then
+                opts.mod_matrix.draw(ctx, state)
             end
         end,
     }
