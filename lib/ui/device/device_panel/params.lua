@@ -16,6 +16,9 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
     local r = reaper
     local imgui = require('imgui')
 
+    -- Use smaller font for parameter cells
+    r.ImGui_PushFont(ctx.ctx, nil, 11)
+
     local mod_links = opts and opts.mod_links
     local state = opts and opts.state
     local fx_guid = opts and opts.fx_guid
@@ -274,6 +277,7 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
         ctx:pop_style_color(5)
     end
 
+    r.ImGui_PopFont(ctx.ctx)
     return interacted
 end
 
