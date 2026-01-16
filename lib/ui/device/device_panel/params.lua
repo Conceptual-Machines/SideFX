@@ -6,6 +6,8 @@ local M = {}
 local drawing = require('lib.ui.common.drawing')
 local unit_detector = require('lib.utils.unit_detector')
 local state_module = require('lib.core.state')
+local modulator_module = require('lib.modulator.modulator')
+local bake_module = require('lib.modulator.modulator_bake')
 
 --- Draw a single parameter cell (label + slider + modulation overlay)
 -- @param ctx ImGui context
@@ -33,8 +35,14 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
         -- Check if this param has modulation
         local link = mod_links and mod_links[param_idx]
 
-        -- Param name (truncated) - highlight if modulated
-        if link then
+        -- Check if link is disabled
+        local link_key = fx_guid and (fx_guid .. "_" .. param_idx) or nil
+        local is_link_disabled = link and link_key and state and state.link_disabled and state.link_disabled[link_key]
+
+        -- Param name (truncated) - highlight if modulated, grey if disabled
+        if is_link_disabled then
+            ctx:push_style_color(imgui.Col.Text(), 0x666688FF)  -- Grey-blue for disabled modulation
+        elseif link then
             ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)  -- Blue for modulated
         else
             ctx:push_style_color(imgui.Col.Text(), 0xAAAAAAFF)
@@ -48,12 +56,20 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
             ctx:set_tooltip(param_name)
         end
 
-        -- Horizontal slider (shorter width)
-        ctx:push_style_color(imgui.Col.FrameBg(), 0x555555FF)
-        ctx:push_style_color(imgui.Col.FrameBgHovered(), 0x666666FF)
-        ctx:push_style_color(imgui.Col.FrameBgActive(), 0x777777FF)
-        ctx:push_style_color(imgui.Col.SliderGrab(), 0x5588AAFF)
-        ctx:push_style_color(imgui.Col.SliderGrabActive(), 0x77AACCFF)
+        -- Horizontal slider (shorter width) - grey out if link is disabled
+        if is_link_disabled then
+            ctx:push_style_color(imgui.Col.FrameBg(), 0x3A3A44FF)
+            ctx:push_style_color(imgui.Col.FrameBgHovered(), 0x444450FF)
+            ctx:push_style_color(imgui.Col.FrameBgActive(), 0x4A4A55FF)
+            ctx:push_style_color(imgui.Col.SliderGrab(), 0x556677FF)
+            ctx:push_style_color(imgui.Col.SliderGrabActive(), 0x667788FF)
+        else
+            ctx:push_style_color(imgui.Col.FrameBg(), 0x555555FF)
+            ctx:push_style_color(imgui.Col.FrameBgHovered(), 0x666666FF)
+            ctx:push_style_color(imgui.Col.FrameBgActive(), 0x777777FF)
+            ctx:push_style_color(imgui.Col.SliderGrab(), 0x5588AAFF)
+            ctx:push_style_color(imgui.Col.SliderGrabActive(), 0x77AACCFF)
+        end
 
         -- Make slider thinner vertically
         ctx:push_style_var(imgui.StyleVar.FramePadding(), 2, 1)  -- x=2, y=1 (thin slider bar)
@@ -102,30 +118,101 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
                 changed = true
             end
         else
-            -- Normal slider
-            local slider_format, slider_mult
-            if unit_info then
-                slider_format = unit_info.format
-                slider_mult = unit_info.display_mult
-                -- If using plugin format, hide slider text and overlay plugin value
-                if unit_info.use_plugin_format then
+            -- Check if Shift is held for mod depth adjustment (not when link is disabled)
+            local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+            local is_mod_depth_mode = link and shift_held and not is_link_disabled
+
+            if is_mod_depth_mode then
+                -- Shift+drag: adjust modulation depth instead of parameter value
+                local current_depth = link.scale or 0.5
+                local depth_norm = (current_depth + 1) / 2  -- Convert -1..1 to 0..1
+                local is_bipolar = link.is_bipolar or false
+
+                -- Check for Ctrl press to toggle bipolar (check both left and right Ctrl)
+                local ctrl_pressed = r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_LeftCtrl())
+                    or r.ImGui_IsKeyPressed(ctx.ctx, r.ImGui_Key_RightCtrl())
+                if ctrl_pressed then
+                    -- Toggle bipolar mode
+                    is_bipolar = not is_bipolar
+                    local plink_prefix = string.format("param.%d.plink.", param_idx)
+                    local offset = is_bipolar and "-0.5" or "0"
+                    fx:set_named_config_param(plink_prefix .. "offset", offset)
+
+                    -- Update state
+                    if state and fx_guid then
+                        state.link_bipolar = state.link_bipolar or {}
+                        local link_key = fx_guid .. "_" .. param_idx
+                        state.link_bipolar[link_key] = is_bipolar
+                    end
+                    interacted = true
+                end
+
+                -- Draw depth slider with blue styling (purple tint if bipolar)
+                local frame_bg = is_bipolar and 0x4A2A6AFF or 0x2A4A6AFF
+                local frame_hover = is_bipolar and 0x5A3A7AFF or 0x3A5A7AFF
+                local frame_active = is_bipolar and 0x6A4A8AFF or 0x4A6A8AFF
+                local grab_color = is_bipolar and 0xCC88FFFF or 0x88CCFFFF
+                local grab_active = is_bipolar and 0xDDAAFFFF or 0xAADDFFFF
+
+                ctx:push_style_color(r.ImGui_Col_FrameBg(), frame_bg)
+                ctx:push_style_color(r.ImGui_Col_FrameBgHovered(), frame_hover)
+                ctx:push_style_color(r.ImGui_Col_FrameBgActive(), frame_active)
+                ctx:push_style_color(r.ImGui_Col_SliderGrab(), grab_color)
+                ctx:push_style_color(r.ImGui_Col_SliderGrabActive(), grab_active)
+
+                local depth_changed, new_depth_norm = drawing.slider_double_fine(ctx, "##depth_" .. param_name .. "_" .. param_idx, depth_norm, 0.0, 1.0, "##", nil, 1)
+
+                -- Overlay depth text with mode indicator
+                local depth_display = current_depth * 100
+                local mode_indicator = is_bipolar and "B" or "U"
+                local depth_text = string.format("%s %.0f%%", mode_indicator, depth_display)
+                local text_w = r.ImGui_CalcTextSize(ctx.ctx, depth_text)
+                local text_x = slider_x + (slider_w - text_w) / 2
+                local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
+                local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
+                local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                local text_color = is_bipolar and 0xCC88FFFF or 0x88CCFFFF
+                r.ImGui_DrawList_AddText(draw_list, text_x, text_y, text_color, depth_text)
+
+                ctx:pop_style_color(5)
+
+                if depth_changed then
+                    local new_depth = new_depth_norm * 2 - 1  -- Convert 0..1 to -1..1
+                    local plink_prefix = string.format("param.%d.plink.", param_idx)
+                    fx:set_named_config_param(plink_prefix .. "scale", tostring(new_depth))
+                    interacted = true
+                end
+
+                -- Tooltip for depth mode
+                if r.ImGui_IsItemHovered(ctx.ctx) then
+                    local mode_name = is_bipolar and "Bipolar" or "Unipolar"
+                    ctx:set_tooltip("Mod depth: " .. string.format("%.0f%%", current_depth * 100) .. " (" .. mode_name .. ")\nCtrl: Toggle bipolar\nRelease Shift for normal control")
+                end
+            else
+                -- Normal slider
+                local slider_format, slider_mult
+                if unit_info then
+                    slider_format = unit_info.format
+                    slider_mult = unit_info.display_mult
+                    -- If using plugin format, hide slider text and overlay plugin value
+                    if unit_info.use_plugin_format then
+                        slider_format = "##"
+                    end
+                elseif is_percentage then
+                    slider_format = "%.1f%%"
+                    slider_mult = 100
+                else
+                    -- Non-percentage: hide slider text, overlay plugin's value
+                    slider_format = "##"
+                    slider_mult = 1
+                end
+
+                -- When modulated, hide slider text (we'll overlay baseline for computable units)
+                if link then
                     slider_format = "##"
                 end
-            elseif is_percentage then
-                slider_format = "%.1f%%"
-                slider_mult = 100
-            else
-                -- Non-percentage: hide slider text, overlay plugin's value
-                slider_format = "##"
-                slider_mult = 1
-            end
 
-            -- When modulated, hide slider text (we'll overlay baseline for computable units)
-            if link then
-                slider_format = "##"
-            end
-
-            changed, new_val = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, slider_format, nil, slider_mult)
+                changed, new_val = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, slider_format, nil, slider_mult)
 
             -- Overlay text on slider
             -- When modulated: show cached baseline formatted value (static)
@@ -161,14 +248,14 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
                 r.ImGui_DrawList_AddText(draw_list, text_x, text_y, 0xFFFFFFFF, overlay_text)
             end
 
-            -- Tooltip showing modulation range when hovering
+            -- Tooltip showing modulation range when hovering (not when disabled)
             -- TODO: Show range in actual units (Hz, dB, etc.) instead of percentage.
             -- This requires caching formatted values for lower/upper bounds, which gets
             -- complicated when bipolar mode changes. Need to either:
             -- 1. Cache on-demand when tooltip is shown (temporarily set param, get format, restore)
             -- 2. Invalidate cache properly when baseline/scale/bipolar changes
             -- 3. Store formatted bounds when modulation link is created in modulator.lua
-            if link and r.ImGui_IsItemHovered(ctx.ctx) then
+            if link and not is_link_disabled and r.ImGui_IsItemHovered(ctx.ctx) then
                 local baseline = link.baseline or 0
                 local scale = link.scale or 0.5
                 local tooltip
@@ -188,6 +275,153 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
                 end
                 ctx:set_tooltip(tooltip)
             end
+            end  -- end of normal slider else branch
+        end
+
+        -- Right-click context menu for parameter linking
+        local modulators = opts and opts.modulators or {}
+        local track = opts and opts.track
+        if ctx:begin_popup_context_item("param_ctx_" .. param_idx .. "_" .. (fx_guid or "")) then
+            -- If parameter has a link, show Remove, Disable, and Bake options first
+            if link then
+                local link_key = fx_guid and (fx_guid .. "_" .. param_idx) or nil
+                local is_disabled = link_key and state and state.link_disabled and state.link_disabled[link_key]
+                local disable_label = is_disabled and "Enable Link" or "Disable Link"
+
+                if ctx:menu_item(disable_label) then
+                    local plink_prefix = string.format("param.%d.plink.", param_idx)
+                    if is_disabled then
+                        -- Re-enable: restore saved scale
+                        local saved = state.link_saved_scale and state.link_saved_scale[link_key] or 0.5
+                        fx:set_named_config_param(plink_prefix .. "scale", tostring(saved))
+                        state.link_disabled[link_key] = false
+                    else
+                        -- Disable: save current scale, set to 0
+                        state.link_saved_scale = state.link_saved_scale or {}
+                        state.link_saved_scale[link_key] = link.scale or 0.5
+                        fx:set_named_config_param(plink_prefix .. "scale", "0")
+                        state.link_disabled = state.link_disabled or {}
+                        state.link_disabled[link_key] = true
+                    end
+                    state_module.save_link_scales()
+                    interacted = true
+                end
+                if ctx:menu_item("Remove Link") then
+                    modulator_module.remove_param_link(fx, param_idx)
+                    -- Clear state
+                    if state and fx_guid then
+                        if state.link_baselines then state.link_baselines[link_key] = nil end
+                        if state.link_bipolar then state.link_bipolar[link_key] = nil end
+                        if state.baseline_formatted then state.baseline_formatted[link_key] = nil end
+                        if state.link_disabled then state.link_disabled[link_key] = nil end
+                        if state.link_saved_scale then state.link_saved_scale[link_key] = nil end
+                    end
+                    interacted = true
+                end
+                if ctx:menu_item("Bake to Automation") then
+                    -- Find the modulator from the modulators list (first one that matches link.effect)
+                    local modulator = nil
+                    for _, mod in ipairs(modulators) do
+                        -- Use first available modulator for now
+                        -- TODO: match by link.effect index if multiple modulators
+                        modulator = mod
+                        break
+                    end
+
+                    if modulator and state then
+                        -- Open bake modal like the sidebar does
+                        local config = require('lib.core.config')
+                        if config.get('bake_show_range_picker') then
+                            -- Open bake modal for this specific link
+                            state.bake_modal = state.bake_modal or {}
+                            state.bake_modal[fx_guid] = {
+                                open = true,
+                                link = { param_idx = param_idx, scale = link.scale, baseline = link.baseline },
+                                modulator = modulator,
+                                fx = fx
+                            }
+                        else
+                            -- Use default range directly
+                            local bake_options = {
+                                range_mode = config.get('bake_default_range_mode'),
+                                disable_link = config.get('bake_disable_link_after')
+                            }
+                            local current_scale = link.scale
+                            local ok, result, msg = pcall(function()
+                                return bake_module.bake_to_automation(track, modulator, fx, param_idx, bake_options)
+                            end)
+                            if ok and result then
+                                reaper.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
+                                if bake_options.disable_link then
+                                    state.link_saved_scale = state.link_saved_scale or {}
+                                    state.link_disabled = state.link_disabled or {}
+                                    state.link_saved_scale[link_key] = current_scale
+                                    state.link_disabled[link_key] = true
+                                    state_module.save_link_scales()
+                                end
+                            elseif not ok then
+                                reaper.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
+                            else
+                                reaper.ShowConsoleMsg("SideFX: " .. tostring(msg or "No automation created") .. "\n")
+                            end
+                        end
+                    end
+                    interacted = true
+                end
+                ctx:separator()
+            end
+
+            -- Link to modulator options
+            if #modulators > 0 then
+                ctx:text_disabled("Link to Modulator")
+                ctx:separator()
+                for i, mod in ipairs(modulators) do
+                    local mod_name = "LFO " .. i
+                    if ctx:menu_item(mod_name) then
+                        -- Check modifier keys for link options
+                        local shift = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+                        local ctrl = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Ctrl())
+                        local alt = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Alt())
+
+                        -- Determine depth: Shift=100%, Alt=inverted, default=50%
+                        local depth = 0.5
+                        if shift then depth = 1.0 end
+                        if alt then depth = -depth end
+
+                        -- Determine bipolar: Ctrl=bipolar
+                        local is_bipolar = ctrl
+
+                        local PARAM_OUTPUT = 3  -- slider4 output
+                        local initial_value = fx:get_param_normalized(param_idx) or 0
+                        local success = fx:create_param_link(mod, PARAM_OUTPUT, param_idx, depth)
+                        if success then
+                            -- Store baseline and initialize link state
+                            local plink_prefix = string.format("param.%d.plink.", param_idx)
+                            local mod_prefix = string.format("param.%d.mod.", param_idx)
+                            fx:set_named_config_param(mod_prefix .. "baseline", tostring(initial_value))
+
+                            -- Set offset for bipolar mode
+                            local offset = is_bipolar and "-0.5" or "0"
+                            fx:set_named_config_param(plink_prefix .. "offset", offset)
+
+                            local link_key = fx_guid .. "_" .. param_idx
+                            if state then
+                                state.link_baselines = state.link_baselines or {}
+                                state.link_baselines[link_key] = initial_value
+                                state.link_bipolar = state.link_bipolar or {}
+                                state.link_bipolar[link_key] = is_bipolar
+                            end
+                            interacted = true
+                        end
+                    end
+                end
+                ctx:separator()
+                ctx:text_disabled("Shift: 100%  Ctrl: Bipolar  Alt: Invert")
+            else
+                ctx:text_disabled("No modulators")
+                ctx:text_disabled("Add LFO first")
+            end
+            ctx:end_popup()
         end
 
         -- Show unit next to slider (override or detected) - unless hide_label is set
@@ -257,17 +491,21 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
             local max_mod = math.min(1, math.max(range_start, range_end))
             local range_x1 = slider_x + min_mod * slider_w
             local range_x2 = slider_x + max_mod * slider_w
+            -- Use greyed out colors if link is disabled
+            local range_color = is_link_disabled and 0x55667766 or 0x88CCFFAA
+            local indicator_color = is_link_disabled and 0x888888FF or 0xFFFFFFFF
+
             r.ImGui_DrawList_AddRectFilled(draw_list,
                 range_x1, slider_y + slider_h - 3,
                 range_x2, slider_y + slider_h,
-                0x88CCFFAA)  -- Blue range indicator at bottom
-            
+                range_color)  -- Range indicator at bottom
+
             -- Draw moving indicator at current modulated value
             local indicator_x = slider_x + param_val * slider_w
             r.ImGui_DrawList_AddRectFilled(draw_list,
                 indicator_x - 2, slider_y,
                 indicator_x + 2, slider_y + slider_h,
-                0xFFFFFFFF)  -- White indicator
+                indicator_color)  -- Value indicator
         end
 
         ctx:pop_style_var(1)

@@ -194,7 +194,7 @@ local function cleanup_device_sends(device_container, dest_track)
 
     for child in iter do
         local ok_name, name = pcall(function() return child:get_name() end)
-        if ok_name and name and (name:match("SideFX_Modulator") or name:match("SideFX Modulator")) then
+        if ok_name and name and name:match("SideFX[_ ]Modulator") then
             -- This is a modulator - check if it has an external source
             local ok_guid, mod_guid = pcall(function() return child:get_guid() end)
             if ok_guid and mod_guid and state.modulator_source_track and state.modulator_source_track[mod_guid] then
@@ -224,7 +224,7 @@ local function get_device_modulators(device_container)
 
     for child in iter do
         local ok_name, name = pcall(function() return child:get_name() end)
-        if ok_name and name and (name:match("SideFX_Modulator") or name:match("SideFX Modulator")) then
+        if ok_name and name and name:match("SideFX[_ ]Modulator") then
             table.insert(modulators, child)
         end
     end
@@ -722,132 +722,6 @@ local function get_existing_param_links(fx, expanded_modulator, PARAM)
     end
 
     return existing_links
-end
-
--- Helper: Get exposed parameters for a plugin (from param_selections)
--- Returns array of param indices, or nil if no selections configured
-local function get_exposed_params(fx, state)
-    -- Get the FX's GUID to look up original name
-    local ok_guid, fx_guid = pcall(function() return fx:get_guid() end)
-    if not ok_guid or not fx_guid then return nil end
-
-    -- Try to get original plugin name (stored when FX was added)
-    local original_name = state_module.get_fx_original_name(fx_guid)
-
-    -- If no stored original name, try to get it from the FX directly
-    if not original_name then
-        local ok_name, name = pcall(function() return fx:get_name() end)
-        if ok_name and name then
-            original_name = name
-        end
-    end
-
-    if not original_name then return nil end
-
-    -- Try exact match first
-    if state.param_selections and state.param_selections[original_name] then
-        return state.param_selections[original_name]
-    end
-
-    -- Try with stripped D-container prefixes (e.g., "D1: VST: ..." -> "VST: ...")
-    local naming = require('lib.utils.naming')
-    local clean_name = naming.strip_sidefx_prefixes(original_name)
-    if clean_name ~= original_name and state.param_selections and state.param_selections[clean_name] then
-        return state.param_selections[clean_name]
-    end
-
-    -- Try matching stored keys against clean name
-    if state.param_selections then
-        for key, selections in pairs(state.param_selections) do
-            local key_clean = naming.strip_sidefx_prefixes(key)
-            if key_clean == clean_name and #selections > 0 then
-                return selections
-            end
-        end
-    end
-
-    return nil
-end
-
--- Helper: Draw link parameter dropdown
-local function draw_link_param_dropdown(ctx, guid, fx, expanded_modulator, existing_links, state, PARAM)
-    local interacted = false
-
-    ctx:same_line()
-
-    local target_device = fx
-    if target_device then
-        local ok_params, param_count = pcall(function() return target_device:get_num_params() end)
-        if ok_params and param_count and param_count > 0 then
-            -- Get exposed params (user-selected) or nil for all params
-            local exposed_params = get_exposed_params(target_device, state)
-            local has_exposed = exposed_params and #exposed_params > 0
-
-            -- Build set of exposed param indices for fast lookup
-            local exposed_set = {}
-            if has_exposed then
-                for _, idx in ipairs(exposed_params) do
-                    exposed_set[idx] = true
-                end
-            end
-
-            local current_param_name = "Link..."
-            ctx:set_next_item_width(-1)
-            if ctx:begin_combo("##link_param_" .. guid, current_param_name) then
-                for param_idx = 0, param_count - 1 do
-                    -- Only show exposed params if configured, otherwise show all
-                    local should_show = not has_exposed or exposed_set[param_idx]
-
-                    if should_show then
-                        local ok_pname, param_name = pcall(function() return target_device:get_param_name(param_idx) end)
-                        if ok_pname and param_name then
-                            local is_linked = false
-                            for _, link in ipairs(existing_links) do
-                                if link.param_idx == param_idx then
-                                    is_linked = true
-                                    break
-                                end
-                            end
-                            if ctx:selectable(param_name .. (is_linked and " ✓" or ""), false) then
-                                local initial_value = target_device:get_param_normalized(param_idx) or 0
-                                local default_depth = 0.5
-                                local success = target_device:create_param_link(
-                                    expanded_modulator,
-                                    PARAM.PARAM_OUTPUT,
-                                    param_idx,
-                                    default_depth
-                                )
-                                if success then
-                                    local plink_prefix = string.format("param.%d.plink.", param_idx)
-                                    local mod_prefix = string.format("param.%d.mod.", param_idx)
-                                    target_device:set_named_config_param(mod_prefix .. "baseline", tostring(initial_value))
-                                    target_device:set_named_config_param(plink_prefix .. "offset", "0")
-
-                                    local link_key = guid .. "_" .. param_idx
-                                    state.link_baselines = state.link_baselines or {}
-                                    state.link_baselines[link_key] = initial_value
-                                    state.link_bipolar = state.link_bipolar or {}
-                                    state.link_bipolar[link_key] = false
-
-                                    interacted = true
-                                end
-                            end
-                        end
-                    end
-                end
-                ctx:end_combo()
-            end
-            if ctx:is_item_hovered() then
-                local tooltip = "Link to parameter"
-                if has_exposed then
-                    tooltip = tooltip .. "\n(Showing " .. #exposed_params .. " exposed params)"
-                end
-                ctx:set_tooltip(tooltip)
-            end
-        end
-    end
-
-    return interacted
 end
 
 -- Helper: Draw advanced settings popup

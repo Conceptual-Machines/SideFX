@@ -541,6 +541,22 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
         opts.fx_guid = guid  -- Pass guid for building link keys
         -- opts.plugin_name is set in M.draw before this function is called
 
+        -- Get modulators for right-click linking in params
+        local modulators = {}
+        if container then
+            local ok_iter, iter = pcall(function() return container:iter_container_children() end)
+            if ok_iter and iter then
+                for child in iter do
+                    local ok_name, child_name = pcall(function() return child:get_name() end)
+                    if ok_name and child_name and child_name:match("SideFX[_ ]Modulator") then
+                        table.insert(modulators, child)
+                    end
+                end
+            end
+        end
+        opts.modulators = modulators
+        opts.track = state.track  -- Pass track for bake operations
+
         if device_column.draw(ctx, is_device_collapsed, params_column, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts, name, fx_naming, draw_sidebar_column, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, colors) then
             interacted = true
         end

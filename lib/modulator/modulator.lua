@@ -32,6 +32,7 @@ end
 --------------------------------------------------------------------------------
 
 M.MODULATOR_JSFX = "JS:SideFX/SideFX_Modulator"
+M.MODULATOR_DISPLAY_PATTERN = "SideFX[_ ]Modulator"  -- Pattern for matching display name
 M.MOD_OUTPUT_PARAM = 3  -- slider4 in JSFX (0-indexed)
 
 --------------------------------------------------------------------------------
@@ -47,7 +48,7 @@ function M.find_modulators_on_track()
     for fx_info in state.track:iter_all_fx_flat() do
         local fx = fx_info.fx
         local name = fx:get_name()
-        if name and (name:find(M.MODULATOR_JSFX) or name:find("SideFX Modulator")) then
+        if name and name:match(M.MODULATOR_DISPLAY_PATTERN) then
             table.insert(modulators, {
                 fx = fx,
                 fx_idx = fx.pointer,
@@ -283,7 +284,7 @@ function M.get_modulator_links(mod_fx)
         local fx_name = fx:get_name()
         local fx_idx = fx.pointer
         -- Skip modulators and containers
-        if fx_name and not (fx_name:find(M.MODULATOR_JSFX) or fx_name:find("SideFX Modulator") or fx_name:find("Container")) then
+        if fx_name and not (fx_name:match(M.MODULATOR_DISPLAY_PATTERN) or fx_name:find("Container")) then
             local param_count = fx:get_num_params()
             for param_idx = 0, param_count - 1 do
                 local plink_prefix = string.format("param.%d.plink.", param_idx)
@@ -315,7 +316,7 @@ end
 function M.is_modulator_fx(fx)
     if not fx then return false end
     local name = fx:get_name()
-    return name and (name:find(M.MODULATOR_JSFX) or name:find("SideFX Modulator"))
+    return name and name:match(M.MODULATOR_DISPLAY_PATTERN)
 end
 
 --------------------------------------------------------------------------------

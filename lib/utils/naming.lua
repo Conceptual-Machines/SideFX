@@ -129,8 +129,7 @@ end
 -- @return boolean
 function M.is_modulator_name(name)
     if not name then return false end
-    return name:find("SideFX_Modulator") ~= nil
-        or name:find("SideFX Modulator") ~= nil
+    return name:match("SideFX[_ ]Modulator") ~= nil
 end
 
 --------------------------------------------------------------------------------
