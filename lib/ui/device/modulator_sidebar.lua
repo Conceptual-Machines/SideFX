@@ -681,39 +681,75 @@ end
 local function get_existing_param_links(fx, expanded_modulator, PARAM)
     local existing_links = {}
     local expected_mod_idx = nil
-    local my_parent = fx:get_parent_container()
-    
-    if my_parent then
-        local children = my_parent:get_container_children()
-        local mod_guid = expanded_modulator:get_guid()
-        for i, child in ipairs(children) do
-            if child:get_guid() == mod_guid then
-                expected_mod_idx = i - 1
-                break
-            end
+    local state = state_module.state
+
+    -- Get FX GUID first (works even if pointer is stale)
+    local ok_fx_guid, fx_guid = pcall(function() return fx:get_guid() end)
+    if not ok_fx_guid or not fx_guid then
+        return existing_links
+    end
+
+    -- Re-find fx by GUID to ensure fresh pointer (handles stale references after FX list changes)
+    if state.track then
+        local fresh_fx = state.track:find_fx_by_guid(fx_guid)
+        if fresh_fx then
+            fx = fresh_fx
         end
     end
-    
-    if expected_mod_idx ~= nil then
-        local ok_params, param_count = pcall(function() return fx:get_num_params() end)
-        if ok_params and param_count then
-            for param_idx = 0, param_count - 1 do
-                local link_info = fx:get_param_link_info(param_idx)
-                if link_info and link_info.effect == expected_mod_idx and link_info.param == PARAM.PARAM_OUTPUT then
-                    local ok_pname, param_name = pcall(function() return fx:get_param_name(param_idx) end)
-                    if ok_pname and param_name then
-                        table.insert(existing_links, {
-                            param_idx = param_idx,
-                            param_name = param_name,
-                            scale = link_info.scale or 1.0,
-                            offset = link_info.offset or 0
-                        })
-                    end
+
+    -- Get modulator GUID and re-find if needed
+    local ok_mod_guid, mod_guid = pcall(function() return expanded_modulator:get_guid() end)
+    if not ok_mod_guid or not mod_guid then
+        return existing_links
+    end
+
+    if state.track then
+        local fresh_mod = state.track:find_fx_by_guid(mod_guid)
+        if fresh_mod then
+            expanded_modulator = fresh_mod
+        end
+    end
+
+    local ok_parent, my_parent = pcall(function() return fx:get_parent_container() end)
+    if not ok_parent or not my_parent then
+        return existing_links
+    end
+
+    local ok_children, children = pcall(function() return my_parent:get_container_children() end)
+    if not ok_children or not children then
+        return existing_links
+    end
+
+    for i, child in ipairs(children) do
+        local ok_child_guid, child_guid = pcall(function() return child:get_guid() end)
+        if ok_child_guid and child_guid == mod_guid then
+            expected_mod_idx = i - 1
+            break
+        end
+    end
+
+    if expected_mod_idx == nil then
+        return existing_links
+    end
+
+    local ok_params, param_count = pcall(function() return fx:get_num_params() end)
+    if ok_params and param_count then
+        for param_idx = 0, param_count - 1 do
+            local link_info = fx:get_param_link_info(param_idx)
+            if link_info and link_info.effect == expected_mod_idx and link_info.param == PARAM.PARAM_OUTPUT then
+                local ok_pname, param_name = pcall(function() return fx:get_param_name(param_idx) end)
+                if ok_pname and param_name then
+                    table.insert(existing_links, {
+                        param_idx = param_idx,
+                        param_name = param_name,
+                        scale = link_info.scale or 1.0,
+                        offset = link_info.offset or 0
+                    })
                 end
             end
         end
     end
-    
+
     return existing_links
 end
 
@@ -1113,6 +1149,19 @@ end
 -- Helper: Draw existing parameter links
 local function draw_existing_links(ctx, guid, fx, existing_links, state, expanded_modulator, opts)
     local interacted = false
+
+    -- Re-find fx and modulator by GUID to ensure fresh pointers
+    local ok_fx_guid, fx_guid = pcall(function() return fx:get_guid() end)
+    if ok_fx_guid and fx_guid and state.track then
+        local fresh_fx = state.track:find_fx_by_guid(fx_guid)
+        if fresh_fx then fx = fresh_fx end
+    end
+
+    local ok_mod_guid, mod_guid = pcall(function() return expanded_modulator:get_guid() end)
+    if ok_mod_guid and mod_guid and state.track then
+        local fresh_mod = state.track:find_fx_by_guid(mod_guid)
+        if fresh_mod then expanded_modulator = fresh_mod end
+    end
 
     if #existing_links > 0 then
         state.link_bipolar = state.link_bipolar or {}
@@ -1682,114 +1731,113 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
         end
     end
 
-    -- Draw bake modal popup
+    -- Draw bake modal popup (only for this device's modal)
     state.bake_modal = state.bake_modal or {}
-    for modal_guid, modal_state in pairs(state.bake_modal) do
-        if modal_state.open then
-            local popup_id = "Bake to Automation##bake_modal_" .. modal_guid
-            if not modal_state.opened_frame then
-                r.ImGui_OpenPopup(ctx.ctx, popup_id)
-                modal_state.opened_frame = true
-            end
+    local modal_state = state.bake_modal[guid]
+    if modal_state and modal_state.open then
+        local popup_id = "Bake to Automation##bake_modal_" .. guid
+        if not modal_state.opened_frame then
+            r.ImGui_OpenPopup(ctx.ctx, popup_id)
+            modal_state.opened_frame = true
+        end
 
-            local popup_flags = r.ImGui_WindowFlags_AlwaysAutoResize()
-            local visible = r.ImGui_BeginPopup(ctx.ctx, popup_id, popup_flags)
-            if visible then
-                local is_all_links = modal_state.link == nil
-                local title = is_all_links and "Bake All Parameters" or ("Bake: " .. (modal_state.link and modal_state.link.param_name or ""))
-                ctx:text(title)
-                ctx:separator()
-                ctx:spacing()
+        local popup_flags = r.ImGui_WindowFlags_AlwaysAutoResize()
+        local visible = r.ImGui_BeginPopup(ctx.ctx, popup_id, popup_flags)
+        if visible then
+            local is_all_links = modal_state.link == nil
+            local title = is_all_links and "Bake All Parameters" or ("Bake: " .. (modal_state.link and modal_state.link.param_name or ""))
+            ctx:text(title)
+            ctx:separator()
+            ctx:spacing()
 
-                ctx:text("Select range:")
-                ctx:spacing()
+            ctx:text("Select range:")
+            ctx:spacing()
 
-                -- Range mode buttons (one per line for clarity)
-                local default_range = config.get('bake_default_range_mode')
-                for mode_val = 1, 4 do
-                    local mode_label = modulator_bake.RANGE_MODE_LABELS[mode_val]
-                    if mode_label then
-                        local is_default = mode_val == default_range
-                        local btn_label = mode_label .. (is_default and " *" or "")
+            -- Range mode buttons (one per line for clarity)
+            local default_range = config.get('bake_default_range_mode')
+            for mode_val = 1, 4 do
+                local mode_label = modulator_bake.RANGE_MODE_LABELS[mode_val]
+                if mode_label then
+                    local is_default = mode_val == default_range
+                    local btn_label = mode_label .. (is_default and " *" or "")
 
-                        if ctx:button(btn_label .. "##range_" .. mode_val, -1, 0) then
-                            -- Perform the bake
-                            local bake_options = {
-                                range_mode = mode_val,
-                                disable_link = config.get('bake_disable_link_after')
-                            }
+                    if ctx:button(btn_label .. "##range_" .. mode_val, -1, 0) then
+                        -- Perform the bake
+                        local bake_options = {
+                            range_mode = mode_val,
+                            disable_link = config.get('bake_disable_link_after')
+                        }
 
-                            local ok, result, msg
-                            if is_all_links then
-                                ok, result, msg = pcall(function()
-                                    return modulator_bake.bake_all_links(
-                                        state.track,
-                                        modal_state.modulator,
-                                        modal_state.fx,
-                                        modal_state.links,
-                                        bake_options
-                                    )
-                                end)
-                            else
-                                ok, result, msg = pcall(function()
-                                    return modulator_bake.bake_to_automation(
-                                        state.track,
-                                        modal_state.modulator,
-                                        modal_state.fx,
-                                        modal_state.link.param_idx,
-                                        bake_options
-                                    )
-                                end)
-                            end
+                        local ok, result, msg
+                        if is_all_links then
+                            ok, result, msg = pcall(function()
+                                return modulator_bake.bake_all_links(
+                                    state.track,
+                                    modal_state.modulator,
+                                    modal_state.fx,
+                                    modal_state.links,
+                                    bake_options
+                                )
+                            end)
+                        else
+                            ok, result, msg = pcall(function()
+                                return modulator_bake.bake_to_automation(
+                                    state.track,
+                                    modal_state.modulator,
+                                    modal_state.fx,
+                                    modal_state.link.param_idx,
+                                    bake_options
+                                )
+                            end)
+                        end
 
-                            if ok and result then
-                                r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
-                                -- If disable_link was set, update state
-                                if bake_options.disable_link then
-                                    state.link_saved_scale = state.link_saved_scale or {}
-                                    state.link_disabled = state.link_disabled or {}
-                                    if is_all_links then
-                                        for _, lnk in ipairs(modal_state.links) do
-                                            local link_key = modal_guid .. "_" .. lnk.param_idx
-                                            state.link_saved_scale[link_key] = lnk.scale
-                                            state.link_disabled[link_key] = true
-                                        end
-                                    else
-                                        local link_key = modal_guid .. "_" .. modal_state.link.param_idx
-                                        state.link_saved_scale[link_key] = modal_state.link.scale
+                        if ok and result then
+                            r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
+                            -- If disable_link was set, update state
+                            if bake_options.disable_link then
+                                state.link_saved_scale = state.link_saved_scale or {}
+                                state.link_disabled = state.link_disabled or {}
+                                if is_all_links then
+                                    for _, lnk in ipairs(modal_state.links) do
+                                        local link_key = guid .. "_" .. lnk.param_idx
+                                        state.link_saved_scale[link_key] = lnk.scale
                                         state.link_disabled[link_key] = true
                                     end
+                                else
+                                    local link_key = guid .. "_" .. modal_state.link.param_idx
+                                    state.link_saved_scale[link_key] = modal_state.link.scale
+                                    state.link_disabled[link_key] = true
                                 end
-                            elseif not ok then
-                                r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
-                            else
-                                r.ShowConsoleMsg("SideFX: " .. tostring(msg or "Bake failed") .. "\n")
                             end
-
-                            modal_state.open = false
-                            modal_state.opened_frame = nil
-                            r.ImGui_CloseCurrentPopup(ctx.ctx)
-                            interacted = true
+                        elseif not ok then
+                            r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
+                        else
+                            r.ShowConsoleMsg("SideFX: " .. tostring(msg or "Bake failed") .. "\n")
                         end
+
+                        modal_state.open = false
+                        modal_state.opened_frame = nil
+                        r.ImGui_CloseCurrentPopup(ctx.ctx)
+                        interacted = true
                     end
                 end
+            end
 
-                ctx:spacing()
-                ctx:separator()
-                ctx:spacing()
+            ctx:spacing()
+            ctx:separator()
+            ctx:spacing()
 
-                if ctx:button("Cancel##cancel_bake", -1, 0) then
-                    modal_state.open = false
-                    modal_state.opened_frame = nil
-                    r.ImGui_CloseCurrentPopup(ctx.ctx)
-                end
-
-                r.ImGui_EndPopup(ctx.ctx)
-            else
-                -- Popup was closed externally
+            if ctx:button("Cancel##cancel_bake", -1, 0) then
                 modal_state.open = false
                 modal_state.opened_frame = nil
+                r.ImGui_CloseCurrentPopup(ctx.ctx)
             end
+
+            r.ImGui_EndPopup(ctx.ctx)
+        else
+            -- Popup was closed externally
+            modal_state.open = false
+            modal_state.opened_frame = nil
         end
     end
 

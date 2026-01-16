@@ -427,20 +427,26 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
     local resolution = options.resolution or M.DEFAULT_OPTIONS.resolution
     local range_mode = options.range_mode or M.DEFAULT_OPTIONS.range_mode
 
-    -- DEBUG: Log inputs
-    r.ShowConsoleMsg(string.format("=== BAKE DEBUG ===\n"))
-    r.ShowConsoleMsg(string.format("  modulator: %s (type=%s)\n", tostring(modulator), type(modulator)))
-    r.ShowConsoleMsg(string.format("  target_fx: %s (type=%s)\n", tostring(target_fx), type(target_fx)))
-    r.ShowConsoleMsg(string.format("  param_idx: %s\n", tostring(param_idx)))
-    r.ShowConsoleMsg(string.format("  range_mode: %s\n", tostring(range_mode)))
+    -- Re-find FX by GUID to ensure fresh pointers (indices can change after adding/removing FX)
+    local ok_mod_guid, mod_guid = pcall(function() return modulator:get_guid() end)
+    local ok_target_guid, target_guid = pcall(function() return target_fx:get_guid() end)
+
+    if not ok_mod_guid or not mod_guid then
+        return false, "Modulator reference is invalid"
+    end
+    if not ok_target_guid or not target_guid then
+        return false, "Target FX reference is invalid"
+    end
+
+    modulator = track:find_fx_by_guid(mod_guid)
+    target_fx = track:find_fx_by_guid(target_guid)
+
+    if not modulator or not target_fx then
+        return false, "Could not find modulator or target FX (may have been deleted)"
+    end
 
     -- Get link information
     local link_info = M.get_link_info(target_fx, param_idx)
-    r.ShowConsoleMsg(string.format("  link_info: %s\n", link_info and "found" or "nil"))
-    if link_info then
-        r.ShowConsoleMsg(string.format("    baseline=%.3f, scale=%.3f, offset=%.3f\n",
-            link_info.baseline or 0, link_info.scale or 0, link_info.offset or 0))
-    end
     if not link_info then
         return false, "Parameter is not linked to a modulator"
     end
@@ -448,10 +454,6 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
     -- Get cycle duration and trigger mode
     local cycle_duration = M.get_cycle_duration(modulator)
     local trigger_mode = M.get_trigger_mode(modulator)
-    r.ShowConsoleMsg(string.format("  cycle_duration: %.3fs\n", cycle_duration))
-    r.ShowConsoleMsg(string.format("  trigger_mode: %d (%s)\n", trigger_mode,
-        trigger_mode == 0 and "Free" or trigger_mode == 1 and "Transport" or
-        trigger_mode == 2 and "MIDI" or trigger_mode == 3 and "Audio" or "Unknown"))
 
     -- Determine time range based on range mode
     local start_time, end_time, range_error = M.get_time_range(track, range_mode)
@@ -598,6 +600,24 @@ function M.bake_all_links(track, modulator, target_fx, links, options)
 
     if not links or #links == 0 then
         return false, "No links provided"
+    end
+
+    -- Re-find FX by GUID to ensure fresh pointers
+    local ok_mod_guid, mod_guid = pcall(function() return modulator:get_guid() end)
+    local ok_target_guid, target_guid = pcall(function() return target_fx:get_guid() end)
+
+    if not ok_mod_guid or not mod_guid then
+        return false, "Modulator reference is invalid"
+    end
+    if not ok_target_guid or not target_guid then
+        return false, "Target FX reference is invalid"
+    end
+
+    modulator = track:find_fx_by_guid(mod_guid)
+    target_fx = track:find_fx_by_guid(target_guid)
+
+    if not modulator or not target_fx then
+        return false, "Could not find modulator or target FX (may have been deleted)"
     end
 
     local baked_count = 0

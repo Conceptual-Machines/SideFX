@@ -15,8 +15,6 @@ slider6:1<0,1,0.01>-Depth
 slider20:0<0,3,1{Free,Transport,MIDI,Audio}>-Trigger Mode
 slider21:0<0,1,1{This Track,MIDI Bus}>-MIDI Source
 slider22:0<0,127,1>-MIDI Note (0=any)
-// MIDI Gate Mode: 0=Trigger (runs continuously after note-on), 1=Gate (stops on note-off)
-slider94:0<0,1,1{Trigger,Gate}>-MIDI Gate Mode
 slider23:0.5<0,1,0.01>-Audio Threshold
 slider24:100<1,2000,1>-Attack (ms)
 slider25:500<1,5000,1>-Release (ms)
@@ -103,6 +101,9 @@ slider92:0<0,1,0.001>-Input Level (Debug)
 
 // Triggered state (read-only, for UI indicator)
 slider93:0<0,1,1>-Triggered
+
+// MIDI Gate Mode: 0=Trigger (runs continuously after note-on), 1=Gate (stops on note-off)
+slider94:0<0,1,1{Trigger,Gate}>-MIDI Gate Mode
 
 @init
 MAX_NODES = 16;
@@ -450,6 +451,9 @@ trigger_mode == 2 ? (
 
 // Read MIDI gate mode
 midi_gate_mode = slider94;
+
+// DEBUG: Expose gate mode for UI verification (temporary)
+// slider92 = midi_gate_mode;  // Uncomment to see gate mode value
 
 while (midirecv(offset, msg1, msg2, msg3)) (
   trigger_mode == 2 ? (
