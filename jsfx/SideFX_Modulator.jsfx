@@ -129,6 +129,7 @@ last_play_state = 0;
 // Sample-accurate MIDI triggering
 midi_trigger_sample = -1;  // Sample offset within block where trigger occurs (-1 = none)
 current_block_sample = 0;  // Current sample position within block
+midi_notes_held = 0;  // Count of currently held MIDI notes (for proper note-off handling)
 
 // Drag state
 drag_node = -1;
@@ -455,10 +456,17 @@ while (midirecv(offset, msg1, msg2, msg3)) (
       (midi_note == 0 || note == midi_note) ? (
         midi_trigger_sample = offset;  // Store sample offset for @sample
         triggered = 1;
+        midi_notes_held += 1;
         trigger_pulse_counter = 10;  // Flash for ~10 blocks
       );
     );
-    // Note off is ignored - LFO continues running after being triggered
+    // Note off - decrement note count
+    (status == 0x80 || (status == 0x90 && velocity == 0)) ? (
+      (midi_note == 0 || note == midi_note) ? (
+        midi_notes_held = max(0, midi_notes_held - 1);
+        midi_notes_held == 0 ? triggered = 0;
+      );
+    );
   );
   midisend(offset, msg1, msg2, msg3);
 );

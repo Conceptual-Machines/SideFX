@@ -231,6 +231,9 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
         interacted = true
     end
     ctx:pop_style_color(5)
+    if r.ImGui_IsItemHovered(ctx.ctx) then
+        ctx:set_tooltip(string.format("Gain: %.1f dB\nShift+drag: Fine control\nCtrl+click: Reset to 0 dB\nDouble-click value: Text input", gain_db))
+    end
 
     -- dB label below fader
     local label_h = 16
