@@ -904,7 +904,10 @@ local function draw_analyzer_popouts(ctx)
             -- Visualization - use available space
             local avail_w, avail_h = ctx:get_content_region_avail()
             local viz_h = avail_h - 60  -- Leave room for controls
-            drawing.draw_oscilloscope(ctx, "##scope_popout_viz", avail_w, viz_h, slot)
+            local scope_pop_hovered = drawing.draw_oscilloscope(ctx, "##scope_popout_viz", avail_w, viz_h, slot)
+            if scope_pop_hovered then
+                ctx:set_tooltip("Oscilloscope - Stereo waveform display\nL (green) / R (magenta)\nLogarithmic dB scale")
+            end
 
             -- Controls
             if scope_fx then
@@ -960,7 +963,10 @@ local function draw_analyzer_popouts(ctx)
             -- Visualization - use available space
             local avail_w, avail_h = ctx:get_content_region_avail()
             local viz_h = avail_h - 60  -- Leave room for controls
-            drawing.draw_spectrum(ctx, "##spectrum_popout_viz", avail_w, viz_h, slot)
+            local spectrum_pop_hovered = drawing.draw_spectrum(ctx, "##spectrum_popout_viz", avail_w, viz_h, slot)
+            if spectrum_pop_hovered then
+                ctx:set_tooltip("Spectrum Analyzer - Frequency response\nLogarithmic frequency scale (20Hz-20kHz)\nClick/drag: Adjust floor dB")
+            end
 
             -- Controls
             if spectrum_fx then
@@ -1045,7 +1051,10 @@ local function draw_analyzers(ctx, avail_height)
             ctx:pop_style_color(2)
 
             -- Visualization
-            drawing.draw_oscilloscope(ctx, "##scope_viz", analyzer_w, analyzer_h, slot)
+            local scope_hovered = drawing.draw_oscilloscope(ctx, "##scope_viz", analyzer_w, analyzer_h, slot)
+            if scope_hovered then
+                ctx:set_tooltip("Oscilloscope - Stereo waveform display\nL (green) / R (magenta)\nLogarithmic dB scale")
+            end
 
             -- Controls
             if scope_fx then
@@ -1097,7 +1106,10 @@ local function draw_analyzers(ctx, avail_height)
             ctx:pop_style_color(2)
 
             -- Visualization
-            drawing.draw_spectrum(ctx, "##spectrum_viz", analyzer_w, analyzer_h, slot)
+            local spectrum_hovered = drawing.draw_spectrum(ctx, "##spectrum_viz", analyzer_w, analyzer_h, slot)
+            if spectrum_hovered then
+                ctx:set_tooltip("Spectrum Analyzer - Frequency response\nLogarithmic frequency scale (20Hz-20kHz)\nClick/drag: Adjust floor dB")
+            end
 
             -- Controls
             if spectrum_fx then
