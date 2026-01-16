@@ -213,8 +213,11 @@ end
 function M.get_midi_notes(track, start_time, end_time)
     local notes = {}
 
+    r.ShowConsoleMsg(string.format("  get_midi_notes: looking for notes in range %.3f - %.3f\n", start_time, end_time))
+
     -- Iterate through all media items on the track
     local item_count = r.CountTrackMediaItems(track.pointer)
+    r.ShowConsoleMsg(string.format("  found %d items on track\n", item_count))
     for i = 0, item_count - 1 do
         local item = r.GetTrackMediaItem(track.pointer, i)
         if item then
@@ -226,15 +229,26 @@ function M.get_midi_notes(track, start_time, end_time)
             local take = r.GetActiveTake(item)
             if take and r.TakeIsMIDI(take) then
                 local source = r.GetMediaItemTake_Source(take)
-                local source_len = r.GetMediaSourceLength(source)
+                local loop_enabled = r.GetMediaItemInfo_Value(item, "B_LOOPSRC") == 1
+
+                -- Get actual source/loop length using PCM_Source_GetSectionInfo
+                -- This returns the correct loop length for MIDI items
+                local _, _, section_len = r.PCM_Source_GetSectionInfo(source)
+                local source_len = section_len > 0 and section_len or r.GetMediaSourceLength(source)
+
+                -- num_loops: if source is shorter than item and loop enabled, calculate loops
+                local num_loops = (loop_enabled and source_len > 0 and source_len < item_len)
+                    and math.ceil(item_len / source_len) or 1
+
+                -- Get all MIDI notes in this take
+                local _, note_count = r.MIDI_CountEvts(take)
+
+                r.ShowConsoleMsg(string.format("  Item %d: pos=%.3f item_len=%.3f source_len=%.3f loop=%s num_loops=%d\n",
+                    i, item_pos, item_len, source_len, loop_enabled and "yes" or "no", num_loops))
 
                 -- Skip items completely outside our time range
                 if item_end >= start_time and item_pos <= end_time then
-                    -- Get all MIDI notes in this take
-                    local _, note_count = r.MIDI_CountEvts(take)
-
-                    -- Calculate how many loops fit in the item
-                    local num_loops = math.ceil(item_len / source_len)
+                    r.ShowConsoleMsg(string.format("    note_count=%d\n", note_count))
 
                     for loop = 0, num_loops - 1 do
                         local loop_offset = loop * source_len
@@ -413,8 +427,20 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
     local resolution = options.resolution or M.DEFAULT_OPTIONS.resolution
     local range_mode = options.range_mode or M.DEFAULT_OPTIONS.range_mode
 
+    -- DEBUG: Log inputs
+    r.ShowConsoleMsg(string.format("=== BAKE DEBUG ===\n"))
+    r.ShowConsoleMsg(string.format("  modulator: %s (type=%s)\n", tostring(modulator), type(modulator)))
+    r.ShowConsoleMsg(string.format("  target_fx: %s (type=%s)\n", tostring(target_fx), type(target_fx)))
+    r.ShowConsoleMsg(string.format("  param_idx: %s\n", tostring(param_idx)))
+    r.ShowConsoleMsg(string.format("  range_mode: %s\n", tostring(range_mode)))
+
     -- Get link information
     local link_info = M.get_link_info(target_fx, param_idx)
+    r.ShowConsoleMsg(string.format("  link_info: %s\n", link_info and "found" or "nil"))
+    if link_info then
+        r.ShowConsoleMsg(string.format("    baseline=%.3f, scale=%.3f, offset=%.3f\n",
+            link_info.baseline or 0, link_info.scale or 0, link_info.offset or 0))
+    end
     if not link_info then
         return false, "Parameter is not linked to a modulator"
     end
@@ -422,6 +448,10 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
     -- Get cycle duration and trigger mode
     local cycle_duration = M.get_cycle_duration(modulator)
     local trigger_mode = M.get_trigger_mode(modulator)
+    r.ShowConsoleMsg(string.format("  cycle_duration: %.3fs\n", cycle_duration))
+    r.ShowConsoleMsg(string.format("  trigger_mode: %d (%s)\n", trigger_mode,
+        trigger_mode == 0 and "Free" or trigger_mode == 1 and "Transport" or
+        trigger_mode == 2 and "MIDI" or trigger_mode == 3 and "Audio" or "Unknown"))
 
     -- Determine time range based on range mode
     local start_time, end_time, range_error = M.get_time_range(track, range_mode)
@@ -533,7 +563,7 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
     -- Sort points after batch insert
     r.Envelope_SortPoints(envelope)
 
-    -- Optionally disable parameter link (set scale to 0)
+    -- Optionally disable parameter link (set scale to 0, keeps link visible but inactive)
     if options.disable_link then
         local plink_prefix = string.format("param.%d.plink.", param_idx)
         target_fx:set_named_config_param(plink_prefix .. "scale", "0")

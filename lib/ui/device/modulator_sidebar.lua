@@ -1270,11 +1270,21 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                             range_mode = config.get('bake_default_range_mode'),
                             disable_link = config.get('bake_disable_link_after')
                         }
+                        -- Save current scale before bake (in case we're disabling)
+                        local current_scale = link.scale
                         local ok, result, msg = pcall(function()
                             return modulator_bake.bake_to_automation(state.track, expanded_modulator, fx, link.param_idx, bake_options)
                         end)
                         if ok and result then
                             r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
+                            -- If disable_link was set, update state to track disabled link
+                            if bake_options.disable_link then
+                                local link_key = guid .. "_" .. link.param_idx
+                                state.link_saved_scale = state.link_saved_scale or {}
+                                state.link_disabled = state.link_disabled or {}
+                                state.link_saved_scale[link_key] = current_scale
+                                state.link_disabled[link_key] = true
+                            end
                         elseif not ok then
                             r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
                         else
@@ -1493,11 +1503,26 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                         range_mode = config.get('bake_default_range_mode'),
                                         disable_link = config.get('bake_disable_link_after')
                                     }
+                                    -- Save current scales before bake (in case we're disabling)
+                                    local saved_scales = {}
+                                    for _, lnk in ipairs(existing_links) do
+                                        saved_scales[lnk.param_idx] = lnk.scale
+                                    end
                                     local ok, result, msg = pcall(function()
                                         return modulator_bake.bake_all_links(state.track, expanded_modulator, fx, existing_links, bake_options)
                                     end)
                                     if ok and result then
                                         r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
+                                        -- If disable_link was set, update state for all links
+                                        if bake_options.disable_link then
+                                            state.link_saved_scale = state.link_saved_scale or {}
+                                            state.link_disabled = state.link_disabled or {}
+                                            for _, lnk in ipairs(existing_links) do
+                                                local link_key = guid .. "_" .. lnk.param_idx
+                                                state.link_saved_scale[link_key] = saved_scales[lnk.param_idx]
+                                                state.link_disabled[link_key] = true
+                                            end
+                                        end
                                     elseif not ok then
                                         r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
                                     else
@@ -1689,6 +1714,22 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
 
                             if ok and result then
                                 r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
+                                -- If disable_link was set, update state
+                                if bake_options.disable_link then
+                                    state.link_saved_scale = state.link_saved_scale or {}
+                                    state.link_disabled = state.link_disabled or {}
+                                    if is_all_links then
+                                        for _, lnk in ipairs(modal_state.links) do
+                                            local link_key = modal_guid .. "_" .. lnk.param_idx
+                                            state.link_saved_scale[link_key] = lnk.scale
+                                            state.link_disabled[link_key] = true
+                                        end
+                                    else
+                                        local link_key = modal_guid .. "_" .. modal_state.link.param_idx
+                                        state.link_saved_scale[link_key] = modal_state.link.scale
+                                        state.link_disabled[link_key] = true
+                                    end
+                                end
                             elseif not ok then
                                 r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
                             else
