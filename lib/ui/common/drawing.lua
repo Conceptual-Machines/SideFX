@@ -517,7 +517,7 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
     -- Y-axis grid (dB levels) - logarithmic scale
     -- Display range: 0dB at edge, -48dB at center
     local db_range = 48
-    local db_marks = {0, -6, -12, -18, -24, -36, -48}
+    local db_marks = {0, -12, -24, -36, -48}  -- Fewer marks for cleaner look
     for _, db in ipairs(db_marks) do
         -- Map dB to normalized position (0dB=1, -48dB=0)
         local normalized = (db + db_range) / db_range
@@ -525,9 +525,9 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
         -- Upper and lower lines (positive and negative amplitude)
         r.ImGui_DrawList_AddLine(draw_list, x, center_y - offset, x + width, center_y - offset, grid_color, 1)
         r.ImGui_DrawList_AddLine(draw_list, x, center_y + offset, x + width, center_y + offset, grid_color, 1)
-        -- Labels (only on upper lines to avoid clutter)
-        local label_text = string.format("%ddB", db)
-        r.ImGui_DrawList_AddText(draw_list, x + 2, center_y - offset - 10, label_color, label_text)
+        -- Labels (only on upper lines, smaller text)
+        local label_text = string.format("%d", db)
+        r.ImGui_DrawList_AddText(draw_list, x + 1, center_y - offset - 9, label_color, label_text)
     end
 
     -- X-axis grid (time divisions)
@@ -535,17 +535,15 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
     for i = 1, num_x_divs - 1 do
         local line_x = x + (width * i / num_x_divs)
         r.ImGui_DrawList_AddLine(draw_list, line_x, y, line_x, y + height, grid_color, 1)
-        -- Time label
+        -- Time label (shorter format)
         local t = view_msec * (1 - i / num_x_divs)  -- Time ago from right
         local label_text
-        if t < 1 then
-            label_text = string.format("%.1fms", t)
-        elseif t >= 1000 then
-            label_text = string.format("%.1fs", t/1000)
+        if t >= 1000 then
+            label_text = string.format("%.0fs", t/1000)
         else
-            label_text = string.format("%.0fms", t)
+            label_text = string.format("%.0f", t)
         end
-        r.ImGui_DrawList_AddText(draw_list, line_x + 2, y + height - 12, label_color, label_text)
+        r.ImGui_DrawList_AddText(draw_list, line_x + 2, y + height - 11, label_color, label_text)
     end
 
     -- Helper: convert linear amplitude to logarithmic display position
@@ -572,6 +570,10 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
         return center_y - sign * offset
     end
 
+    -- Track peak values for display
+    local peak_l_pos, peak_l_neg = 0, 0
+    local peak_r_pos, peak_r_neg = 0, 0
+
     -- Draw both channels if we have samples
     if buffer_size > 0 then
         local prev_px_l, prev_py_l
@@ -586,6 +588,12 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
                 -- Clamp samples
                 sample_l = math.max(-1, math.min(1, sample_l))
                 sample_r = math.max(-1, math.min(1, sample_r))
+
+                -- Track peaks (bipolar)
+                if sample_l > peak_l_pos then peak_l_pos = sample_l end
+                if sample_l < peak_l_neg then peak_l_neg = sample_l end
+                if sample_r > peak_r_pos then peak_r_pos = sample_r end
+                if sample_r < peak_r_neg then peak_r_neg = sample_r end
 
                 local px = x + i
                 local py_l = amp_to_log_y(sample_l)
@@ -607,9 +615,23 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
         end
     end
 
-    -- Channel legend
-    r.ImGui_DrawList_AddText(draw_list, x + width - 50, y + 4, color_l, "L")
-    r.ImGui_DrawList_AddText(draw_list, x + width - 35, y + 4, color_r, "R")
+    -- Helper: amplitude to dB string (short format)
+    local function amp_to_db_str(amp)
+        if math.abs(amp) < 0.001 then return "-oo" end
+        local db = 20 * math.log(math.abs(amp), 10)
+        return string.format("%.0f", db)
+    end
+
+    -- Channel legend with bipolar peak values (+peak/-peak dB)
+    local l_pos_str = amp_to_db_str(peak_l_pos)
+    local l_neg_str = amp_to_db_str(peak_l_neg)
+    local r_pos_str = amp_to_db_str(peak_r_pos)
+    local r_neg_str = amp_to_db_str(peak_r_neg)
+
+    -- Show L/R with bipolar peak values (pos/neg dB)
+    local text_x = math.max(x + 2, x + width - 85)  -- Ensure text stays in bounds
+    r.ImGui_DrawList_AddText(draw_list, text_x, y + 3, color_l, string.format("L: %s / %s", l_pos_str, l_neg_str))
+    r.ImGui_DrawList_AddText(draw_list, text_x, y + 14, color_r, string.format("R: %s / %s", r_pos_str, r_neg_str))
 
     -- Border
     r.ImGui_DrawList_AddRect(draw_list, x, y, x + width, y + height, 0x444444FF, 4, 0, 1)
@@ -674,25 +696,25 @@ function M.draw_spectrum(ctx, label, width, height, slot)
     -- Background
     r.ImGui_DrawList_AddRectFilled(draw_list, x, y, x + width, y + height, 0x1A1A1AFF, 4)
 
-    -- Y-axis grid (dB levels) - adapt to floor setting
-    local db_levels = {0, -12, -24, -36, -48, -60, -72, -84, -96, -108, -120}
+    -- Y-axis grid (dB levels) - adapt to floor setting, fewer marks
+    local db_levels = {0, -12, -24, -36, -48, -60}
     for _, db in ipairs(db_levels) do
         if db >= floor_db then
             local norm = (db - floor_db) / (-floor_db)
             local line_y = y + height - norm * height
             r.ImGui_DrawList_AddLine(draw_list, x, line_y, x + width, line_y, grid_color, 1)
-            r.ImGui_DrawList_AddText(draw_list, x + 2, line_y - 10, label_color, string.format("%ddB", db))
+            r.ImGui_DrawList_AddText(draw_list, x + 1, line_y - 9, label_color, string.format("%d", db))
         end
     end
 
     -- X-axis grid (frequency markers - logarithmic positions)
-    local freq_markers = {30, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000}
+    local freq_markers = {50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000}
     for _, hz in ipairs(freq_markers) do
         if hz >= min_freq and hz <= max_freq then
             local line_x = freq_to_x(hz)
             if line_x > x + 5 and line_x < x + width - 5 then
                 r.ImGui_DrawList_AddLine(draw_list, line_x, y, line_x, y + height, grid_color, 1)
-                local label_text = hz >= 1000 and string.format("%.0fk", hz/1000) or string.format("%.0f", hz)
+                local label_text = hz >= 1000 and string.format("%dk", hz/1000) or string.format("%d", hz)
                 r.ImGui_DrawList_AddText(draw_list, line_x + 2, y + 2, label_color, label_text)
             end
         end
@@ -744,9 +766,22 @@ function M.draw_spectrum(ctx, label, width, height, slot)
             -- Handle edges (before first or after last bin)
             if not found then
                 if px_x <= bin_points[1].x then
-                    mag = bin_points[1].mag
+                    -- Fade in from zero at low frequencies
+                    local fade_dist = bin_points[1].x - x
+                    if fade_dist > 0 then
+                        local t = (px_x - x) / fade_dist
+                        mag = bin_points[1].mag * t
+                    end
                 elseif px_x >= bin_points[#bin_points].x then
-                    mag = bin_points[#bin_points].mag
+                    -- Fade out to zero at high frequencies (beyond data range)
+                    local fade_start = bin_points[#bin_points].x
+                    local fade_end = x + width
+                    local fade_dist = fade_end - fade_start
+                    if fade_dist > 0 then
+                        local t = 1 - (px_x - fade_start) / fade_dist
+                        t = math.max(0, t)
+                        mag = bin_points[#bin_points].mag * t * t  -- Quadratic fade
+                    end
                 end
             end
         elseif #bin_points == 1 then
