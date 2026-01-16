@@ -130,6 +130,7 @@ master = 1;
 level1 = level2 = level3 = level4 = level5 = level6 = level7 = level8 = 1;
 level9 = level10 = level11 = level12 = level13 = level14 = level15 = level16 = 1;
 
+
 @slider
 master = 10 ^ (slider1 / 20);
 
@@ -221,10 +222,7 @@ master_smooth = master_smooth * smooth_coeff + master * (1 - smooth_coeff);
 master_bal_l_smooth = master_bal_l_smooth * smooth_coeff + master_bal_l * (1 - smooth_coeff);
 master_bal_r_smooth = master_bal_r_smooth * smooth_coeff + master_bal_r * (1 - smooth_coeff);
 
-// Sum all chain inputs to stereo output
-// Chain 1 = inputs 3/4 (spl2/spl3), Chain 2 = inputs 5/6 (spl4/spl5), etc.
-// Note: inputs 1/2 (spl0/spl1) are dry signal, not summed
-
+// Sum all 16 chains (each chain outputs to sideband channels: chain N -> spl[N*2], spl[N*2+1])
 spl0 = (spl2 * level1 * bal_l_1) +
        (spl4 * level2 * bal_l_2) +
        (spl6 * level3 * bal_l_3) +

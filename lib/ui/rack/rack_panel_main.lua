@@ -29,10 +29,12 @@ local function draw_collapsed_fader_control(ctx, mixer, rack_guid, state, drawin
     local meter_w = 12
     local scale_w = 20
 
-    local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
-    if not ok_gain or not gain_norm then return end
+    -- Read actual dB value directly (normalized mapping is non-linear for JSFX)
+    local ok_gain, gain_db = pcall(function() return mixer:get_param(0) end)
+    if not ok_gain or not gain_db then return end
 
-    local gain_db = -24 + gain_norm * 36
+    -- Calculate normalized position for fader visualization (0-1 range for -24 to +12)
+    local gain_norm = (gain_db + 24) / 36
     local gain_format = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db))
 
     local _, remaining_h = ctx:get_content_region_avail()
@@ -75,10 +77,10 @@ local function draw_collapsed_fader_control(ctx, mixer, rack_guid, state, drawin
     ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
     local gain_changed, new_gain_db = ctx:v_slider_double("##master_gain_v", fader_w, fader_h, gain_db, -24, 12, "")
     if gain_changed then
-        pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
+        pcall(function() mixer:set_param(0, new_gain_db) end)
     end
     if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-        pcall(function() mixer:set_param_normalized(0, (0 + 24) / 36) end)
+        pcall(function() mixer:set_param(0, 0) end)  -- Reset to 0dB
     end
     ctx:pop_style_color(5)
 
@@ -99,7 +101,7 @@ local function draw_collapsed_fader_control(ctx, mixer, rack_guid, state, drawin
         local input_changed, input_val = ctx:input_double("##gain_input", gain_db, 0, 0, "%.1f")
         if input_changed then
             local new_db = math.max(-24, math.min(12, input_val))
-            pcall(function() mixer:set_param_normalized(0, (new_db + 24) / 36) end)
+            pcall(function() mixer:set_param(0, new_db) end)
         end
         if ctx:is_key_pressed(imgui.Key.Enter()) or ctx:is_key_pressed(imgui.Key.Escape()) then
             ctx:close_current_popup()
@@ -123,29 +125,29 @@ local function draw_master_controls_table(ctx, mixer, draw_pan_slider)
         ctx:text_colored(0xAAAAAAFF, "Master")
 
         ctx:table_set_column_index(1)
-        local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
-        if ok_gain and gain_norm then
-            local gain_db = -24 + gain_norm * 36
+        -- Read actual dB value directly (normalized mapping is non-linear for JSFX)
+        local ok_gain, gain_db = pcall(function() return mixer:get_param(0) end)
+        if ok_gain and gain_db then
             local gain_format = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.1f", gain_db) or string.format("%.1f", gain_db))
             ctx:set_next_item_width(-1)
             local gain_changed, new_gain_db = ctx:slider_double("##master_gain", gain_db, -24, 12, gain_format)
             if gain_changed then
-                pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
+                pcall(function() mixer:set_param(0, new_gain_db) end)
             end
             if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-                pcall(function() mixer:set_param_normalized(0, (0 + 24) / 36) end)
+                pcall(function() mixer:set_param(0, 0) end)  -- Reset to 0dB
             end
         else
             ctx:text_disabled("--")
         end
 
         ctx:table_set_column_index(2)
-        local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(1) end)
-        if ok_pan and pan_norm then
-            local pan_val = -100 + pan_norm * 200
+        -- Read actual pan value directly (normalized mapping is non-linear for JSFX)
+        local ok_pan, pan_val = pcall(function() return mixer:get_param(1) end)
+        if ok_pan and pan_val then
             local pan_changed, new_pan = draw_pan_slider(ctx, "##master_pan", pan_val, 60)
             if pan_changed then
-                pcall(function() mixer:set_param_normalized(1, (new_pan + 100) / 200) end)
+                pcall(function() mixer:set_param(1, new_pan) end)
             end
         else
             ctx:text_disabled("C")
@@ -448,17 +450,16 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
                 -- Chain count
                 ctx:text_disabled(string.format("%d chains", #chains))
 
-                -- Pan slider
-                local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(1) end)
-                if ok_pan and pan_norm then
-                    local pan_val = -100 + pan_norm * 200
+                -- Pan slider - read actual value directly (normalized mapping is non-linear for JSFX)
+                local ok_pan, pan_val = pcall(function() return mixer:get_param(1) end)
+                if ok_pan and pan_val then
                     local avail_w, _ = ctx:get_content_region_avail()
                     local pan_w = math.min(avail_w - 4, 80)
                     local pan_offset = math.max(0, (avail_w - pan_w) / 2)
                     ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + pan_offset)
                     local pan_changed, new_pan = draw_pan_slider(ctx, "##master_pan_c", pan_val, pan_w)
                     if pan_changed then
-                        pcall(function() mixer:set_param_normalized(1, (new_pan + 100) / 200) end)
+                        pcall(function() mixer:set_param(1, new_pan) end)
                     end
                 end
 
