@@ -269,6 +269,12 @@ function M.convert_device_to_rack(device)
         state_module.mark_track_as_sidefx(state.track)
     end
 
+    -- Expand the rack and chain by default so user sees the device
+    state.expanded_racks = state.expanded_racks or {}
+    state.expanded_racks[rack_guid] = true
+    state.expanded_nested_chains = state.expanded_nested_chains or {}
+    state.expanded_nested_chains[rack_guid] = chain_guid
+
     return state.track:find_fx_by_guid(rack_guid)
 end
 
