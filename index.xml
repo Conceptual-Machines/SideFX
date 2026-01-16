@@ -8,10 +8,92 @@
 Requirements (install via ReaPack):
 - ReaWrap >= 0.7.3
 - ReaImGui extension
-- EmojImGui (talagan_EmojImGui)
 - RPP-Parser (ReaTeam Scripts > Development)]]></description>
         <link rel="homepage">https://github.com/Conceptual-Machines/SideFX</link>
       </metadata>
+      <version name="0.3.0" author="Nomad Monad" time="2026-01-16T00:00:00Z">
+        <changelog><![CDATA[v0.3.0 (2026-01-16)
+  + Replace EmojImGui with native PNG icons
+  + New icons module (lib/ui/common/icons.lua)
+  + 25 PNG icons in assets/icons/
+  + Larger toolbar buttons (28px)
+  + Consistent button sizing across UI
+  + Improved breadcrumb styling and naming
+  + Better button alignment in chain rows
+  + Remove EmojImGui dependency
+]]></changelog>
+        <source main="main">SideFX.lua</source>
+        <source file="lib/browser/browser.lua">lib/browser/browser.lua</source>
+        <source file="lib/core/config.lua">lib/core/config.lua</source>
+        <source file="lib/core/constants.lua">lib/core/constants.lua</source>
+        <source file="lib/core/state.lua">lib/core/state.lua</source>
+        <source file="lib/device/container.lua">lib/device/container.lua</source>
+        <source file="lib/device/device.lua">lib/device/device.lua</source>
+        <source file="lib/fx/fx_naming.lua">lib/fx/fx_naming.lua</source>
+        <source file="lib/fx/fx_utils.lua">lib/fx/fx_utils.lua</source>
+        <source file="lib/modulator/modulator_constants.lua">lib/modulator/modulator_constants.lua</source>
+        <source file="lib/modulator/modulator.lua">lib/modulator/modulator.lua</source>
+        <source file="lib/rack/rack_backend.lua">lib/rack/rack_backend.lua</source>
+        <source file="lib/rack/rack.lua">lib/rack/rack.lua</source>
+        <source file="lib/ui/chain/chain_column.lua">lib/ui/chain/chain_column.lua</source>
+        <source file="lib/ui/chain/chain_item.lua">lib/ui/chain/chain_item.lua</source>
+        <source file="lib/ui/chain/device_chain.lua">lib/ui/chain/device_chain.lua</source>
+        <source file="lib/ui/common/drag_drop.lua">lib/ui/common/drag_drop.lua</source>
+        <source file="lib/ui/common/drawing.lua">lib/ui/common/drawing.lua</source>
+        <source file="lib/ui/common/icons.lua">lib/ui/common/icons.lua</source>
+        <source file="lib/ui/common/widgets.lua">lib/ui/common/widgets.lua</source>
+        <source file="lib/ui/device/device_panel.lua">lib/ui/device/device_panel.lua</source>
+        <source file="lib/ui/device/device_panel/collapsed_header.lua">lib/ui/device/device_panel/collapsed_header.lua</source>
+        <source file="lib/ui/device/device_panel/device_column.lua">lib/ui/device/device_panel/device_column.lua</source>
+        <source file="lib/ui/device/device_panel/header.lua">lib/ui/device/device_panel/header.lua</source>
+        <source file="lib/ui/device/device_panel/modulator_header.lua">lib/ui/device/device_panel/modulator_header.lua</source>
+        <source file="lib/ui/device/device_panel/params.lua">lib/ui/device/device_panel/params.lua</source>
+        <source file="lib/ui/device/device_panel/sidebar.lua">lib/ui/device/device_panel/sidebar.lua</source>
+        <source file="lib/ui/device/modulator_panel.lua">lib/ui/device/modulator_panel.lua</source>
+        <source file="lib/ui/device/modulator_sidebar.lua">lib/ui/device/modulator_sidebar.lua</source>
+        <source file="lib/ui/device/param_selector.lua">lib/ui/device/param_selector.lua</source>
+        <source file="lib/ui/fx/fx_detail_panel.lua">lib/ui/fx/fx_detail_panel.lua</source>
+        <source file="lib/ui/fx/fx_list_column.lua">lib/ui/fx/fx_list_column.lua</source>
+        <source file="lib/ui/fx/fx_menu.lua">lib/ui/fx/fx_menu.lua</source>
+        <source file="lib/ui/main/browser_panel.lua">lib/ui/main/browser_panel.lua</source>
+        <source file="lib/ui/main/main_window.lua">lib/ui/main/main_window.lua</source>
+        <source file="lib/ui/main/toolbar.lua">lib/ui/main/toolbar.lua</source>
+        <source file="lib/ui/rack/rack_panel_main.lua">lib/ui/rack/rack_panel_main.lua</source>
+        <source file="lib/ui/rack/rack_panel.lua">lib/ui/rack/rack_panel.lua</source>
+        <source file="lib/ui/rack/rack_ui.lua">lib/ui/rack/rack_ui.lua</source>
+        <source file="lib/ui/settings/settings_dialog.lua">lib/ui/settings/settings_dialog.lua</source>
+        <source file="lib/ui/presets/preset_dialog.lua">lib/ui/presets/preset_dialog.lua</source>
+        <source file="lib/utils/naming.lua">lib/utils/naming.lua</source>
+        <source file="lib/utils/param_utils.lua">lib/utils/param_utils.lua</source>
+        <source file="lib/utils/presets.lua">lib/utils/presets.lua</source>
+        <source file="lib/utils/json.lua">lib/utils/json.lua</source>
+        <source file="lib/utils/track_detection.lua">lib/utils/track_detection.lua</source>
+        <source file="assets/icons/cancel.png">assets/icons/cancel.png</source>
+        <source file="assets/icons/chain.png">assets/icons/chain.png</source>
+        <source file="assets/icons/curve.png">assets/icons/curve.png</source>
+        <source file="assets/icons/folder-closed.png">assets/icons/folder-closed.png</source>
+        <source file="assets/icons/folder-open.png">assets/icons/folder-open.png</source>
+        <source file="assets/icons/free.png">assets/icons/free.png</source>
+        <source file="assets/icons/gear.png">assets/icons/gear.png</source>
+        <source file="assets/icons/keyboard.png">assets/icons/keyboard.png</source>
+        <source file="assets/icons/knobs.png">assets/icons/knobs.png</source>
+        <source file="assets/icons/lock-closed.png">assets/icons/lock-closed.png</source>
+        <source file="assets/icons/lock-open.png">assets/icons/lock-open.png</source>
+        <source file="assets/icons/loop.png">assets/icons/loop.png</source>
+        <source file="assets/icons/multiband.png">assets/icons/multiband.png</source>
+        <source file="assets/icons/on.png">assets/icons/on.png</source>
+        <source file="assets/icons/oneshot.png">assets/icons/oneshot.png</source>
+        <source file="assets/icons/oscilloscope.png">assets/icons/oscilloscope.png</source>
+        <source file="assets/icons/plug.png">assets/icons/plug.png</source>
+        <source file="assets/icons/rack.png">assets/icons/rack.png</source>
+        <source file="assets/icons/refresh.png">assets/icons/refresh.png</source>
+        <source file="assets/icons/save.png">assets/icons/save.png</source>
+        <source file="assets/icons/speaker-muted.png">assets/icons/speaker-muted.png</source>
+        <source file="assets/icons/speaker-on.png">assets/icons/speaker-on.png</source>
+        <source file="assets/icons/spectrum.png">assets/icons/spectrum.png</source>
+        <source file="assets/icons/sync.png">assets/icons/sync.png</source>
+        <source file="assets/icons/wrench.png">assets/icons/wrench.png</source>
+      </version>
       <version name="0.1.1" author="Nomad Monad" time="2026-01-06T00:00:00Z">
         <changelog><![CDATA[v0.1.1 (2026-01-06)
   + Restyled utility controls (pan above fader, double-click editing)

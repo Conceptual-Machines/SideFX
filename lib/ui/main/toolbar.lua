@@ -97,34 +97,6 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         end
         if ctx:is_item_hovered() then ctx:set_tooltip("Click to add rack at end\nOr drag to drop anywhere") end
 
-        ctx:same_line()
-
-        -- Scope button (singleton - toggles on/off)
-        local has_scope = state.has_scope or false
-        local scope_tint = has_scope and 0x88FF88FF or 0xCCCCCCFF
-        if icons.button_bordered(ctx, "scope_btn", icons.Names.oscilloscope, 28, scope_tint) then
-            if state.track and callbacks.on_toggle_scope then
-                callbacks.on_toggle_scope()
-            end
-        end
-        if ctx:is_item_hovered() then
-            ctx:set_tooltip(has_scope and "Remove oscilloscope" or "Add oscilloscope at end of chain")
-        end
-
-        ctx:same_line()
-
-        -- Spectrum button (singleton - toggles on/off)
-        local has_spectrum = state.has_spectrum or false
-        local spectrum_tint = has_spectrum and 0x88FF88FF or 0xCCCCCCFF
-        if icons.button_bordered(ctx, "spectrum_btn", icons.Names.spectrum, 28, spectrum_tint) then
-            if state.track and callbacks.on_toggle_spectrum then
-                callbacks.on_toggle_spectrum()
-            end
-        end
-        if ctx:is_item_hovered() then
-            ctx:set_tooltip(has_spectrum and "Remove spectrum analyzer" or "Add spectrum analyzer at end of chain")
-        end
-
         -- Helper to draw breadcrumb-style button
         local function draw_breadcrumb_button(ctx, label, id)
             local r = reaper
@@ -193,8 +165,36 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
             end
         end
 
-        -- RIGHT COLUMN: Preset and Config buttons
+        -- RIGHT COLUMN: Scope, Spectrum, Preset, and Config buttons
         ctx:table_set_column_index(1)
+
+        -- Scope button (singleton - toggles on/off)
+        local has_scope = state.has_scope or false
+        local scope_tint = has_scope and 0x88FF88FF or 0xCCCCCCFF
+        if icons.button_bordered(ctx, "scope_btn", icons.Names.oscilloscope, 28, scope_tint) then
+            if state.track and callbacks.on_toggle_scope then
+                callbacks.on_toggle_scope()
+            end
+        end
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip(has_scope and "Remove oscilloscope" or "Add oscilloscope at end of chain")
+        end
+
+        ctx:same_line()
+
+        -- Spectrum button (singleton - toggles on/off)
+        local has_spectrum = state.has_spectrum or false
+        local spectrum_tint = has_spectrum and 0x88FF88FF or 0xCCCCCCFF
+        if icons.button_bordered(ctx, "spectrum_btn", icons.Names.spectrum, 28, spectrum_tint) then
+            if state.track and callbacks.on_toggle_spectrum then
+                callbacks.on_toggle_spectrum()
+            end
+        end
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip(has_spectrum and "Remove spectrum analyzer" or "Add spectrum analyzer at end of chain")
+        end
+
+        ctx:same_line()
 
         -- Preset button
         if icons.button_bordered(ctx, "preset_btn", icons.Names.save, 28) then

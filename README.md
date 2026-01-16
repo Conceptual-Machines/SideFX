@@ -3,7 +3,7 @@
 [![CI](https://github.com/Conceptual-Machines/SideFX/actions/workflows/ci.yml/badge.svg)](https://github.com/Conceptual-Machines/SideFX/actions/workflows/ci.yml)
 [![Release](https://github.com/Conceptual-Machines/SideFX/actions/workflows/release.yml/badge.svg)](https://github.com/Conceptual-Machines/SideFX/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/Conceptual-Machines/SideFX/releases)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/Conceptual-Machines/SideFX/releases)
 
 Ableton/Bitwig-style FX rack management for REAPER 7+.
 
