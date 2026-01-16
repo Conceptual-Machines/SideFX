@@ -10,6 +10,7 @@ local M = {}
 function M.draw(ctx, fx, container, state_guid, enabled, device_collapsed, opts, colors)
     local r = reaper
     local drawing = require('lib.ui.common.drawing')
+    local icons = require('lib.ui.common.icons')
     local imgui = require('imgui')
     local interacted = false
 
@@ -56,7 +57,8 @@ function M.draw(ctx, fx, container, state_guid, enabled, device_collapsed, opts,
 
         -- ON/OFF toggle
         ctx:table_set_column_index(0)
-        if drawing.draw_on_off_circle(ctx, "##on_off_collapsed_" .. state_guid, enabled, btn_size, btn_size, colors.bypass_on, colors.bypass_off) then
+        local on_tint = enabled and 0x88FF88FF or 0x888888FF
+        if icons.button_bordered(ctx, "on_off_collapsed_" .. state_guid, icons.Names.on, 18, on_tint) then
             container:set_enabled(not enabled)
             interacted = true
         end
@@ -66,9 +68,7 @@ function M.draw(ctx, fx, container, state_guid, enabled, device_collapsed, opts,
 
         -- Delete button
         ctx:table_set_column_index(1)
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
-        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x884444FF)
-        if ctx:button("×##delete_collapsed_" .. state_guid, btn_size, btn_size) then
+        if icons.button_bordered(ctx, "delete_collapsed_" .. state_guid, icons.Names.cancel, 18, 0xFF6666FF) then
             if opts.on_delete then
                 opts.on_delete(fx)
             else
@@ -76,7 +76,6 @@ function M.draw(ctx, fx, container, state_guid, enabled, device_collapsed, opts,
             end
             interacted = true
         end
-        ctx:pop_style_color(2)
         if r.ImGui_IsItemHovered(ctx.ctx) then
             ctx:set_tooltip("Delete device")
         end

@@ -8,37 +8,16 @@ local r = reaper
 -- This is used by curve_editor to avoid Shift key conflicts
 M.slider_fine_active = false
 
---- Draw a UI icon (spanner/wrench emoji button)
+--- Draw a UI icon (wrench icon button)
 -- @param ctx ImGui context
 -- @param label string Label for the button
--- @param width number Button width
--- @param height number Button height
--- @param icon_font ImGui font handle for emoji rendering (optional)
+-- @param width number Button width (unused, icon determines size)
+-- @param height number Button height (unused, icon determines size)
+-- @param icon_font ImGui font handle (unused, kept for API compatibility)
 -- @return boolean True if clicked
 function M.draw_ui_icon(ctx, label, width, height, icon_font)
-    local imgui = require('imgui')
-    local constants = require('lib.core.constants')
-    local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
-    local icon = constants.icon_text(emojimgui, constants.Icons.wrench)
-
-    -- Push icon font if available (use 14pt for emoji icons to better match button size)
-    if icon_font then
-        ctx:push_font(icon_font, 14)
-    end
-
-    -- Adjust frame padding to center the emoji better
-    ctx:push_style_var(imgui.StyleVar.FramePadding(), 2, 2)
-
-    local clicked = ctx:button(icon .. label, width, height)
-
-    ctx:pop_style_var()
-
-    -- Pop icon font if we pushed it
-    if icon_font then
-        ctx:pop_font()
-    end
-
-    return clicked
+    local icons = require('lib.ui.common.icons')
+    return icons.button_bordered(ctx, "ui_icon" .. label, icons.Names.wrench, 18)
 end
 
 --- Draw an ON/OFF circle indicator with colored background

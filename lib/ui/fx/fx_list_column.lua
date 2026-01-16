@@ -6,6 +6,7 @@
 
 local imgui = require('imgui')
 local helpers = require('helpers')
+local icons = require('lib.ui.common.icons')
 
 local M = {}
 
@@ -42,10 +43,7 @@ function M.draw(ctx, fx_list, column_title, depth, width, parent_container_guid,
     local state = opts.state
     local state_module = opts.state_module
     local track = opts.track
-    local icon_font = opts.icon_font
-    local icon_size = opts.icon_size
-    local icon_text = opts.icon_text
-    local Icons = opts.Icons
+    -- icon_font, icon_size, icon_text, Icons are no longer used (using icons module directly)
     local get_fx_display_name = opts.get_fx_display_name
     local move_fx_to_track_level = opts.move_fx_to_track_level
     local move_fx_to_container = opts.move_fx_to_container
@@ -122,13 +120,11 @@ function M.draw(ctx, fx_list, column_title, depth, width, parent_container_guid,
             local name_w = width - icon_w - controls_w - 30  -- 30px gap
             local controls_x = width - controls_w - 8
 
-            -- Icon with emoji font
-            if icon_font then ctx:push_font(icon_font, icon_size) end
-            local icon = is_container
-                and (is_expanded and icon_text(Icons.folder_open) or icon_text(Icons.folder_closed))
-                or icon_text(Icons.plug)
-            ctx:text(icon)
-            if icon_font then ctx:pop_font() end
+            -- Icon
+            local icon_name = is_container
+                and (is_expanded and icons.Names.folder_open or icons.Names.folder_closed)
+                or icons.Names.plug
+            icons.image(ctx, icon_name, 16)
 
             -- Name as selectable (or input text if renaming)
             ctx:same_line()

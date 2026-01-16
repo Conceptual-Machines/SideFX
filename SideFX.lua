@@ -6,7 +6,6 @@
 --   [nomain] lib/ui/*.lua
 -- @depends ReaWrap>=0.7.3
 -- @depends ReaImGui
--- @depends talagan_EmojImGui
 -- @link https://github.com/Conceptual-Machines/SideFX
 -- @about
 --   # SideFX
@@ -51,17 +50,6 @@ local scripts_folder = r.GetResourcePath() .. "/Scripts/"
 local reawrap_reapack = scripts_folder .. "ReaWrap/Libraries/lua/"
 local sidefx_parent = script_path:match("^(.+[/\\])SideFX[/\\]")
 local reawrap_dev = sidefx_parent and (sidefx_parent .. "ReaWrap/lua/") or ""
-
--- EmojImGui path
-local emojimgui_path = scripts_folder .. "ReaTeam Scripts/Development/talagan_EmojImGui/"
-
--- Load EmojImGui FIRST with ReaImGui's builtin path (before ReaWrap's imgui shadows it)
-local reaimgui_path = r.ImGui_GetBuiltinPath and (r.ImGui_GetBuiltinPath() .. "/?.lua;") or ""
-package.path = reaimgui_path .. emojimgui_path .. "?.lua;" .. package.path
-local EmojImGui = require('emojimgui')
-
--- Clear the cached ReaImGui 'imgui' so we can load ReaWrap's version
-package.loaded['imgui'] = nil
 
 -- Force reload all lib modules during development
 for name in pairs(package.loaded) do
@@ -118,23 +106,21 @@ local main_window = require('lib.ui.main.main_window')
 local toolbar = require('lib.ui.main.toolbar')
 local drag_drop = require('lib.ui.common.drag_drop')
 local rack_ui = require('lib.ui.rack.rack_ui')
+local icons = require('lib.ui.common.icons')
 
 --------------------------------------------------------------------------------
--- Icons (using OpenMoji font)
+-- Icons
 --------------------------------------------------------------------------------
 
-local Icons = constants.Icons
-local icon_font = nil
+-- Initialize icons module with script path
+icons.init(script_path)
+
 local icon_size = 16
 local default_font = nil
 
 -- Font references (updated by main_window when fonts are loaded)
 local default_font_ref = { value = nil }
-local icon_font_ref = { value = nil }
-
-local function icon_text(icon_id)
-    return constants.icon_text(EmojImGui, icon_id)
-end
+local icon_font_ref = { value = nil }  -- Kept for API compatibility
 
 --------------------------------------------------------------------------------
 -- State (from lib/state.lua)
@@ -681,7 +667,7 @@ local function draw_selected_chain_column_if_expanded(ctx, rack_data, rack_guid)
             end
 end
 
-local function draw_device_chain(ctx, fx_list, avail_width, avail_height, icon_font_ref)
+local function draw_device_chain(ctx, fx_list, avail_width, avail_height, icon_font_ref, header_font_ref)
     device_chain.draw(ctx, fx_list, avail_width, avail_height, {
         state = state,
         get_fx_display_name = get_fx_display_name,
@@ -695,6 +681,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height, icon_f
         is_utility_fx = is_utility_fx,
         chain_item = chain_item,
         icon_font = icon_font_ref and icon_font_ref.value or nil,
+        header_font = header_font_ref and header_font_ref.value or nil,
         draw_selected_chain_column_if_expanded = draw_selected_chain_column_if_expanded,
         draw_rack_panel = draw_rack_panel,
     })
@@ -1165,7 +1152,6 @@ local function main()
 
     -- Initialize module-level font references (will be updated by main_window when fonts load)
     default_font_ref.value = default_font
-    icon_font_ref.value = icon_font
 
     -- Create window callbacks
     local window_callbacks = main_window.create_callbacks({
@@ -1173,7 +1159,6 @@ local function main()
         state_module = state_module,
         device_module = device_module,
         default_font = default_font,
-        icon_font = icon_font,
         reaper_theme = reaper_theme,
         get_selected_track = get_selected_track,
         check_fx_changes = check_fx_changes,
@@ -1184,7 +1169,7 @@ local function main()
         draw_device_chain = draw_device_chain,
         draw_analyzers = draw_analyzers,
         refresh_fx_list = refresh_fx_list,
-        EmojImGui = EmojImGui,
+        icons = icons,
         default_font_ref = default_font_ref,
         icon_font_ref = icon_font_ref,
         settings_dialog = settings_dialog,

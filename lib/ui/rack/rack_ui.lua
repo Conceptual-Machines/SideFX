@@ -8,6 +8,7 @@ local imgui = require('imgui')
 local r = reaper
 local widgets = require('lib.ui.common.widgets')
 local drawing = require('lib.ui.common.drawing')
+local icons = require('lib.ui.common.icons')
 local fx_naming = require('lib.fx.fx_naming')
 
 local M = {}
@@ -266,49 +267,6 @@ local function draw_chain_context_menu(ctx, chain_btn_id, chain_guid, chain, is_
 end
 
 --------------------------------------------------------------------------------
--- Custom Widgets
---------------------------------------------------------------------------------
-
---- Draw an ON/OFF circle indicator with colored background
--- @param ctx ImGui context
--- @param label string Label for the button
--- @param is_on boolean Whether the state is ON
--- @param width number Button width
--- @param height number Button height
--- @param bg_color_on number RGBA color for ON background
--- @param bg_color_off number RGBA color for OFF background
--- @return boolean True if clicked
-local function draw_on_off_circle(ctx, label, is_on, width, height, bg_color_on, bg_color_off)
-    -- Get cursor position for drawing
-    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-    local center_x = cursor_x + width / 2
-    local center_y = cursor_y + height / 2
-    local radius = 6  -- Small circle radius
-
-    -- Invisible button for interaction
-    r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
-    local clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
-    local is_hovered = r.ImGui_IsItemHovered(ctx.ctx)
-
-    -- Draw background and circle
-    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-
-    -- Draw background rectangle
-    local bg_color = is_on and bg_color_on or bg_color_off
-    r.ImGui_DrawList_AddRectFilled(draw_list, cursor_x, cursor_y, cursor_x + width, cursor_y + height, bg_color, 0)
-
-    if is_on then
-        -- Filled circle for ON state
-        r.ImGui_DrawList_AddCircleFilled(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12)
-    else
-        -- Empty circle (outline only) for OFF state
-        r.ImGui_DrawList_AddCircle(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12, 2)
-    end
-
-    return clicked
-end
-
---------------------------------------------------------------------------------
 -- Rack Header
 --------------------------------------------------------------------------------
 
@@ -348,15 +306,15 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
         -- Column 0: Burger menu (fixed width)
         ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
         if is_expanded then
-            -- Expanded: name gets most space
-            ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 7)
-            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
-            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
+            -- Expanded: name gets most space, buttons fixed width
+            ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch())
+            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 22)
+            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 22)
         else
-            -- Collapsed: equal distribution
-            ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthStretch(), 1)
-            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
-            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
+            -- Collapsed: name stretches, buttons fixed width
+            ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthStretch())
+            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 22)
+            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 22)
         end
 
         ctx:table_next_row()
@@ -416,19 +374,16 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
         ctx:table_set_column_index(2)
         local ok_enabled, rack_enabled = pcall(function() return rack:get_enabled() end)
         rack_enabled = ok_enabled and rack_enabled or false
-        -- Draw custom circle indicator with colored background
-        local avail_w, _ = ctx:get_content_region_avail()
-        if draw_on_off_circle(ctx, "##rack_on_off_" .. rack_guid, rack_enabled, avail_w, 20, 0x44AA44FF, 0xAA4444FF) then
+        local on_tint = rack_enabled and 0x88FF88FF or 0x888888FF
+        if icons.button_bordered(ctx, "rack_on_off_" .. rack_guid, icons.Names.on, 20, on_tint) then
             pcall(function() rack:set_enabled(not rack_enabled) end)
         end
 
         -- Column 3: X button
         ctx:table_set_column_index(3)
-        ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
-        if ctx:button("×##rack_del", -1, 20) then
+        if icons.button_bordered(ctx, "rack_del_" .. rack_guid, icons.Names.cancel, 20, 0xFF6666FF) then
             callbacks.on_delete(rack)
         end
-        ctx:pop_style_color()
 
         ctx:end_table()
     end
@@ -585,7 +540,7 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
             ctx:push_style_color(imgui.Col.Button(), 0x555555FF)  -- Grey when not muted
             ctx:push_style_color(imgui.Col.ButtonHovered(), 0x666666FF)
         end
-        if ctx:button("M##mute_" .. chain_idx, 18, 18) then
+        if ctx:button("M##mute_" .. chain_idx, 20, 20) then
             pcall(function() mixer:set_param_normalized(mute_param, is_muted and 0 or 1) end)
         end
         ctx:pop_style_color(2)
@@ -609,7 +564,7 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
             ctx:push_style_color(imgui.Col.Button(), 0x555555FF)  -- Grey when not soloed
             ctx:push_style_color(imgui.Col.ButtonHovered(), 0x666666FF)
         end
-        if ctx:button("S##solo_" .. chain_idx, 18, 18) then
+        if ctx:button("S##solo_" .. chain_idx, 20, 20) then
             pcall(function() mixer:set_param_normalized(solo_param, is_soloed and 0 or 1) end)
         end
         ctx:pop_style_color(2)
@@ -620,24 +575,27 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
         ctx:text_disabled("-")
     end
 
-    -- Column 3: Enable button (circle icon) - same size as X button
+    -- Column 3: Enable button (on icon)
     ctx:table_set_column_index(3)
-    local bg_color_on = 0x44AA44FF  -- Green for ON
-    local bg_color_off = 0xAA4444FF  -- Red for OFF
-    if draw_on_off_circle(ctx, "##chain_on_off_" .. chain_guid, chain_enabled, 24, 20, bg_color_on, bg_color_off) then
+    local on_tint = chain_enabled and 0x88FF88FF or 0x888888FF
+    if icons.button_bordered(ctx, "chain_on_off_" .. chain_guid, icons.Names.on, 20, on_tint) then
         pcall(function() chain:set_enabled(not chain_enabled) end)
     end
+    if ctx:is_item_hovered() then
+        ctx:set_tooltip(chain_enabled and "Bypass chain" or "Enable chain")
+    end
 
-    -- Column 4: Delete button (same size as ON button)
+    -- Column 4: Delete button (cancel icon)
     ctx:table_set_column_index(4)
-    ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
-    if ctx:button("×", 24, 20) then
+    if icons.button_bordered(ctx, "chain_del_" .. chain_guid, icons.Names.cancel, 20, 0xFF6666FF) then
         chain:delete()
         local rack_guid = rack:get_guid()
         callbacks.on_delete_chain(chain, is_selected, is_nested_rack, rack_guid)
         callbacks.on_refresh()
     end
-    ctx:pop_style_color()
+    if ctx:is_item_hovered() then
+        ctx:set_tooltip("Delete chain")
+    end
 
     -- Column 5: Volume slider - read actual dB value (normalized mapping is non-linear for JSFX)
     ctx:table_set_column_index(5)

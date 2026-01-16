@@ -6,7 +6,7 @@
 
 local imgui = require('imgui')
 local helpers = require('helpers')
-local constants = require('lib.core.constants')
+local icons = require('lib.ui.common.icons')
 local param_selector = require('lib.ui.device.param_selector')
 
 local M = {}
@@ -62,15 +62,9 @@ function M.draw(ctx, state, icon_font, icon_size, on_plugin_add, filter_plugins)
             i = i + 1
             ctx:push_id(i)
 
-            -- Icon with emoji font
-            if icon_font then ctx:push_font(icon_font, icon_size) end
-            -- Get emojimgui from global (set up in main script)
-            local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
-            local icon = plugin.is_instrument
-                and constants.icon_text(emojimgui, constants.Icons.musical_keyboard)
-                or constants.icon_text(emojimgui, constants.Icons.control_knobs)
-            ctx:text(icon)
-            if icon_font then ctx:pop_font() end
+            -- Icon
+            local icon_name = plugin.is_instrument and icons.Names.keyboard or icons.Names.knobs
+            icons.image(ctx, icon_name, 16)
 
             -- Text with default font
             ctx:same_line()

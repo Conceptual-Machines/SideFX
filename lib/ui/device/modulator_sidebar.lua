@@ -9,6 +9,7 @@ local state_module = require('lib.core.state')
 local config = require('lib.core.config')
 local PARAM = require('lib.modulator.modulator_constants')
 local drawing = require('lib.ui.common.drawing')
+local icons = require('lib.ui.common.icons')
 local modulator_module = require('lib.modulator.modulator')
 local curve_editor = require('lib.ui.common.curve_editor')
 local modulator_presets = require('lib.modulator.modulator_presets')
@@ -421,16 +422,9 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
             ctx:set_tooltip("Waveform Preset")
         end
 
-        -- Column 2: Save button with icon
+        -- Column 2: Save button
         ctx:table_set_column_index(1)
-        local constants = require('lib.core.constants')
-        local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
-        local save_icon = constants.icon_text(emojimgui, constants.Icons.floppy_disk)
-
-        if opts.icon_font then
-            ctx:push_font(opts.icon_font, 14)
-        end
-        if ctx:button(save_icon .. "##save_" .. guid, icon_btn_size, 0) then
+        if icons.button_bordered(ctx, "save_preset_" .. guid, icons.Names.save, 18) then
             -- Open save preset popup, pre-fill with current preset name
             state.save_preset_popup = state.save_preset_popup or {}
             state.save_preset_popup[mod_guid] = {
@@ -440,16 +434,13 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
             }
             interacted = true
         end
-        if opts.icon_font then
-            ctx:pop_font()
-        end
         if ctx:is_item_hovered() then
             ctx:set_tooltip("Save Preset")
         end
 
-        -- Column 3: UI icon
+        -- Column 3: UI button (curve editor popup)
         ctx:table_set_column_index(2)
-        if drawing.draw_ui_icon(ctx, "##ui_" .. guid, icon_btn_size, icon_btn_size, opts.icon_font) then
+        if icons.button_bordered(ctx, "curve_editor_" .. guid, icons.Names.curve, 18) then
             state.curve_editor_popup = state.curve_editor_popup or {}
             state.curve_editor_popup[editor_key] = state.curve_editor_popup[editor_key] or {}
             state.curve_editor_popup[editor_key].open_requested = true
@@ -508,29 +499,25 @@ local function draw_rate_controls(ctx, guid, expanded_modulator)
         local is_free = tempo_mode < 0.5
 
         -- Free button
-        if is_free then
-            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-        end
-        if ctx:button("Free##tempo_" .. guid, 52, 0) then
+        local free_tint = is_free and 0x88FF88FF or 0x888888FF
+        if icons.button_bordered(ctx, "free_" .. guid, icons.Names.free, 18, free_tint) then
             expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 0)
             interacted = true
         end
-        if is_free then
-            ctx:pop_style_color()
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip("Free running (Hz)")
         end
 
-        ctx:same_line(0, 0)
+        ctx:same_line(0, 4)
 
         -- Sync button
-        if not is_free then
-            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-        end
-        if ctx:button("Sync##tempo_" .. guid, 52, 0) then
+        local sync_tint = (not is_free) and 0x88FF88FF or 0x888888FF
+        if icons.button_bordered(ctx, "sync_" .. guid, icons.Names.sync, 18, sync_tint) then
             expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 1)
             interacted = true
         end
-        if not is_free then
-            ctx:pop_style_color()
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip("Tempo sync")
         end
 
         ctx:same_line()
@@ -642,32 +629,21 @@ local function draw_trigger_and_advanced_button(ctx, guid, expanded_modulator, o
         is_external_mode = ok_src and audio_src and audio_src >= 0.5
     end
 
-    -- Advanced button with gear icon
-    local constants = require('lib.core.constants')
-    local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
-    local gear_icon = constants.icon_text(emojimgui, constants.Icons.gear)
-
+    -- Advanced button
     local advanced_popup_id = "Advanced##adv_popup_" .. guid
-    if opts.icon_font then
-        ctx:push_font(opts.icon_font, 14)
-    end
 
-    -- Highlight gear button when external mode is active
+    -- Highlight button when external mode is active
     if is_external_mode then
         ctx:push_style_color(r.ImGui_Col_Button(), 0x336699FF)
         ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x4477AAFF)
     end
 
-    if ctx:button(gear_icon .. "##adv_btn_" .. guid, 24, 0) then
+    if ctx:button("*##adv_btn_" .. guid, 24, 0) then
         r.ImGui_OpenPopup(ctx.ctx, advanced_popup_id)
     end
 
     if is_external_mode then
         ctx:pop_style_color(2)
-    end
-
-    if opts.icon_font then
-        ctx:pop_font()
     end
     if ctx:is_item_hovered() then
         local tooltip = "Advanced Settings"

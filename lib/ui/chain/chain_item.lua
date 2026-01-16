@@ -15,6 +15,7 @@ local get_fx_display_name
 local device_panel
 local state
 local icon_font
+local header_font
 local refresh_fx_list
 local add_plugin_by_name
 local add_rack_to_track
@@ -28,6 +29,7 @@ function M.init(deps)
     device_panel = deps.device_panel
     state = deps.state
     icon_font = deps.icon_font
+    header_font = deps.header_font
     refresh_fx_list = deps.refresh_fx_list
     add_plugin_by_name = deps.add_plugin_by_name
     add_rack_to_track = deps.add_rack_to_track
@@ -214,6 +216,7 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
             container_name = container_name,
             missing_utility = item.missing_utility,  -- Flag for warning icon
             icon_font = icon_font,
+            header_font = header_font,
             track = state.track,
             refresh_fx_list = refresh_fx_list,
             is_selected = is_selected,  -- For border highlighting

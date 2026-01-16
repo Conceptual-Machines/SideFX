@@ -6,6 +6,7 @@
 
 local imgui = require('imgui')
 local r = reaper
+local icons = require('lib.ui.common.icons')
 
 local M = {}
 
@@ -191,12 +192,12 @@ local function draw_chains_table(ctx, chains, rack, mixer, is_nested, state, get
     else
         if ctx:begin_table("chains_table", 7, imgui.TableFlags.SizingStretchProp()) then
             ctx:table_setup_column("name", imgui.TableColumnFlags.WidthFixed(), 80)
-            ctx:table_setup_column("mute", imgui.TableColumnFlags.WidthFixed(), 20)
-            ctx:table_setup_column("solo", imgui.TableColumnFlags.WidthFixed(), 20)
-            ctx:table_setup_column("enable", imgui.TableColumnFlags.WidthFixed(), 24)
-            ctx:table_setup_column("delete", imgui.TableColumnFlags.WidthFixed(), 24)
-            ctx:table_setup_column("volume", imgui.TableColumnFlags.WidthStretch(), 1)
-            ctx:table_setup_column("pan", imgui.TableColumnFlags.WidthFixed(), 60)
+            ctx:table_setup_column("mute", imgui.TableColumnFlags.WidthFixed(), 22)
+            ctx:table_setup_column("solo", imgui.TableColumnFlags.WidthFixed(), 22)
+            ctx:table_setup_column("enable", imgui.TableColumnFlags.WidthFixed(), 22)
+            ctx:table_setup_column("delete", imgui.TableColumnFlags.WidthFixed(), 22)
+            ctx:table_setup_column("volume", imgui.TableColumnFlags.WidthStretch(), 2)
+            ctx:table_setup_column("pan", imgui.TableColumnFlags.WidthFixed(), 50)
 
             for j, chain in ipairs(chains) do
                 ctx:table_next_row()
@@ -491,13 +492,14 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
             -- Chains area header and table
             ctx:text_colored(0xAAAAAAFF, "Chains:")
             ctx:same_line()
-            ctx:push_style_color(imgui.Col.Button(), 0x446688FF)
-            if ctx:small_button("+ Chain") then
+            if icons.button_bordered(ctx, "add_chain_btn", icons.Names.chain, 18, 0x88AAFFFF) then
                 if add_empty_chain_to_rack then
                     add_empty_chain_to_rack(rack)
                 end
             end
-            ctx:pop_style_color()
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("Add new chain")
+            end
 
             -- Draw chains table or empty state
             draw_chains_table(ctx, chains, rack, mixer, is_nested, state, get_fx_display_name, state_module, refresh_fx_list, add_device_to_chain, reorder_chain_in_rack, move_chain_between_racks, add_chain_to_rack, add_nested_rack_to_rack)

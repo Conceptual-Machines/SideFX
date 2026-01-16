@@ -84,6 +84,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         device_panel = device_panel,
         state = state,
         icon_font = opts.icon_font,
+        header_font = opts.header_font,
         refresh_fx_list = refresh_fx_list,
         add_plugin_by_name = add_plugin_by_name,
         add_rack_to_track = add_rack_to_track,

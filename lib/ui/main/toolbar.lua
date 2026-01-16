@@ -5,8 +5,8 @@
 -- @license MIT
 
 local imgui = require('imgui')
-local constants = require('lib.core.constants')
 local config = require('lib.core.config')
+local icons = require('lib.ui.common.icons')
 
 local M = {}
 
@@ -33,8 +33,6 @@ local BUTTON_HEIGHT = 24  -- Match icon button height
 --   - on_add_rack: () -> nil
 --   - on_collapse_from_depth: (depth) -> nil
 function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks)
-    local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
-
     -- Use table with 2 columns: left content and right buttons
     if ctx:begin_table("toolbar", 2, imgui.TableFlags.SizingStretchProp()) then
         ctx:table_setup_column("left", imgui.TableColumnFlags.WidthStretch())
@@ -46,16 +44,13 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         ctx:table_set_column_index(0)
 
         -- Refresh button
-        if icon_font then ctx:push_font(icon_font, icon_size) end
-        local refresh_icon = constants.icon_text(emojimgui, constants.Icons.arrows_counterclockwise)
-        if ctx:button(refresh_icon) then
+        if icons.button_bordered(ctx, "refresh_btn", icons.Names.refresh, 28) then
             callbacks.on_refresh()
             -- Set status message
             local plugin_count = state.browser and state.browser.plugins and #state.browser.plugins or 0
             status_message = string.format("Rescanned %d plugins", plugin_count)
             status_time = reaper.time_precise()
         end
-        if icon_font then ctx:pop_font() end
         if ctx:is_item_hovered() then ctx:set_tooltip("Refresh FX list & rescan plugins") end
 
         -- Show status message if recent
@@ -76,14 +71,12 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
 
         -- Browser toggle button
         local browser_visible = state.browser and state.browser.visible
-        local browser_btn_color = browser_visible and 0x446644FF or 0x444444FF
-        ctx:push_style_color(imgui.Col.Button(), browser_btn_color)
-        if ctx:button(browser_visible and "Browser" or "Browser", 0, BUTTON_HEIGHT) then
+        local browser_tint = browser_visible and 0x88FF88FF or 0xCCCCCCFF
+        if icons.button_bordered(ctx, "browser_btn", icons.Names.plug, 28, browser_tint) then
             if state.browser then
                 state.browser.visible = not state.browser.visible
             end
         end
-        ctx:pop_style_color()
         if ctx:is_item_hovered() then
             ctx:set_tooltip(browser_visible and "Hide plugin browser" or "Show plugin browser")
         end
@@ -91,13 +84,11 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         ctx:same_line()
 
         -- Add Rack button (also draggable)
-        ctx:push_style_color(imgui.Col.Button(), 0x446688FF)
-        if ctx:button("+ Rack", 0, BUTTON_HEIGHT) then
+        if icons.button_bordered(ctx, "rack_btn", icons.Names.rack, 28, 0x88AAFFFF) then
             if state.track then
                 callbacks.on_add_rack()
             end
         end
-        ctx:pop_style_color()
         -- Drag source for rack
         if ctx:begin_drag_drop_source() then
             ctx:set_drag_drop_payload("RACK_ADD", "new_rack")
@@ -110,14 +101,12 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
 
         -- Scope button (singleton - toggles on/off)
         local has_scope = state.has_scope or false
-        local scope_color = has_scope and 0x448844FF or 0x444444FF
-        ctx:push_style_color(imgui.Col.Button(), scope_color)
-        if ctx:button("Scope", 0, BUTTON_HEIGHT) then
+        local scope_tint = has_scope and 0x88FF88FF or 0xCCCCCCFF
+        if icons.button_bordered(ctx, "scope_btn", icons.Names.oscilloscope, 28, scope_tint) then
             if state.track and callbacks.on_toggle_scope then
                 callbacks.on_toggle_scope()
             end
         end
-        ctx:pop_style_color()
         if ctx:is_item_hovered() then
             ctx:set_tooltip(has_scope and "Remove oscilloscope" or "Add oscilloscope at end of chain")
         end
@@ -126,26 +115,38 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
 
         -- Spectrum button (singleton - toggles on/off)
         local has_spectrum = state.has_spectrum or false
-        local spectrum_color = has_spectrum and 0x448844FF or 0x444444FF
-        ctx:push_style_color(imgui.Col.Button(), spectrum_color)
-        if ctx:button("Spectrum", 0, BUTTON_HEIGHT) then
+        local spectrum_tint = has_spectrum and 0x88FF88FF or 0xCCCCCCFF
+        if icons.button_bordered(ctx, "spectrum_btn", icons.Names.spectrum, 28, spectrum_tint) then
             if state.track and callbacks.on_toggle_spectrum then
                 callbacks.on_toggle_spectrum()
             end
         end
-        ctx:pop_style_color()
         if ctx:is_item_hovered() then
             ctx:set_tooltip(has_spectrum and "Remove spectrum analyzer" or "Add spectrum analyzer at end of chain")
         end
 
-        -- Track name (if enabled)
+        -- Helper to draw breadcrumb-style button
+        local function draw_breadcrumb_button(ctx, label, id)
+            local r = reaper
+            r.ImGui_PushStyleVar(ctx.ctx, r.ImGui_StyleVar_FramePadding(), 8, 5)
+            r.ImGui_PushStyleVar(ctx.ctx, r.ImGui_StyleVar_FrameRounding(), 3)
+            r.ImGui_PushStyleVar(ctx.ctx, r.ImGui_StyleVar_FrameBorderSize(), 1)
+            r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_Button(), 0x333333FF)
+            r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_ButtonHovered(), 0x444444FF)
+            r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_ButtonActive(), 0x555555FF)
+            r.ImGui_PushStyleColor(ctx.ctx, r.ImGui_Col_Border(), 0x555555FF)
+            local clicked = ctx:button(label .. "##" .. id)
+            r.ImGui_PopStyleColor(ctx.ctx, 4)
+            r.ImGui_PopStyleVar(ctx.ctx, 3)
+            return clicked
+        end
+
+        -- Track name (if enabled) - styled as breadcrumb button
         if config.get('show_track_name') then
             ctx:same_line()
-            ctx:text("|")
+            ctx:text_disabled("|")
             ctx:same_line()
-            ctx:push_style_color(imgui.Col.Text(), 0xAADDFFFF)
-            ctx:text(state.track_name)
-            ctx:pop_style_color()
+            draw_breadcrumb_button(ctx, state.track_name, "track_name")
         end
 
         -- Breadcrumb trail (for navigating into containers)
@@ -155,9 +156,22 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
             for i, guid in ipairs(state.expanded_path) do
                 local ok, container = pcall(function() return state.track:find_fx_by_guid(guid) end)
                 if ok and container then
-                    local ok_name, name = pcall(function() return get_fx_display_name(container) end)
-                    if ok_name and name then
-                        table.insert(breadcrumbs, { index = i, name = name, guid = guid })
+                    local ok_raw, raw_name = pcall(function() return container:get_name() end)
+                    if ok_raw and raw_name then
+                        -- Get consistent display name based on container type
+                        local display_name
+                        if raw_name:match("^R%d+$") then
+                            -- Rack (just "R1", "R2", etc.): use "Rack" or custom display name
+                            display_name = get_fx_display_name(container)
+                        elseif raw_name:match("C%d+") then
+                            -- Chain: extract chain number and show "Chain N"
+                            -- Handles both "C1" and "R2_C1" formats
+                            local chain_num = raw_name:match("C(%d+)")
+                            display_name = "Chain " .. (chain_num or "?")
+                        else
+                            display_name = get_fx_display_name(container)
+                        end
+                        table.insert(breadcrumbs, { index = i, name = display_name, guid = guid })
                     end
                 end
             end
@@ -168,7 +182,7 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
                 ctx:text_disabled(">")
                 for j, crumb in ipairs(breadcrumbs) do
                     ctx:same_line()
-                    if ctx:small_button(crumb.name .. "##bread_" .. crumb.index) then
+                    if draw_breadcrumb_button(ctx, crumb.name, "bread_" .. crumb.index) then
                         callbacks.on_collapse_from_depth(crumb.index + 1)
                     end
                     if j < #breadcrumbs then
@@ -182,30 +196,22 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         -- RIGHT COLUMN: Preset and Config buttons
         ctx:table_set_column_index(1)
 
-        local button_width = 30
-
         -- Preset button
-        if icon_font then ctx:push_font(icon_font, icon_size) end
-        local preset_icon = constants.icon_text(emojimgui, constants.Icons.floppy_disk)
-        if ctx:button(preset_icon .. "##preset", button_width, 0) then
+        if icons.button_bordered(ctx, "preset_btn", icons.Names.save, 28) then
             if callbacks.on_preset then
                 callbacks.on_preset()
             end
         end
-        if icon_font then ctx:pop_font() end
         if ctx:is_item_hovered() then ctx:set_tooltip("Save/Load Preset") end
 
         ctx:same_line()
 
         -- Config button
-        if icon_font then ctx:push_font(icon_font, icon_size) end
-        local config_icon = constants.icon_text(emojimgui, constants.Icons.gear)
-        if ctx:button(config_icon .. "##config", button_width, 0) then
+        if icons.button_bordered(ctx, "config_btn", icons.Names.gear, 28) then
             if callbacks.on_config then
                 callbacks.on_config()
             end
         end
-        if icon_font then ctx:pop_font() end
         if ctx:is_item_hovered() then ctx:set_tooltip("Settings") end
 
         -- Add right padding

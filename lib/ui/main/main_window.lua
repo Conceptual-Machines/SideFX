@@ -6,6 +6,7 @@
 
 local imgui = require('imgui')
 local r = reaper
+local icons = require('lib.ui.common.icons')
 
 local M = {}
 
@@ -153,7 +154,7 @@ end
 --   - draw_plugin_browser: function (ctx) -> nil
 --   - draw_device_chain: function (ctx, fx_list, width, height) -> nil
 --   - refresh_fx_list: function () -> nil
---   - EmojImGui: EmojImGui module
+--   - icons: Icons module
 -- @return table {on_close, on_draw}
 function M.create_callbacks(opts)
     local state = opts.state
@@ -168,11 +169,12 @@ function M.create_callbacks(opts)
     local draw_device_chain = opts.draw_device_chain
     local draw_analyzers = opts.draw_analyzers
     local refresh_fx_list = opts.refresh_fx_list
-    local EmojImGui = opts.EmojImGui
+    -- icons module is imported at module level
 
     -- Font references (passed in so they can be updated)
     local default_font_ref = opts.default_font_ref or { value = opts.default_font }
     local icon_font_ref = opts.icon_font_ref or { value = opts.icon_font }
+    local header_font_ref = opts.header_font_ref or { value = nil }
 
     local callbacks = {
         on_close = function(self)
@@ -217,14 +219,35 @@ function M.create_callbacks(opts)
                 end
             end
 
+            -- Create bold font for headers on first frame
+            if not header_font_ref.value then
+                local font_families = {
+                    "Segoe UI",
+                    "Helvetica Neue",
+                    "Arial",
+                    "DejaVu Sans",
+                }
+                local bold_flag = r.ImGui_FontFlags_Bold()
+                for _, family in ipairs(font_families) do
+                    header_font_ref.value = r.ImGui_CreateFont(family, bold_flag)
+                    if header_font_ref.value then
+                        break
+                    end
+                end
+                if not header_font_ref.value then
+                    header_font_ref.value = r.ImGui_CreateFont("", bold_flag)
+                end
+            end
+
             -- Push default font if available
             if default_font_ref.value then
                 ctx:push_font(default_font_ref.value, 14)
             end
 
-            -- Load icon font on first frame
+            -- Preload icons on first frame
             if not icon_font_ref.value then
-                icon_font_ref.value = EmojImGui.Asset.Font(ctx.ctx, "OpenMoji")
+                icons.preload_all(ctx.ctx)
+                icon_font_ref.value = true  -- Mark as initialized
             end
 
             -- Track change detection
@@ -415,11 +438,18 @@ function M.create_callbacks(opts)
                         end
 
                         -- Draw the horizontal device chain (includes modulators)
-                        draw_device_chain(ctx, filtered_fx, chain_w, avail_h, icon_font_ref)
+                        -- Use smaller font for chain content
+                        if default_font_ref.value then
+                            r.ImGui_PushFont(ctx.ctx, default_font_ref.value, 12)
+                        end
+                        draw_device_chain(ctx, filtered_fx, chain_w, avail_h, icon_font_ref, header_font_ref)
 
                         -- Draw analyzer visualizations at end of chain
                         if draw_analyzers then
                             draw_analyzers(ctx, avail_h)
+                        end
+                        if default_font_ref.value then
+                            r.ImGui_PopFont(ctx.ctx)
                         end
                     end
                 end

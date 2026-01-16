@@ -10,6 +10,7 @@ local widgets = require('lib.ui.common.widgets')
 local fx_utils = require('lib.fx.fx_utils')
 local modulator_sidebar = require('lib.ui.device.modulator_sidebar')
 local drawing = require('lib.ui.common.drawing')
+local icons = require('lib.ui.common.icons')
 local fx_naming = require('lib.fx.fx_naming')
 local param_utils = require('lib.utils.param_utils')
 local state_module = require('lib.core.state')
@@ -244,17 +245,15 @@ local function draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opt
 
         -- ON/OFF toggle
         r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-        local avail_w, avail_h = ctx:get_content_region_avail()
-        if avail_w > 0 and drawing.draw_on_off_circle(ctx, "##on_off_" .. state_guid, enabled, avail_w, 24, colors.bypass_on, colors.bypass_off) then
+        local on_tint = enabled and 0x88FF88FF or 0x888888FF
+        if icons.button_bordered(ctx, "on_off_" .. state_guid, icons.Names.on, 18, on_tint) then
             fx:set_enabled(not enabled)
             interacted = true
         end
 
         -- Close button
         r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
-        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x444444FF)
-        if ctx:button("×", -1, 24) then
+        if icons.button_bordered(ctx, "delete_" .. state_guid, icons.Names.cancel, 18, 0xFF6666FF) then
             if opts.on_delete then
                 opts.on_delete(fx)
             else
@@ -262,7 +261,6 @@ local function draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opt
             end
             interacted = true
         end
-        ctx:pop_style_color(2)
 
         r.ImGui_EndTable(ctx.ctx)
     end
