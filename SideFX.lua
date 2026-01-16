@@ -1153,10 +1153,12 @@ local function main()
     -- Load parameter unit overrides (global, not per-track)
     state_module.load_param_unit_overrides()
 
-    -- Load expansion state and display names for current track
+    -- Load expansion state, display names, link scales, and mod slots for current track
     if state.track then
         state_module.load_expansion_state()
         state_module.load_display_names()
+        state_module.load_link_scales()
+        state_module.load_expanded_mod_slots()
     end
 
     -- Initialize module-level font references (will be updated by main_window when fonts load)

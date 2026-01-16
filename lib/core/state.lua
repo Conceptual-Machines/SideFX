@@ -623,6 +623,120 @@ function M.load_display_names()
     end
 end
 
+--- Save disabled link scales to project.
+-- Persists link_saved_scale so disabled links show correct value after script restart.
+function M.save_link_scales()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    -- Serialize link_saved_scale as key=value pairs
+    local scale_pairs = {}
+    local count = 0
+    if state.link_saved_scale then
+        for link_key, scale in pairs(state.link_saved_scale) do
+            if scale then
+                table.insert(scale_pairs, link_key .. "=" .. tostring(scale))
+                count = count + 1
+            end
+        end
+    end
+
+    local key = "LinkScales_" .. track_guid
+    if count > 0 then
+        local serialized = table.concat(scale_pairs, "|")
+        r.SetProjExtState(0, "SideFX", key, serialized)
+    else
+        r.SetProjExtState(0, "SideFX", key, "")
+    end
+end
+
+--- Load disabled link scales from project.
+function M.load_link_scales()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    local key = "LinkScales_" .. track_guid
+    local ok_get, serialized = r.GetProjExtState(0, "SideFX", key)
+
+    if ok_get == 0 or not serialized or serialized == "" then
+        state.link_saved_scale = state.link_saved_scale or {}
+        return
+    end
+
+    -- Parse serialized data
+    state.link_saved_scale = state.link_saved_scale or {}
+    for pair in serialized:gmatch("([^|]+)") do
+        local link_key, scale_str = pair:match("^(.+)=([%d%.%-]+)$")
+        if link_key and scale_str then
+            local scale = tonumber(scale_str)
+            if scale then
+                state.link_saved_scale[link_key] = scale
+            end
+        end
+    end
+end
+
+--- Save expanded modulator slots to project.
+-- Persists which LFO slot is expanded for each device.
+function M.save_expanded_mod_slots()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    -- Serialize expanded_mod_slot as state_guid=slot_idx pairs
+    local slot_pairs = {}
+    local count = 0
+    if state.expanded_mod_slot then
+        for state_guid, slot_idx in pairs(state.expanded_mod_slot) do
+            if slot_idx ~= nil then
+                table.insert(slot_pairs, state_guid .. "=" .. tostring(slot_idx))
+                count = count + 1
+            end
+        end
+    end
+
+    local key = "ExpandedModSlots_" .. track_guid
+    if count > 0 then
+        local serialized = table.concat(slot_pairs, "|")
+        r.SetProjExtState(0, "SideFX", key, serialized)
+    else
+        r.SetProjExtState(0, "SideFX", key, "")
+    end
+end
+
+--- Load expanded modulator slots from project.
+function M.load_expanded_mod_slots()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    local key = "ExpandedModSlots_" .. track_guid
+    local ok_get, serialized = r.GetProjExtState(0, "SideFX", key)
+
+    if ok_get == 0 or not serialized or serialized == "" then
+        state.expanded_mod_slot = state.expanded_mod_slot or {}
+        return
+    end
+
+    -- Parse serialized data
+    state.expanded_mod_slot = state.expanded_mod_slot or {}
+    for pair in serialized:gmatch("([^|]+)") do
+        local state_guid, slot_str = pair:match("^(.+)=([%d]+)$")
+        if state_guid and slot_str then
+            local slot_idx = tonumber(slot_str)
+            if slot_idx then
+                state.expanded_mod_slot[state_guid] = slot_idx
+            end
+        end
+    end
+end
+
 --------------------------------------------------------------------------------
 -- Configuration Management
 --------------------------------------------------------------------------------

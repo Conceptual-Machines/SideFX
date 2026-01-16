@@ -268,6 +268,8 @@ local function draw_modulator_grid(ctx, guid, modulators, expanded_slot_idx, slo
                         else
                             state.expanded_mod_slot[state_guid] = slot_idx
                         end
+                        -- Persist expanded mod slot state
+                        state_module.save_expanded_mod_slots()
                         interacted = true
                     end
 
@@ -281,6 +283,7 @@ local function draw_modulator_grid(ctx, guid, modulators, expanded_slot_idx, slo
                             if ok_del then
                                 -- Clear expansion state for this slot
                                 state.expanded_mod_slot[state_guid] = nil
+                                state_module.save_expanded_mod_slots()
                                 -- Refresh FX list
                                 if opts.refresh_fx_list then
                                     opts.refresh_fx_list()
@@ -1189,12 +1192,15 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                 local plink_prefix = string.format("param.%d.plink.", link.param_idx)
                 local actual_depth = link.scale
 
-                -- Check if link is disabled (scale ~= 0 or we have saved scale)
-                local is_disabled = state.link_disabled[link_key] or false
-                -- Also detect if scale is 0 but we don't have it tracked
-                if math.abs(actual_depth) < 0.001 and state.link_saved_scale[link_key] then
-                    is_disabled = true
+                -- Check if link is disabled (scale ~0 means disabled)
+                -- This detection works even after script restart since we check actual scale value
+                local is_disabled = math.abs(actual_depth) < 0.001
+                -- Sync state with actual scale (handles script restart)
+                if is_disabled then
                     state.link_disabled[link_key] = true
+                elseif state.link_disabled[link_key] then
+                    -- Scale is non-zero but state says disabled - clear stale state
+                    state.link_disabled[link_key] = false
                 end
 
                 ctx:table_next_row()
@@ -1267,7 +1273,7 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                 local depth_avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
                 ctx:set_next_item_width(-1)
 
-                local depth_value = is_disabled and (state.link_saved_scale[link_key] or 0) or actual_depth
+                local depth_value = is_disabled and (state.link_saved_scale[link_key] or 0.5) or actual_depth
                 -- Convert -1 to 1 range to 0-1 for slider (better granularity)
                 local depth_norm = (depth_value + 1) / 2
 
@@ -1321,6 +1327,8 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                         fx:set_named_config_param(plink_prefix .. "scale", "0")
                         state.link_disabled[link_key] = true
                     end
+                    -- Persist link scales to project
+                    state_module.save_link_scales()
                     interacted = true
                 end
                 if is_disabled then
@@ -1363,6 +1371,7 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                                 state.link_disabled = state.link_disabled or {}
                                 state.link_saved_scale[link_key] = current_scale
                                 state.link_disabled[link_key] = true
+                                state_module.save_link_scales()
                             end
                         elseif not ok then
                             r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
@@ -1432,6 +1441,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                 local ok_guid, m_guid = pcall(function() return mod:get_guid() end)
                 if ok_guid and m_guid == mod_guid then
                     state.expanded_mod_slot[state_guid] = idx - 1  -- 0-based slot index
+                    state_module.save_expanded_mod_slots()
                     break
                 end
             end
@@ -1464,6 +1474,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     -- Select this mod and expand sidebar
                     state.expanded_mod_slot[state_guid] = slot_idx
                     state.mod_sidebar_collapsed[state_guid] = false
+                    state_module.save_expanded_mod_slots()
                     interacted = true
                 end
             end
@@ -1601,6 +1612,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                                 state.link_saved_scale[link_key] = saved_scales[lnk.param_idx]
                                                 state.link_disabled[link_key] = true
                                             end
+                                            state_module.save_link_scales()
                                         end
                                     elseif not ok then
                                         r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
@@ -1808,6 +1820,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                                     state.link_saved_scale[link_key] = modal_state.link.scale
                                     state.link_disabled[link_key] = true
                                 end
+                                state_module.save_link_scales()
                             end
                         elseif not ok then
                             r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")

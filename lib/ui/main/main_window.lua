@@ -280,6 +280,8 @@ function M.create_callbacks(opts)
                 if state.track then
                     state_module.load_expansion_state()
                     state_module.load_display_names()
+                    state_module.load_link_scales()
+                    state_module.load_expanded_mod_slots()
                 end
             else
                 -- Process any pending modulator additions (deferred from previous frame)

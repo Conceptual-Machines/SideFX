@@ -483,7 +483,11 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
         return false, "Could not create automation envelope"
     end
 
-    -- Begin undo block
+    -- Save any pending changes as separate undo point before bake
+    -- This prevents undo from rolling back modulator waveform/rate changes made before bake
+    r.Undo_OnStateChange("Modulator changes")
+
+    -- Begin undo block for bake operation
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
 
@@ -502,9 +506,6 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
             r.Undo_EndBlock("Bake LFO to Automation", -1)
             return false, "No MIDI notes found in time range"
         end
-
-        r.ShowConsoleMsg(string.format("Bake: Found %d MIDI notes for trigger (cycle_duration=%.3fs)\n",
-            #midi_notes, cycle_duration))
 
         for _, note in ipairs(midi_notes) do
             local note_duration = note.duration
