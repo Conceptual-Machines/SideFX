@@ -30,7 +30,6 @@ Ableton/Bitwig-style FX rack management for REAPER 7+.
 | ReaImGui | ReaTeam Extensions | UI framework |
 | ReaWrap | Conceptual Machines | OOP wrapper library |
 | RPP-Parser | ReaTeam Scripts | Preset save/load |
-| EmojImGui | ReaTeam Scripts | Icon support |
 | js_ReaScriptAPI (optional) | ReaTeam Extensions | Custom preset folder selection |
 
 > **Note:** Dependencies must be installed manually via ReaPack before installing SideFX.
@@ -43,7 +42,7 @@ Ableton/Bitwig-style FX rack management for REAPER 7+.
 
 ### Via ReaPack
 
-1. Install dependencies from ReaTeam repositories (ReaImGui, RPP-Parser, EmojImGui)
+1. Install dependencies from ReaTeam repositories (ReaImGui, RPP-Parser)
 2. Add Conceptual Machines repositories via **Extensions > ReaPack > Import repositories...**:
    ```
    https://github.com/Conceptual-Machines/ReaWrap/raw/main/index.xml

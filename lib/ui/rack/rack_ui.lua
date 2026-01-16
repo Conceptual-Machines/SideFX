@@ -279,7 +279,6 @@ end
 --   - on_toggle_expand: (rack_guid, is_expanded) -> nil
 --   - on_rename: (rack_guid, display_name) -> nil
 --   - on_delete: (rack) -> nil
---   - icon_font: ImGui font for emojis (optional)
 function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
     is_nested = (is_nested == true)
 
