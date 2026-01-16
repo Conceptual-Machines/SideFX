@@ -79,29 +79,12 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         if ctx:button("≡##drag_" .. guid, 20, 20) then
             -- Drag handle doesn't do anything on click
         end
-        if r.ImGui_IsItemHovered(ctx.ctx) then
-            ctx:set_tooltip("Drag to reorder")
-        end
-        ctx:same_line(0, 2)  -- Minimal gap
-        if ctx:button("▼##collapse_" .. guid, 20, 20) then
-            local state_module = require('lib.core.state')
-            local state = state_module.state
-            state.device_controls_collapsed = state.device_controls_collapsed or {}
-            state.device_controls_collapsed[state_guid] = true
-            state_module.save_device_collapsed_states()
-        end
-        ctx:pop_style_color(3)
-        if r.ImGui_IsItemHovered(ctx.ctx) then
-            ctx:set_tooltip("Collapse device")
-        end
-
-        -- Drag/drop handling
+        -- Drag source must be right after the drag handle button
         if ctx:begin_drag_drop_source() then
             ctx:set_drag_drop_payload("FX_GUID", drag_guid)
             ctx:text("Moving: " .. fx_naming.truncate(name, 20))
             ctx:end_drag_drop_source()
         end
-
         if ctx:begin_drag_drop_target() then
             local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
             if accepted and payload and payload ~= drag_guid then
@@ -125,6 +108,21 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
                 interacted = true
             end
             ctx:end_drag_drop_target()
+        end
+        if r.ImGui_IsItemHovered(ctx.ctx) then
+            ctx:set_tooltip("Drag to reorder")
+        end
+        ctx:same_line(0, 2)  -- Minimal gap
+        if ctx:button("▼##collapse_" .. guid, 20, 20) then
+            local state_module = require('lib.core.state')
+            local state = state_module.state
+            state.device_controls_collapsed = state.device_controls_collapsed or {}
+            state.device_controls_collapsed[state_guid] = true
+            state_module.save_device_collapsed_states()
+        end
+        ctx:pop_style_color(3)
+        if r.ImGui_IsItemHovered(ctx.ctx) then
+            ctx:set_tooltip("Collapse device")
         end
 
         -- Column 2: Device name (editable)
