@@ -496,7 +496,6 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
     -- Read metadata from GMEM
     local num_samples = r.gmem_read(scope_base + 2048) or 0
     local view_msec = r.gmem_read(scope_base + 2049) or 100
-    local view_maxdb = r.gmem_read(scope_base + 2050) or 0
 
     -- Use num_samples or default buffer size
     local buffer_size = num_samples > 0 and math.floor(num_samples) or 1024
@@ -511,37 +510,24 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
     -- Background
     r.ImGui_DrawList_AddRectFilled(draw_list, x, y, x + width, y + height, 0x1A1A1AFF, 4)
 
-    -- Center line
+    -- Center line (silence / -48dB threshold)
     local center_y = y + height/2
     r.ImGui_DrawList_AddLine(draw_list, x, center_y, x + width, center_y, 0x666666FF, 1)
 
-    -- Y-axis grid (dB levels based on view_maxdb)
-    -- Draw some horizontal reference lines
-    local db_marks = {0, -6, -12, -18, -24}
-    if view_maxdb < 0 then
-        -- Zoom range from center
-        local zoom_scale = math.exp(-view_maxdb * (math.log(10)/20))
-        for _, db in ipairs(db_marks) do
-            local amp = math.exp(db * (math.log(10)/20))  -- dB to linear
-            local offset = amp * zoom_scale * (height/2 - 4)
-            if offset < height/2 - 4 then
-                -- Upper and lower lines
-                r.ImGui_DrawList_AddLine(draw_list, x, center_y - offset, x + width, center_y - offset, grid_color, 1)
-                r.ImGui_DrawList_AddLine(draw_list, x, center_y + offset, x + width, center_y + offset, grid_color, 1)
-                -- Labels
-                local label_text = string.format("%ddB", db)
-                r.ImGui_DrawList_AddText(draw_list, x + 2, center_y - offset - 10, label_color, label_text)
-            end
-        end
-    else
-        -- Standard amplitude grid
-        local y_levels = {1, 0.5, 0, -0.5, -1}
-        local y_labels = {"+1", "+.5", "0", "-.5", "-1"}
-        for i, level in ipairs(y_levels) do
-            local line_y = center_y - level * (height/2 - 4)
-            r.ImGui_DrawList_AddLine(draw_list, x, line_y, x + width, line_y, grid_color, 1)
-            r.ImGui_DrawList_AddText(draw_list, x + 2, line_y - 6, label_color, y_labels[i])
-        end
+    -- Y-axis grid (dB levels) - logarithmic scale
+    -- Display range: 0dB at edge, -48dB at center
+    local db_range = 48
+    local db_marks = {0, -6, -12, -18, -24, -36, -48}
+    for _, db in ipairs(db_marks) do
+        -- Map dB to normalized position (0dB=1, -48dB=0)
+        local normalized = (db + db_range) / db_range
+        local offset = normalized * (height/2 - 4)
+        -- Upper and lower lines (positive and negative amplitude)
+        r.ImGui_DrawList_AddLine(draw_list, x, center_y - offset, x + width, center_y - offset, grid_color, 1)
+        r.ImGui_DrawList_AddLine(draw_list, x, center_y + offset, x + width, center_y + offset, grid_color, 1)
+        -- Labels (only on upper lines to avoid clutter)
+        local label_text = string.format("%ddB", db)
+        r.ImGui_DrawList_AddText(draw_list, x + 2, center_y - offset - 10, label_color, label_text)
     end
 
     -- X-axis grid (time divisions)
@@ -562,9 +548,32 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
         r.ImGui_DrawList_AddText(draw_list, line_x + 2, y + height - 12, label_color, label_text)
     end
 
+    -- Helper: convert linear amplitude to logarithmic display position
+    -- Maps amplitude to dB scale, preserving sign for display
+    local function amp_to_log_y(sample)
+        local sign = sample >= 0 and 1 or -1
+        local abs_sample = math.abs(sample)
+
+        -- Clamp minimum to avoid log(0)
+        if abs_sample < 0.001 then
+            return center_y  -- Below -60dB, treat as zero
+        end
+
+        -- Convert to dB (0dB = amplitude 1.0)
+        local db = 20 * math.log(abs_sample, 10)
+
+        -- Map dB to display: 0dB at edge, -48dB at center
+        -- This gives us a useful range where quiet signals are visible
+        local db_range = 48  -- Display range in dB
+        local normalized = math.max(0, math.min(1, (db + db_range) / db_range))
+
+        -- Apply sign and convert to Y position
+        local offset = normalized * (height/2 - 4)
+        return center_y - sign * offset
+    end
+
     -- Draw both channels if we have samples
     if buffer_size > 0 then
-        -- Draw left channel
         local prev_px_l, prev_py_l
         local prev_px_r, prev_py_r
 
@@ -579,8 +588,8 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
                 sample_r = math.max(-1, math.min(1, sample_r))
 
                 local px = x + i
-                local py_l = center_y - sample_l * (height/2 - 4)
-                local py_r = center_y - sample_r * (height/2 - 4)
+                local py_l = amp_to_log_y(sample_l)
+                local py_r = amp_to_log_y(sample_r)
 
                 -- Draw left channel line (green)
                 if prev_px_l then
@@ -689,64 +698,90 @@ function M.draw_spectrum(ctx, label, width, height, slot)
         end
     end
 
-    -- Draw spectrum - iterate over bins and interpolate for smooth appearance
-    -- Build array of (x_pos, magnitude) points
-    local points = {}
+    -- Draw spectrum using smooth curve
+    -- Build array of (x_pos, magnitude) points from FFT bins
+    local bin_points = {}
     for bin = 1, num_bins - 1 do  -- Skip bin 0 (DC)
         local freq = bin * hz_per_bin
         if freq >= min_freq and freq <= max_freq then
             local bin_x = freq_to_x(freq)
             local mag = r.gmem_read(fft_base + bin) or 0
             mag = math.max(0, math.min(1, mag))
-            table.insert(points, {x = bin_x, mag = mag})
+            table.insert(bin_points, {x = bin_x, mag = mag})
         end
     end
 
-    -- Draw filled spectrum by interpolating between points
     local bottom_y = y + height - 1
-    for px = 0, width - 1 do
-        local px_x = x + px
 
-        -- Find surrounding points for interpolation
+    -- Sample at regular pixel intervals with interpolation for smooth curve
+    local curve_points = {}
+    local step = 2  -- Sample every 2 pixels for smoother curve
+    for px = 0, width - 1, step do
+        local px_x = x + px
         local mag = 0
         local found = false
 
-        for i = 1, #points - 1 do
-            if points[i].x <= px_x and points[i+1].x >= px_x then
-                -- Linear interpolation between bins
-                local t = (px_x - points[i].x) / (points[i+1].x - points[i].x + 0.001)
-                mag = points[i].mag * (1 - t) + points[i+1].mag * t
-                found = true
-                break
+        -- Find surrounding bin points for interpolation
+        if #bin_points >= 2 then
+            for i = 1, #bin_points - 1 do
+                if bin_points[i].x <= px_x and bin_points[i+1].x >= px_x then
+                    -- Smooth interpolation between bins
+                    local dx = bin_points[i+1].x - bin_points[i].x
+                    if dx > 0.001 then
+                        local t = (px_x - bin_points[i].x) / dx
+                        -- Smoothstep for smoother transitions
+                        t = math.max(0, math.min(1, t))
+                        t = t * t * (3 - 2 * t)
+                        mag = bin_points[i].mag * (1 - t) + bin_points[i+1].mag * t
+                    else
+                        mag = (bin_points[i].mag + bin_points[i+1].mag) * 0.5
+                    end
+                    found = true
+                    break
+                end
             end
-        end
 
-        -- Handle edges
-        if not found and #points > 0 then
-            if px_x < points[1].x then
-                mag = points[1].mag
-            elseif px_x > points[#points].x then
-                mag = points[#points].mag
+            -- Handle edges (before first or after last bin)
+            if not found then
+                if px_x <= bin_points[1].x then
+                    mag = bin_points[1].mag
+                elseif px_x >= bin_points[#bin_points].x then
+                    mag = bin_points[#bin_points].mag
+                end
             end
+        elseif #bin_points == 1 then
+            mag = bin_points[1].mag
         end
 
         mag = math.max(0, math.min(1, mag))
-        local bar_height = mag * (height - 2)
-        local bar_y = bottom_y - bar_height
+        local point_y = bottom_y - mag * (height - 2)
+        table.insert(curve_points, {x = px_x, y = point_y, mag = mag})
+    end
 
-        if bar_height > 0 then
-            -- Color gradient based on magnitude (yellow spectrum style)
-            local bar_color
-            if mag > 0.8 then
-                bar_color = 0xFFFF00FF  -- Bright yellow
-            elseif mag > 0.5 then
-                bar_color = 0xFFCC00FF  -- Yellow
-            else
-                bar_color = 0xCC9900FF  -- Darker yellow/orange
-            end
+    -- Draw filled area under curve using triangles
+    local fill_color = 0xCC990066  -- Semi-transparent orange/yellow
+    for i = 1, #curve_points - 1 do
+        local p1 = curve_points[i]
+        local p2 = curve_points[i + 1]
+        -- Draw quad as two triangles
+        r.ImGui_DrawList_AddTriangleFilled(draw_list,
+            p1.x, p1.y,
+            p2.x, p2.y,
+            p2.x, bottom_y,
+            fill_color)
+        r.ImGui_DrawList_AddTriangleFilled(draw_list,
+            p1.x, p1.y,
+            p2.x, bottom_y,
+            p1.x, bottom_y,
+            fill_color)
+    end
 
-            r.ImGui_DrawList_AddLine(draw_list, px_x, bar_y, px_x, bottom_y, bar_color, 1)
-        end
+    -- Draw smooth curve line on top
+    local line_color = 0xFFCC00FF  -- Yellow
+    for i = 1, #curve_points - 1 do
+        local p1 = curve_points[i]
+        local p2 = curve_points[i + 1]
+        r.ImGui_DrawList_AddLine(draw_list, p1.x, p1.y, p2.x, p2.y, line_color, 2.0)
     end
 
     -- Border

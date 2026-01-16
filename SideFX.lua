@@ -693,16 +693,292 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height, icon_f
 end
 
 -- Default analyzer panel sizes (can be adjusted via state)
-local DEFAULT_ANALYZER_W = 500
+local DEFAULT_ANALYZER_W = 600
 local DEFAULT_ANALYZER_H = 200
 
 --- Draw analyzer visualizations (scope/spectrum) at end of chain
+--- Draw scope controls (shared between inline and popout)
+-- @param suffix string Optional suffix for widget IDs (e.g., "_pop" for popout)
+local function draw_scope_controls(ctx, scope_fx, analyzer_w, suffix)
+    suffix = suffix or ""
+    local half_w = (analyzer_w - 8) / 2
+
+    -- Time window slider (param 0) - 1-500 ms
+    ctx:push_item_width(half_w)
+    local time_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 0)
+    local time_ms = 1 + time_val * 499
+    local changed, new_time = r.ImGui_SliderDouble(ctx.ctx, "##scope_time" .. suffix, time_ms, 1, 500, "%.0f ms")
+    if changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 0, (new_time - 1) / 499)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Time window") end
+    ctx:pop_item_width()
+
+    ctx:same_line()
+
+    -- Gain slider (param 1) - -24 to +24 dB
+    ctx:push_item_width(half_w)
+    local gain_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 1)
+    local gain_db = -24 + gain_val * 48
+    local gain_changed, new_gain = r.ImGui_SliderDouble(ctx.ctx, "##scope_gain" .. suffix, gain_db, -24, 24, "%.1f dB")
+    if gain_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 1, (new_gain + 24) / 48)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Gain") end
+    ctx:pop_item_width()
+
+    -- Controls row 2
+    local third_w = (analyzer_w - 16) / 3
+
+    -- Trigger mode combo (param 2)
+    ctx:push_item_width(third_w)
+    local trig_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 2)
+    local trig_mode = math.floor(trig_val * 2 + 0.5)
+    local trig_changed, new_trig = r.ImGui_Combo(ctx.ctx, "##scope_trig" .. suffix, trig_mode, "Auto\0Rising\0Falling\0")
+    if trig_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 2, new_trig / 2)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Trigger mode") end
+    ctx:pop_item_width()
+
+    ctx:same_line()
+
+    -- Trigger level slider (param 3) - -1 to +1
+    ctx:push_item_width(third_w)
+    local level_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 3)
+    local level = -1 + level_val * 2
+    local level_changed, new_level = r.ImGui_SliderDouble(ctx.ctx, "##scope_level" .. suffix, level, -1, 1, "%.2f")
+    if level_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 3, (new_level + 1) / 2)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Trigger level") end
+    ctx:pop_item_width()
+
+    ctx:same_line()
+
+    -- Channel combo (param 4)
+    ctx:push_item_width(third_w)
+    local ch_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 4)
+    local ch_mode = math.floor(ch_val * 2 + 0.5)
+    local ch_changed, new_ch = r.ImGui_Combo(ctx.ctx, "##scope_ch" .. suffix, ch_mode, "Stereo\0Left\0Right\0")
+    if ch_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 4, new_ch / 2)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Channel") end
+    ctx:pop_item_width()
+end
+
+--- Draw spectrum controls (shared between inline and popout)
+-- @param suffix string Optional suffix for widget IDs (e.g., "_pop" for popout)
+local function draw_spectrum_controls(ctx, spectrum_fx, analyzer_w, suffix)
+    suffix = suffix or ""
+    local half_w = (analyzer_w - 8) / 2
+
+    -- FFT size combo (param 0) - 0-8 maps to 64-16384
+    ctx:push_item_width(half_w)
+    local fft_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 0)
+    local fft_idx = math.floor(fft_val * 8 + 0.5)
+    local fft_options = "64" .. "\0" .. "128" .. "\0" .. "256" .. "\0" .. "512" .. "\0" .. "1024" .. "\0" .. "2048" .. "\0" .. "4096" .. "\0" .. "8192" .. "\0" .. "16384" .. "\0"
+    local fft_changed, new_fft = r.ImGui_Combo(ctx.ctx, "##spec_fft" .. suffix, fft_idx, fft_options)
+    if fft_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 0, new_fft / 8)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("FFT size") end
+    ctx:pop_item_width()
+
+    ctx:same_line()
+
+    -- Floor dB slider (param 1) - -90 to -12 dB
+    ctx:push_item_width(half_w)
+    local floor_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 1)
+    local floor_db = -90 + floor_val * 78
+    local floor_changed, new_floor = r.ImGui_SliderDouble(ctx.ctx, "##spec_floor" .. suffix, floor_db, -90, -12, "%.0f dB")
+    if floor_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 1, (new_floor + 90) / 78)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Floor level") end
+    ctx:pop_item_width()
+
+    -- Controls row 2
+    local third_w = (analyzer_w - 16) / 3
+
+    -- Smoothing slider (param 2) - 0 to 0.95
+    ctx:push_item_width(third_w)
+    local smooth_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 2)
+    local smooth = smooth_val * 0.95
+    local smooth_changed, new_smooth = r.ImGui_SliderDouble(ctx.ctx, "##spec_smooth" .. suffix, smooth * 100, 0, 95, "%.0f%%")
+    if smooth_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 2, new_smooth / 100 / 0.95)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Smoothing") end
+    ctx:pop_item_width()
+
+    ctx:same_line()
+
+    -- Slope slider (param 3) - 0 to 12 dB/oct
+    ctx:push_item_width(third_w)
+    local slope_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 3)
+    local slope = slope_val * 12
+    local slope_changed, new_slope = r.ImGui_SliderDouble(ctx.ctx, "##spec_slope" .. suffix, slope, 0, 12, "%.1f dB/oct")
+    if slope_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 3, new_slope / 12)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Slope (high freq boost)") end
+    ctx:pop_item_width()
+
+    ctx:same_line()
+
+    -- Channel combo (param 4)
+    ctx:push_item_width(third_w)
+    local ch_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 4)
+    local ch_mode = math.floor(ch_val * 2 + 0.5)
+    local ch_changed, new_ch = r.ImGui_Combo(ctx.ctx, "##spec_ch" .. suffix, ch_mode, "Stereo\0Left\0Right\0")
+    if ch_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 4, new_ch / 2)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Channel") end
+    ctx:pop_item_width()
+end
+
+--- Draw analyzer popout windows (called from main render)
+local function draw_analyzer_popouts(ctx)
+    local drawing = require('lib.ui.common.drawing')
+    local imgui = require('imgui')
+
+    if not state.track then return end
+
+    -- Connect to JSFX GMEM namespace
+    r.gmem_attach("SideFX")
+
+    local slot = get_track_slot()
+
+    -- Scope popout window
+    if state.scope_popout and state.has_scope then
+        local scope_fx = find_analyzer_fx(state.track, SCOPE_PATTERN)
+
+        ctx:set_next_window_size(650, 400, imgui.Cond.FirstUseEver())
+        local window_flags = 0
+        local visible, open = ctx:begin_window("Oscilloscope##popout", true, window_flags)
+        if visible then
+            -- Header with controls
+            if scope_fx then
+                -- Freeze toggle
+                local freeze_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 5)
+                local is_frozen = freeze_val > 0.5
+                ctx:push_style_color(imgui.Col.Button(), is_frozen and 0x4488FFFF or 0x444444FF)
+                if ctx:button(is_frozen and "||" or ">", 24, 20) then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 5, is_frozen and 0 or 1)
+                end
+                ctx:pop_style_color()
+                if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
+                ctx:same_line()
+            end
+
+            -- Delete button
+            ctx:push_style_color(imgui.Col.Button(), 0x663333FF)
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x884444FF)
+            if ctx:button("Remove##del_scope_pop") then
+                toggle_scope()
+                state.scope_popout = false
+            end
+            ctx:pop_style_color(2)
+
+            ctx:same_line()
+
+            -- Dock back button
+            if ctx:button("Dock") then
+                state.scope_popout = false
+            end
+            if ctx:is_item_hovered() then ctx:set_tooltip("Dock back to main window") end
+
+            -- Visualization - use available space
+            local avail_w, avail_h = ctx:get_content_region_avail()
+            local viz_h = avail_h - 60  -- Leave room for controls
+            drawing.draw_oscilloscope(ctx, "##scope_popout_viz", avail_w, viz_h, slot)
+
+            -- Controls
+            if scope_fx then
+                draw_scope_controls(ctx, scope_fx, avail_w, "_pop")
+            end
+
+            ctx:end_window()
+        end
+        if not open then
+            state.scope_popout = false
+        end
+    end
+
+    -- Spectrum popout window
+    if state.spectrum_popout and state.has_spectrum then
+        local spectrum_fx = find_analyzer_fx(state.track, SPECTRUM_PATTERN)
+
+        ctx:set_next_window_size(650, 400, imgui.Cond.FirstUseEver())
+        local window_flags = 0
+        local visible, open = ctx:begin_window("Spectrum Analyzer##popout", true, window_flags)
+        if visible then
+            -- Header with controls
+            if spectrum_fx then
+                -- Freeze toggle
+                local freeze_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 5)
+                local is_frozen = freeze_val > 0.5
+                ctx:push_style_color(imgui.Col.Button(), is_frozen and 0x4488FFFF or 0x444444FF)
+                if ctx:button(is_frozen and "||" or ">", 24, 20) then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 5, is_frozen and 0 or 1)
+                end
+                ctx:pop_style_color()
+                if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
+                ctx:same_line()
+            end
+
+            -- Delete button
+            ctx:push_style_color(imgui.Col.Button(), 0x663333FF)
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x884444FF)
+            if ctx:button("Remove##del_spec_pop") then
+                toggle_spectrum()
+                state.spectrum_popout = false
+            end
+            ctx:pop_style_color(2)
+
+            ctx:same_line()
+
+            -- Dock back button
+            if ctx:button("Dock##spec") then
+                state.spectrum_popout = false
+            end
+            if ctx:is_item_hovered() then ctx:set_tooltip("Dock back to main window") end
+
+            -- Visualization - use available space
+            local avail_w, avail_h = ctx:get_content_region_avail()
+            local viz_h = avail_h - 60  -- Leave room for controls
+            drawing.draw_spectrum(ctx, "##spectrum_popout_viz", avail_w, viz_h, slot)
+
+            -- Controls
+            if spectrum_fx then
+                draw_spectrum_controls(ctx, spectrum_fx, avail_w, "_pop")
+            end
+
+            ctx:end_window()
+        end
+        if not open then
+            state.spectrum_popout = false
+        end
+    end
+end
+
 local function draw_analyzers(ctx, avail_height)
     local drawing = require('lib.ui.common.drawing')
     local imgui = require('imgui')
 
+    -- Draw popout windows first (always, even if inline panels are hidden)
+    draw_analyzer_popouts(ctx)
+
     local has_any = state.has_scope or state.has_spectrum
     if not has_any then return end
+
+    -- Check if any inline panels should be shown
+    local show_inline_scope = state.has_scope and not state.scope_popout
+    local show_inline_spectrum = state.has_spectrum and not state.spectrum_popout
+    if not show_inline_scope and not show_inline_spectrum then return end
 
     -- Connect to JSFX GMEM namespace (required to read GMEM data)
     r.gmem_attach("SideFX")
@@ -720,9 +996,9 @@ local function draw_analyzers(ctx, avail_height)
     -- Get current track slot for GMEM isolation
     local slot = get_track_slot()
 
-    -- Draw scope if active
+    -- Draw scope if active and not popped out
     -- Params: 0=Time, 1=Gain, 2=TrigMode, 3=TrigLevel, 4=Channel, 5=Freeze, 6=Slot
-    if state.has_scope then
+    if show_inline_scope then
         local scope_fx = find_analyzer_fx(state.track, SCOPE_PATTERN)
 
         ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1AFF)
@@ -743,10 +1019,17 @@ local function draw_analyzers(ctx, avail_height)
                 if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
             end
 
-            ctx:same_line(analyzer_w - 8)
+            -- Popout button
+            ctx:same_line(analyzer_w - 36)
+            if ctx:button("^##popout_scope", 20, 20) then
+                state.scope_popout = true
+            end
+            if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
+
+            ctx:same_line()
             ctx:push_style_color(imgui.Col.Button(), 0x663333FF)
             ctx:push_style_color(imgui.Col.ButtonHovered(), 0x884444FF)
-            if ctx:button("×##del_scope", 20, 20) then
+            if ctx:button("x##del_scope", 20, 20) then
                 toggle_scope()
             end
             ctx:pop_style_color(2)
@@ -754,73 +1037,9 @@ local function draw_analyzers(ctx, avail_height)
             -- Visualization
             drawing.draw_oscilloscope(ctx, "##scope_viz", analyzer_w, analyzer_h, slot)
 
-            -- Controls row 1
+            -- Controls
             if scope_fx then
-                local half_w = (analyzer_w - 8) / 2
-
-                -- Time window slider (param 0) - 1-500 ms
-                ctx:push_item_width(half_w)
-                local time_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 0)
-                local time_ms = 1 + time_val * 499
-                local changed, new_time = r.ImGui_SliderDouble(ctx.ctx, "##scope_time", time_ms, 1, 500, "%.0f ms")
-                if changed then
-                    r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 0, (new_time - 1) / 499)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("Time window") end
-                ctx:pop_item_width()
-
-                ctx:same_line()
-
-                -- Gain slider (param 1) - -24 to +24 dB
-                ctx:push_item_width(half_w)
-                local gain_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 1)
-                local gain_db = -24 + gain_val * 48
-                local gain_changed, new_gain = r.ImGui_SliderDouble(ctx.ctx, "##scope_gain", gain_db, -24, 24, "%.1f dB")
-                if gain_changed then
-                    r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 1, (new_gain + 24) / 48)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("Gain") end
-                ctx:pop_item_width()
-
-                -- Controls row 2
-                local third_w = (analyzer_w - 16) / 3
-
-                -- Trigger mode combo (param 2)
-                ctx:push_item_width(third_w)
-                local trig_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 2)
-                local trig_mode = math.floor(trig_val * 2 + 0.5)
-                local trig_changed, new_trig = r.ImGui_Combo(ctx.ctx, "##scope_trig", trig_mode, "Auto\0Rising\0Falling\0")
-                if trig_changed then
-                    r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 2, new_trig / 2)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("Trigger mode") end
-                ctx:pop_item_width()
-
-                ctx:same_line()
-
-                -- Trigger level slider (param 3) - -1 to +1
-                ctx:push_item_width(third_w)
-                local level_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 3)
-                local level = -1 + level_val * 2
-                local level_changed, new_level = r.ImGui_SliderDouble(ctx.ctx, "##scope_level", level, -1, 1, "%.2f")
-                if level_changed then
-                    r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 3, (new_level + 1) / 2)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("Trigger level") end
-                ctx:pop_item_width()
-
-                ctx:same_line()
-
-                -- Channel combo (param 4)
-                ctx:push_item_width(third_w)
-                local ch_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 4)
-                local ch_mode = math.floor(ch_val * 2 + 0.5)
-                local ch_changed, new_ch = r.ImGui_Combo(ctx.ctx, "##scope_ch", ch_mode, "Stereo\0Left\0Right\0")
-                if ch_changed then
-                    r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 4, new_ch / 2)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("Channel") end
-                ctx:pop_item_width()
+                draw_scope_controls(ctx, scope_fx, analyzer_w)
             end
 
             ctx:end_child()
@@ -829,9 +1048,9 @@ local function draw_analyzers(ctx, avail_height)
         ctx:same_line()
     end
 
-    -- Draw spectrum if active
+    -- Draw spectrum if active and not popped out
     -- Params: 0=FFTSize, 1=Floor, 2=Smoothing, 3=Slope, 4=Channel, 5=Freeze, 6=Slot
-    if state.has_spectrum then
+    if show_inline_spectrum then
         local spectrum_fx = find_analyzer_fx(state.track, SPECTRUM_PATTERN)
 
         ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1AFF)
@@ -852,10 +1071,17 @@ local function draw_analyzers(ctx, avail_height)
                 if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
             end
 
-            ctx:same_line(analyzer_w - 8)
+            -- Popout button
+            ctx:same_line(analyzer_w - 36)
+            if ctx:button("^##popout_spectrum", 20, 20) then
+                state.spectrum_popout = true
+            end
+            if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
+
+            ctx:same_line()
             ctx:push_style_color(imgui.Col.Button(), 0x663333FF)
             ctx:push_style_color(imgui.Col.ButtonHovered(), 0x884444FF)
-            if ctx:button("×##del_spectrum", 20, 20) then
+            if ctx:button("x##del_spectrum", 20, 20) then
                 toggle_spectrum()
             end
             ctx:pop_style_color(2)
@@ -863,73 +1089,9 @@ local function draw_analyzers(ctx, avail_height)
             -- Visualization
             drawing.draw_spectrum(ctx, "##spectrum_viz", analyzer_w, analyzer_h, slot)
 
-            -- Controls row 1
+            -- Controls
             if spectrum_fx then
-                local half_w = (analyzer_w - 8) / 2
-
-                -- FFT size combo (param 0) - 0-8 maps to 64-16384
-                ctx:push_item_width(half_w)
-                local fft_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 0)
-                local fft_idx = math.floor(fft_val * 8 + 0.5)
-                local fft_changed, new_fft = r.ImGui_Combo(ctx.ctx, "##spec_fft", fft_idx, "64\0128\0256\0512\01024\02048\04096\08192\016384\0")
-                if fft_changed then
-                    r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 0, new_fft / 8)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("FFT size") end
-                ctx:pop_item_width()
-
-                ctx:same_line()
-
-                -- Floor dB slider (param 1) - -90 to -12 dB
-                ctx:push_item_width(half_w)
-                local floor_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 1)
-                local floor_db = -90 + floor_val * 78
-                local floor_changed, new_floor = r.ImGui_SliderDouble(ctx.ctx, "##spec_floor", floor_db, -90, -12, "%.0f dB")
-                if floor_changed then
-                    r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 1, (new_floor + 90) / 78)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("Floor level") end
-                ctx:pop_item_width()
-
-                -- Controls row 2
-                local third_w = (analyzer_w - 16) / 3
-
-                -- Smoothing slider (param 2) - 0 to 0.95
-                ctx:push_item_width(third_w)
-                local smooth_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 2)
-                local smooth = smooth_val * 0.95
-                local smooth_changed, new_smooth = r.ImGui_SliderDouble(ctx.ctx, "##spec_smooth", smooth * 100, 0, 95, "%.0f%%")
-                if smooth_changed then
-                    r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 2, new_smooth / 100 / 0.95)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("Smoothing") end
-                ctx:pop_item_width()
-
-                ctx:same_line()
-
-                -- Slope slider (param 3) - 0 to 12 dB/oct
-                ctx:push_item_width(third_w)
-                local slope_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 3)
-                local slope = slope_val * 12
-                local slope_changed, new_slope = r.ImGui_SliderDouble(ctx.ctx, "##spec_slope", slope, 0, 12, "%.1f dB/oct")
-                if slope_changed then
-                    r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 3, new_slope / 12)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("Slope (high freq boost)") end
-                ctx:pop_item_width()
-
-                ctx:same_line()
-
-                -- Channel combo (param 4)
-                ctx:push_item_width(third_w)
-                local ch_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 4)
-                local ch_mode = math.floor(ch_val * 2 + 0.5)
-                local ch_changed, new_ch = r.ImGui_Combo(ctx.ctx, "##spec_ch", ch_mode, "Stereo\0Left\0Right\0")
-                if ch_changed then
-                    r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 4, new_ch / 2)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("Channel") end
-                ctx:pop_item_width()
+                draw_spectrum_controls(ctx, spectrum_fx, analyzer_w)
             end
 
             ctx:end_child()

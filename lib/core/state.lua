@@ -87,6 +87,10 @@ M.state = {
     -- Used to look up the original name when FX has been renamed
     fx_original_names = {},  -- {[fx_guid] = "VST3i: Serum 2 (Xfer Records)"}
     
+    -- Analyzer popout state
+    scope_popout = false,     -- Oscilloscope in separate window
+    spectrum_popout = false,  -- Spectrum in separate window
+
     -- User configuration
     config = {
         max_visible_params = 64,  -- Maximum parameters to display (default 64, max 128)
