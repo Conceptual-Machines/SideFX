@@ -129,7 +129,7 @@ local function restore_utility(container)
         return false
     end
     
-    -- Step 3: Rename utility to match device naming
+    -- Step 3: Rename utility to match device naming and initialize parameters
     local ok_name, container_name = pcall(function() return container:get_name() end)
     if ok_name and container_name then
         local device_idx = container_name:match("^D(%d+):")
@@ -139,6 +139,8 @@ local function restore_utility(container)
             local util_inside = fx_utils.get_device_utility(container)
             if util_inside then
                 pcall(function() util_inside:set_named_config_param("renamed_name", util_name) end)
+                -- Initialize gain to 0dB
+                pcall(function() util_inside:set_param(0, 0) end)
             end
         end
     end

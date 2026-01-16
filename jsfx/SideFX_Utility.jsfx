@@ -6,7 +6,7 @@ options:no_meter gmem=SideFX
 // Gain/Pan/Phase utility - controlled exclusively by SideFX UI
 // All sliders hidden (- prefix), no native JSFX interface
 
-slider1:0<-24,24,0.1>-Gain (dB)
+slider1:0<-36,12,0.1>-Gain (dB)
 slider2:0<-100,100,1>-Pan (%)
 slider3:0<0,1,1{Off,On}>-Phase Invert L
 slider4:0<0,1,1{Off,On}>-Phase Invert R
@@ -64,9 +64,16 @@ slider2 == 0 ? (
 spl0 *= phase_l;
 spl1 *= phase_r;
 
-// Output levels for metering (smoothed peak)
-slider5 = slider5 * 0.95 + abs(spl0) * 0.05;
-slider6 = slider6 * 0.95 + abs(spl1) * 0.05;
+// Output levels for metering (peak hold with decay)
+// Fast attack (instant peak), slow decay for readable meters
+abs_l = abs(spl0);
+abs_r = abs(spl1);
+slider5 = abs_l > slider5 ? abs_l : slider5 * 0.995;  // instant attack, ~150ms decay
+slider6 = abs_r > slider6 ? abs_r : slider6 * 0.995;
+
+// Also write to gmem for reliable cross-script reading
+gmem[2] = slider5;  // output level L
+gmem[3] = slider6;  // output level R
 
 // No @gfx - controlled exclusively by SideFX UI
 

@@ -114,6 +114,8 @@ function M.add_plugin_to_track(plugin, position)
                 if util_inside then
                     local util_name = naming.build_device_util_name(device_idx)
                     util_inside:set_named_config_param("renamed_name", util_name)
+                    -- Initialize gain to 0dB
+                    util_inside:set_param(0, 0)
                 end
             end
         else
@@ -314,6 +316,8 @@ local function convert_single_fx_to_device(fx_info, device_idx)
         local util_inside = fx_utils.get_device_utility(container)
         if util_inside then
             util_inside:set_named_config_param("renamed_name", util_name)
+            -- Initialize gain to 0dB (normalized 0.75 in -36 to +12 range)
+            util_inside:set_param_normalized(0, 0.75)
         end
     end
 

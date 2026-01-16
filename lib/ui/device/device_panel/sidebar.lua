@@ -118,9 +118,13 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local state_module = require('lib.core.state')
     local interacted = false
 
-    gain_val = gain_val or 0.5
-    local gain_norm = gain_val
-    local gain_db = (gain_val - 0.5) * 48
+    -- Range: -36 to +12 dB (48dB total), 0dB at exactly 75%
+    local DB_MIN, DB_MAX = -36, 12
+    local DB_RANGE = DB_MAX - DB_MIN  -- 48
+
+    -- gain_val is already the dB value (from get_param, not normalized)
+    local gain_db = gain_val or 0
+    local gain_norm = (gain_db - DB_MIN) / DB_RANGE  -- for visual position
 
     ctx:spacing()
 
@@ -149,10 +153,10 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local fader_x = screen_x + scale_w + 2
     local meter_x = fader_x + fader_w + 2
 
-    -- dB scale - just tick marks, label only at 0
-    local db_marks = {12, 0, -12}
+    -- dB scale - tick marks at key points, label only at 0
+    local db_marks = {12, 0, -12, -24, -36}
     for _, db in ipairs(db_marks) do
-        local mark_norm = (db + 24) / 48
+        local mark_norm = (db - DB_MIN) / DB_RANGE
         local mark_y = screen_y + fader_h - (fader_h * mark_norm)
         r.ImGui_DrawList_AddLine(draw_list, scale_x + scale_w - 4, mark_y, scale_x + scale_w, mark_y, 0x666666FF, 1)
         -- Only label 0 dB
@@ -172,8 +176,8 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     -- Fader border
     r.ImGui_DrawList_AddRect(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x555555FF, 3)
     -- 0dB line
-    local zero_db_norm = 24 / 48
-    local zero_y = screen_y + fader_h - (fader_h * zero_db_norm)
+    local zero_norm = (0 - DB_MIN) / DB_RANGE  -- ~0.889
+    local zero_y = screen_y + fader_h - (fader_h * zero_norm)
     r.ImGui_DrawList_AddLine(draw_list, fader_x, zero_y, fader_x + fader_w, zero_y, 0xFFFFFF44, 1)
 
     -- Stereo meters (mono meter from utility output level)
@@ -183,28 +187,26 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     r.ImGui_DrawList_AddRectFilled(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
     r.ImGui_DrawList_AddRectFilled(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
 
-    -- Get output levels from utility's metering parameters (slider5/6 = param 4/5)
-    -- Note: slider range is 0-2 to allow headroom above 0dB, normalized value = raw/2
-    local ok_level_l, level_l_norm = pcall(function() return utility:get_param_normalized(4) end)
-    local ok_level_r, level_r_norm = pcall(function() return utility:get_param_normalized(5) end)
-    -- Convert from normalized (0-1 for 0-2 range) back to raw level (0-2)
-    local level_l = ok_level_l and level_l_norm * 2 or 0
-    local level_r = ok_level_r and level_r_norm * 2 or 0
+    -- Get output levels from utility JSFX via gmem (more reliable than param reading)
+    -- gmem[2] = output level L, gmem[3] = output level R (written by SideFX_Utility)
+    r.gmem_attach("SideFX")  -- attach to SideFX gmem namespace
+    local level_l = r.gmem_read(2) or 0
+    local level_r = r.gmem_read(3) or 0
+
 
     local function draw_meter_bar(x, w, peak)
         if peak > 0.001 then
             local peak_db = 20 * math.log(peak, 10)
-            -- Clamp to fader range: -24 to +24 dB (same as gain fader)
-            peak_db = math.max(-24, math.min(24, peak_db))
-            -- Map to fader scale: -24 dB = 0, +24 dB = 1 (matches fader exactly)
-            local peak_norm = (peak_db + 24) / 48
+            -- Clamp to fader range
+            peak_db = math.max(DB_MIN, math.min(DB_MAX, peak_db))
+            local peak_norm = (peak_db - DB_MIN) / DB_RANGE
             local meter_fill_h = fader_h * peak_norm
             if meter_fill_h > 1 then
                 local meter_top = screen_y + fader_h - meter_fill_h
                 local meter_color
                 if peak_db > 0 then meter_color = 0xFF4444FF
                 elseif peak_db > -6 then meter_color = 0xFFAA44FF
-                elseif peak_db > -18 then meter_color = 0x44FF44FF
+                elseif peak_db > -12 then meter_color = 0x44FF44FF
                 else meter_color = 0x44AA44FF end
                 r.ImGui_DrawList_AddRectFilled(draw_list, x, meter_top, x + w, screen_y + fader_h - 1, meter_color, 0)
             end
@@ -224,10 +226,9 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     ctx:push_style_color(imgui.Col.FrameBgActive(), 0x00000000)
     ctx:push_style_color(imgui.Col.SliderGrab(), 0xAAAAAAFF)
     ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
-    local gain_changed, new_gain_db = drawing.v_slider_double_fine(ctx, "##gain_fader_v", fader_w, fader_h, gain_db, -24, 24, "", nil, nil, 0)
+    local gain_changed, new_gain_db = drawing.v_slider_double_fine(ctx, "##gain_fader_v", fader_w, fader_h, gain_db, DB_MIN, DB_MAX, "", nil, nil, 0)
     if gain_changed then
-        local new_norm = (new_gain_db + 24) / 48
-        pcall(function() utility:set_param_normalized(0, new_norm) end)
+        pcall(function() utility:set_param(0, new_gain_db) end)  -- set actual dB value
         interacted = true
     end
     ctx:pop_style_color(5)
@@ -257,8 +258,8 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
         ctx:set_keyboard_focus_here()
         local input_changed, input_val = ctx:input_double("##gain_input", gain_db, 0, 0, "%.1f")
         if input_changed then
-            local new_norm = (math.max(-24, math.min(24, input_val)) + 24) / 48
-            pcall(function() utility:set_param_normalized(0, new_norm) end)
+            local clamped_db = math.max(DB_MIN, math.min(DB_MAX, input_val))
+            pcall(function() utility:set_param(0, clamped_db) end)  -- set actual dB value
             interacted = true
         end
         if ctx:is_key_pressed(imgui.Key.Enter()) or ctx:is_key_pressed(imgui.Key.Escape()) then
@@ -358,7 +359,7 @@ function M.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_col
         -- Gain/Pan/Phase controls from utility FX
         local utility = opts.utility
         if utility then
-            local ok_g, gain_val = pcall(function() return utility:get_param_normalized(0) end)
+            local ok_g, gain_val = pcall(function() return utility:get_param(0) end)  -- actual dB value
             local ok_p, pan_val = pcall(function() return utility:get_param_normalized(1) end)
 
             -- Pan slider first (above fader)

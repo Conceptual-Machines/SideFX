@@ -689,6 +689,8 @@ function M.add_chain_to_rack(rack, plugin)
         local util_inside = fx_utils.get_device_utility(device)
         if util_inside then
             util_inside:set_named_config_param("renamed_name", util_name)
+            -- Initialize gain to 0dB
+            util_inside:set_param(0, 0)
         end
     end
 
@@ -928,6 +930,8 @@ function M.add_device_to_chain(chain, plugin)
         local util_inside = fx_utils.get_device_utility(device)
         if util_inside then
             util_inside:set_named_config_param("renamed_name", util_name)
+            -- Initialize gain to 0dB
+            util_inside:set_param(0, 0)
         end
     end
 

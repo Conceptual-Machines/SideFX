@@ -62,6 +62,12 @@ local function draw_collapsed_fader_control(ctx, mixer, rack_guid, state, drawin
     if state.track and state.track.pointer then
         local peak_l = r.Track_GetPeakInfo(state.track.pointer, 0)
         local peak_r = r.Track_GetPeakInfo(state.track.pointer, 1)
+        -- DEBUG: show peak values
+        local peak_db_l = peak_l > 0 and 20 * math.log(peak_l, 10) or -100
+        local peak_db_r = peak_r > 0 and 20 * math.log(peak_r, 10) or -100
+        ctx:set_cursor_screen_pos(screen_x, screen_y + fader_h + 25)
+        ctx:text(string.format("%.1f", math.max(peak_db_l, peak_db_r)))
+        -- END DEBUG
         local half_meter_w = meter_w / 2 - 1
         local meter_l_x = meter_x
         local meter_r_x = meter_x + meter_w / 2 + 1

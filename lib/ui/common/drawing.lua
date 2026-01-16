@@ -449,8 +449,9 @@ function M.draw_peak_meters(ctx, draw_list, meter_l_x, meter_r_x, screen_y, fade
     local function draw_meter_bar(x, w, peak)
         if peak > 0 then
             local peak_db = 20 * math.log(peak, 10)
-            peak_db = math.max(-60, math.min(12, peak_db))
-            local peak_norm = (peak_db + 60) / 72
+            -- Use same range as fader scale: -24dB to +12dB (36dB total)
+            peak_db = math.max(-24, math.min(12, peak_db))
+            local peak_norm = (peak_db + 24) / 36
             local meter_fill_h = fader_h * peak_norm
             if meter_fill_h > 1 then
                 local meter_top = screen_y + fader_h - meter_fill_h
