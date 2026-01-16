@@ -84,9 +84,11 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         end
         ctx:same_line(0, 2)  -- Minimal gap
         if ctx:button("▼##collapse_" .. guid, 20, 20) then
-            if device_collapsed then
-                device_collapsed[state_guid] = true
-            end
+            local state_module = require('lib.core.state')
+            local state = state_module.state
+            state.device_controls_collapsed = state.device_controls_collapsed or {}
+            state.device_controls_collapsed[state_guid] = true
+            state_module.save_device_collapsed_states()
         end
         ctx:pop_style_color(3)
         if r.ImGui_IsItemHovered(ctx.ctx) then

@@ -1159,6 +1159,8 @@ local function main()
         state_module.load_display_names()
         state_module.load_link_scales()
         state_module.load_expanded_mod_slots()
+        state_module.load_mod_sidebar_collapsed()
+        state_module.load_device_collapsed_states()
     end
 
     -- Initialize module-level font references (will be updated by main_window when fonts load)

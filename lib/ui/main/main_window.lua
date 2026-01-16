@@ -282,6 +282,8 @@ function M.create_callbacks(opts)
                     state_module.load_display_names()
                     state_module.load_link_scales()
                     state_module.load_expanded_mod_slots()
+                    state_module.load_mod_sidebar_collapsed()
+                    state_module.load_device_collapsed_states()
                 end
             else
                 -- Process any pending modulator additions (deferred from previous frame)

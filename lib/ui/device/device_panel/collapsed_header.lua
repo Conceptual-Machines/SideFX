@@ -39,7 +39,11 @@ function M.draw(ctx, fx, container, state_guid, enabled, device_collapsed, opts,
         ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
         ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
         if ctx:button("◀##expand_collapsed_" .. state_guid, btn_size, btn_size) then
-            device_collapsed[state_guid] = false
+            local state_module = require('lib.core.state')
+            local state = state_module.state
+            state.device_controls_collapsed = state.device_controls_collapsed or {}
+            state.device_controls_collapsed[state_guid] = false
+            state_module.save_device_collapsed_states()
             interacted = true
         end
         ctx:pop_style_color(3)

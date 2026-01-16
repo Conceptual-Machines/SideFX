@@ -1475,6 +1475,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     state.expanded_mod_slot[state_guid] = slot_idx
                     state.mod_sidebar_collapsed[state_guid] = false
                     state_module.save_expanded_mod_slots()
+                    state_module.save_mod_sidebar_collapsed()
                     interacted = true
                 end
             end

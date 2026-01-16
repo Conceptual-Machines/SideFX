@@ -23,6 +23,7 @@ function M.draw(ctx, state_guid)
     ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
     if ctx:button(mod_arrow_icon .. "##collapse_mod_" .. state_guid, 20, 20) then
         state.mod_sidebar_collapsed[state_guid] = not is_mod_sidebar_collapsed
+        state_module.save_mod_sidebar_collapsed()
         interacted = true
     end
     ctx:pop_style_color(4)

@@ -72,17 +72,17 @@ M.colors = {
 -- Track expanded state per FX (by GUID)
 local expanded_state = {}
 
--- Track sidebar collapsed state per FX (by GUID)
-local sidebar_collapsed = {}
+-- NOTE: Panel collapsed states are now managed by the state module for persistence:
+-- state.device_panel_collapsed - whole panel collapsed to header strip
+-- state.device_sidebar_collapsed - utility sidebar collapsed
+-- state.device_controls_collapsed - device params collapsed, but modulators visible
+-- state.mod_sidebar_collapsed - modulator sidebar collapsed
+-- state.expanded_mod_slot - which modulator slot is expanded
 
--- Track panel collapsed state per FX (by GUID) - collapses the whole panel to just header
-local panel_collapsed = {}
-
--- Track device controls collapsed state per FX (by GUID) - collapses only device params, not modulators/gain
-local device_collapsed = {}
-
--- NOTE: Modulator sidebar state is now managed by the state module
--- (accessed via state.mod_sidebar_collapsed and state.expanded_mod_slot)
+-- Local aliases for convenience (updated each frame from state)
+local sidebar_collapsed
+local panel_collapsed
+local device_collapsed
 
 -- Rename state: which FX is being renamed and the edit buffer
 local rename_active = {}    -- guid -> true if rename mode active
@@ -189,6 +189,7 @@ local function draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_g
             ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
             if ctx:button("▶##collapse_" .. state_guid, 20, 20) then
                 panel_collapsed[state_guid] = false
+                state_module.save_device_collapsed_states()
                 interacted = true
             end
             ctx:pop_style_color(3)
@@ -831,6 +832,14 @@ function M.draw(ctx, fx, opts)
     local cfg = M.config
     local colors = M.colors
 
+    -- Initialize state aliases (from state module for persistence)
+    state.device_panel_collapsed = state.device_panel_collapsed or {}
+    state.device_sidebar_collapsed = state.device_sidebar_collapsed or {}
+    state.device_controls_collapsed = state.device_controls_collapsed or {}
+    panel_collapsed = state.device_panel_collapsed
+    sidebar_collapsed = state.device_sidebar_collapsed
+    device_collapsed = state.device_controls_collapsed
+
     -- Skip rendering if FX list is already invalid (stale data from previous operations)
     if state.fx_list_invalid then return false end
 
@@ -1000,64 +1009,76 @@ end
 
 --- Reset all sidebar collapsed states.
 function M.reset_sidebar()
-    sidebar_collapsed = {}
+    state.device_sidebar_collapsed = {}
+    state_module.save_device_collapsed_states()
 end
 
 --- Set sidebar collapsed state for a specific FX.
 -- @param guid string FX GUID
 -- @param collapsed boolean
 function M.set_sidebar_collapsed(guid, collapsed)
-    sidebar_collapsed[guid] = collapsed
+    state.device_sidebar_collapsed = state.device_sidebar_collapsed or {}
+    state.device_sidebar_collapsed[guid] = collapsed
+    state_module.save_device_collapsed_states()
 end
 
 --- Get sidebar collapsed state for a specific FX.
 -- @param guid string FX GUID
 -- @return boolean
 function M.is_sidebar_collapsed(guid)
-    return sidebar_collapsed[guid] or false
+    return (state.device_sidebar_collapsed and state.device_sidebar_collapsed[guid]) or false
 end
 
 --- Collapse all sidebars
 function M.collapse_all_sidebars()
+    state.device_sidebar_collapsed = state.device_sidebar_collapsed or {}
     for guid, _ in pairs(expanded_state) do
-        sidebar_collapsed[guid] = true
+        state.device_sidebar_collapsed[guid] = true
     end
+    state_module.save_device_collapsed_states()
 end
 
 --- Expand all sidebars
 function M.expand_all_sidebars()
-    sidebar_collapsed = {}
+    state.device_sidebar_collapsed = {}
+    state_module.save_device_collapsed_states()
 end
 
 --- Reset all panel collapsed states.
 function M.reset_panel_collapsed()
-    panel_collapsed = {}
+    state.device_panel_collapsed = {}
+    state_module.save_device_collapsed_states()
 end
 
 --- Set panel collapsed state for a specific FX.
 -- @param guid string FX GUID
 -- @param collapsed boolean
 function M.set_panel_collapsed(guid, collapsed)
-    panel_collapsed[guid] = collapsed
+    state.device_panel_collapsed = state.device_panel_collapsed or {}
+    state.device_panel_collapsed[guid] = collapsed
+    state_module.save_device_collapsed_states()
 end
 
 --- Get panel collapsed state for a specific FX.
 -- @param guid string FX GUID
 -- @return boolean
 function M.is_panel_collapsed(guid)
-    return panel_collapsed[guid] or false
+    return (state.device_panel_collapsed and state.device_panel_collapsed[guid]) or false
 end
 
 --- Collapse all panels
 function M.collapse_all_panels()
+    state.device_panel_collapsed = state.device_panel_collapsed or {}
     for guid, _ in pairs(expanded_state) do
-        panel_collapsed[guid] = true
+        state.device_panel_collapsed[guid] = true
     end
+    state_module.save_device_collapsed_states()
 end
 
 --- Expand all panels
 function M.expand_all_panels()
-    panel_collapsed = {}
+    state.device_panel_collapsed = {}
+    state_module.save_device_collapsed_states()
 end
 
 return M

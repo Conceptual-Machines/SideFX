@@ -75,7 +75,12 @@ M.state = {
     modulator_expanded = {},  -- {[mod_fx_idx] = true} -- which modulators show params
     modulator_advanced = {},  -- {[mod_fx_idx] = true} -- advanced section expanded
     modulator_section_collapsed = {},  -- {[device_guid] = true} -- device modulator section collapsed
-    
+
+    -- Device panel collapsed states (keyed by device container GUID)
+    device_panel_collapsed = {},      -- {[guid] = true} -- whole panel collapsed to header strip
+    device_sidebar_collapsed = {},    -- {[guid] = true} -- utility sidebar collapsed
+    device_controls_collapsed = {},   -- {[guid] = true} -- device params collapsed, but modulators visible
+
     -- Parameter visibility selections (keyed by plugin full_name)
     param_selections = {},  -- {[plugin_full_name] = {param_idx1, param_idx2, ...}}
 
@@ -735,6 +740,121 @@ function M.load_expanded_mod_slots()
             end
         end
     end
+end
+
+--- Save modulator sidebar collapsed state to project.
+function M.save_mod_sidebar_collapsed()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    -- Serialize mod_sidebar_collapsed as comma-separated GUIDs (only collapsed ones)
+    local collapsed_guids = {}
+    local count = 0
+    if state.mod_sidebar_collapsed then
+        for state_guid, is_collapsed in pairs(state.mod_sidebar_collapsed) do
+            if is_collapsed then
+                table.insert(collapsed_guids, state_guid)
+                count = count + 1
+            end
+        end
+    end
+
+    local key = "ModSidebarCollapsed_" .. track_guid
+    if count > 0 then
+        local serialized = table.concat(collapsed_guids, ",")
+        r.SetProjExtState(0, "SideFX", key, serialized)
+    else
+        r.SetProjExtState(0, "SideFX", key, "")
+    end
+end
+
+--- Load modulator sidebar collapsed state from project.
+function M.load_mod_sidebar_collapsed()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    local key = "ModSidebarCollapsed_" .. track_guid
+    local ok_get, serialized = r.GetProjExtState(0, "SideFX", key)
+
+    if ok_get == 0 or not serialized or serialized == "" then
+        state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
+        return
+    end
+
+    -- Parse serialized data
+    state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
+    for guid in serialized:gmatch("([^,]+)") do
+        state.mod_sidebar_collapsed[guid] = true
+    end
+end
+
+--- Save device panel collapsed states to project.
+-- Saves device_panel_collapsed, device_sidebar_collapsed, device_controls_collapsed
+function M.save_device_collapsed_states()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    -- Helper to serialize a boolean-keyed table
+    local function serialize_bool_table(tbl)
+        local guids = {}
+        if tbl then
+            for guid, val in pairs(tbl) do
+                if val then
+                    table.insert(guids, guid)
+                end
+            end
+        end
+        return table.concat(guids, ",")
+    end
+
+    -- Save panel collapsed (whole panel to thin strip)
+    local panel_serialized = serialize_bool_table(state.device_panel_collapsed)
+    r.SetProjExtState(0, "SideFX", "DevicePanelCollapsed_" .. track_guid, panel_serialized)
+
+    -- Save sidebar collapsed (utility sidebar)
+    local sidebar_serialized = serialize_bool_table(state.device_sidebar_collapsed)
+    r.SetProjExtState(0, "SideFX", "DeviceSidebarCollapsed_" .. track_guid, sidebar_serialized)
+
+    -- Save controls collapsed (device params only)
+    local controls_serialized = serialize_bool_table(state.device_controls_collapsed)
+    r.SetProjExtState(0, "SideFX", "DeviceControlsCollapsed_" .. track_guid, controls_serialized)
+end
+
+--- Load device panel collapsed states from project.
+function M.load_device_collapsed_states()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    -- Helper to deserialize into a boolean-keyed table
+    local function deserialize_bool_table(serialized)
+        local tbl = {}
+        if serialized and serialized ~= "" then
+            for guid in serialized:gmatch("([^,]+)") do
+                tbl[guid] = true
+            end
+        end
+        return tbl
+    end
+
+    -- Load panel collapsed
+    local ok_panel, panel_serialized = r.GetProjExtState(0, "SideFX", "DevicePanelCollapsed_" .. track_guid)
+    state.device_panel_collapsed = deserialize_bool_table(ok_panel > 0 and panel_serialized or "")
+
+    -- Load sidebar collapsed
+    local ok_sidebar, sidebar_serialized = r.GetProjExtState(0, "SideFX", "DeviceSidebarCollapsed_" .. track_guid)
+    state.device_sidebar_collapsed = deserialize_bool_table(ok_sidebar > 0 and sidebar_serialized or "")
+
+    -- Load controls collapsed
+    local ok_controls, controls_serialized = r.GetProjExtState(0, "SideFX", "DeviceControlsCollapsed_" .. track_guid)
+    state.device_controls_collapsed = deserialize_bool_table(ok_controls > 0 and controls_serialized or "")
 end
 
 --------------------------------------------------------------------------------
