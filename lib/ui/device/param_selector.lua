@@ -358,12 +358,21 @@ function M.draw(ctx, state)
 
                 -- Save unit overrides (only non-auto values) with custom ranges
                 for param_idx, unit_id in pairs(dialog_state.unit_overrides) do
-                    if unit_id and unit_id ~= "auto" then
-                        -- Get custom range if set
+                    if unit_id and unit_id ~= "auto" and unit_id ~= "plugin" then
+                        -- Get custom range if set, otherwise use defaults
                         local range = dialog_state.range_overrides[param_idx]
-                        local range_min = range and range.min or nil
-                        local range_max = range and range.max or nil
+                        local range_min, range_max
+                        if range then
+                            range_min = range.min
+                            range_max = range.max
+                        else
+                            -- Use default range for this unit
+                            range_min, range_max = unit_detector.get_unit_default_range(unit_id)
+                        end
                         state_mod.set_param_unit_override(dialog_state.plugin_full_name, param_idx, unit_id, range_min, range_max)
+                    elseif unit_id == "plugin" then
+                        -- Plugin format: no range needed
+                        state_mod.set_param_unit_override(dialog_state.plugin_full_name, param_idx, unit_id)
                     else
                         -- Clear override if set to auto
                         state_mod.set_param_unit_override(dialog_state.plugin_full_name, param_idx, nil)

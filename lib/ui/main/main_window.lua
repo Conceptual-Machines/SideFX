@@ -209,6 +209,8 @@ function M.create_callbacks(opts)
                     -- ImGui_CreateFont takes: family_or_file, size (flags are optional via separate call)
                     default_font_ref.value = r.ImGui_CreateFont(family, 14)
                     if default_font_ref.value then
+                        -- Attach font to context for lifecycle management
+                        r.ImGui_Attach(ctx.ctx, default_font_ref.value)
                         break
                     end
                 end
@@ -216,6 +218,9 @@ function M.create_callbacks(opts)
                 -- If no font was created, try with a generic name
                 if not default_font_ref.value then
                     default_font_ref.value = r.ImGui_CreateFont("", 14)
+                    if default_font_ref.value then
+                        r.ImGui_Attach(ctx.ctx, default_font_ref.value)
+                    end
                 end
             end
 
@@ -227,21 +232,26 @@ function M.create_callbacks(opts)
                     "Arial",
                     "DejaVu Sans",
                 }
-                local bold_flag = r.ImGui_FontFlags_Bold()
                 for _, family in ipairs(font_families) do
-                    header_font_ref.value = r.ImGui_CreateFont(family, bold_flag)
+                    header_font_ref.value = r.ImGui_CreateFont(family, 14)
                     if header_font_ref.value then
+                        r.ImGui_Attach(ctx.ctx, header_font_ref.value)
                         break
                     end
                 end
                 if not header_font_ref.value then
-                    header_font_ref.value = r.ImGui_CreateFont("", bold_flag)
+                    header_font_ref.value = r.ImGui_CreateFont("", 14)
+                    if header_font_ref.value then
+                        r.ImGui_Attach(ctx.ctx, header_font_ref.value)
+                    end
                 end
             end
 
             -- Push default font if available
+            local main_font_pushed = false
             if default_font_ref.value then
-                ctx:push_font(default_font_ref.value, 14)
+                local ok = pcall(ctx.push_font, ctx, default_font_ref.value, 14)
+                main_font_pushed = ok
             end
 
             -- Preload icons on first frame
@@ -463,7 +473,7 @@ function M.create_callbacks(opts)
             reaper_theme:unapply(ctx)
 
             -- Pop default font if we pushed it
-            if default_font_ref.value then
+            if main_font_pushed then
                 ctx:pop_font()
             end
 

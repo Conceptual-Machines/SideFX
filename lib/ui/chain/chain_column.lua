@@ -40,8 +40,10 @@ end
 local function draw_chain_header(ctx, chain_name, default_font, chain, chain_guid, state, on_refresh)
     ctx:table_next_row(0, 20)  -- Smaller row height (20px)
     ctx:table_set_column_index(0)
+    local font_pushed = false
     if default_font then
-        ctx:push_font(default_font, 12)  -- 12px smaller font for header
+        local ok = pcall(ctx.push_font, ctx, default_font, 12)  -- 12px smaller font for header
+        font_pushed = ok
     end
     ctx:text_colored(0xAAAAAAFF, "Chain:")
     ctx:same_line()
@@ -63,7 +65,7 @@ local function draw_chain_header(ctx, chain_name, default_font, chain, chain_gui
         end
     end
     ctx:pop_style_color(3)
-    if default_font then
+    if font_pushed then
         ctx:pop_font()
     end
 
