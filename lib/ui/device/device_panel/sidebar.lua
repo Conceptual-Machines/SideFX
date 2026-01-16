@@ -194,8 +194,10 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local function draw_meter_bar(x, w, peak)
         if peak > 0.001 then
             local peak_db = 20 * math.log(peak, 10)
-            peak_db = math.max(-60, math.min(12, peak_db))
-            local peak_norm = (peak_db + 60) / 72  -- -60 to +12 dB range
+            -- Clamp to fader range: -24 to +24 dB (same as gain fader)
+            peak_db = math.max(-24, math.min(24, peak_db))
+            -- Map to fader scale: -24 dB = 0, +24 dB = 1 (matches fader exactly)
+            local peak_norm = (peak_db + 24) / 48
             local meter_fill_h = fader_h * peak_norm
             if meter_fill_h > 1 then
                 local meter_top = screen_y + fader_h - meter_fill_h
