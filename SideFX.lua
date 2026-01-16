@@ -63,6 +63,13 @@ local EmojImGui = require('emojimgui')
 -- Clear the cached ReaImGui 'imgui' so we can load ReaWrap's version
 package.loaded['imgui'] = nil
 
+-- Force reload all lib modules during development
+for name in pairs(package.loaded) do
+    if name:match("^lib%.") then
+        package.loaded[name] = nil
+    end
+end
+
 -- NOW set up ReaWrap paths (these will shadow ReaImGui's imgui with ReaWrap's imgui)
 package.path = script_path .. "?.lua;"
     .. script_path .. "lib/?.lua;"
@@ -97,6 +104,7 @@ local constants = require('lib.core.constants')
 
 -- UI modules
 local widgets = require('lib.ui.common.widgets')
+package.loaded['lib.ui.common.drawing'] = nil  -- Force reload during dev
 local drawing = require('lib.ui.common.drawing')
 local chain_item = require('lib.ui.chain.chain_item')
 local browser_panel = require('lib.ui.main.browser_panel')

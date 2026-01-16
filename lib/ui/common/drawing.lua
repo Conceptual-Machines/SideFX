@@ -525,9 +525,17 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
         -- Upper and lower lines (positive and negative amplitude)
         r.ImGui_DrawList_AddLine(draw_list, x, center_y - offset, x + width, center_y - offset, grid_color, 1)
         r.ImGui_DrawList_AddLine(draw_list, x, center_y + offset, x + width, center_y + offset, grid_color, 1)
-        -- Labels (only on upper lines, smaller text)
+        -- Labels on both sides (bipolar)
         local label_text = string.format("%d", db)
-        r.ImGui_DrawList_AddText(draw_list, x + 1, center_y - offset - 9, label_color, label_text)
+        if offset > 5 then  -- Only show if not at center
+            -- Upper label (positive amplitude side)
+            r.ImGui_DrawList_AddText(draw_list, x + 1, center_y - offset - 9, label_color, label_text)
+            -- Lower label (negative amplitude side) - same dB since it's magnitude
+            r.ImGui_DrawList_AddText(draw_list, x + 1, center_y + offset + 1, label_color, label_text)
+        else
+            -- At center, just show the dB value once
+            r.ImGui_DrawList_AddText(draw_list, x + 1, center_y - offset - 9, label_color, label_text)
+        end
     end
 
     -- X-axis grid (time divisions)
@@ -628,10 +636,10 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
     local r_pos_str = amp_to_db_str(peak_r_pos)
     local r_neg_str = amp_to_db_str(peak_r_neg)
 
-    -- Show L/R with bipolar peak values (pos/neg dB)
-    local text_x = math.max(x + 2, x + width - 85)  -- Ensure text stays in bounds
-    r.ImGui_DrawList_AddText(draw_list, text_x, y + 3, color_l, string.format("L: %s / %s", l_pos_str, l_neg_str))
-    r.ImGui_DrawList_AddText(draw_list, text_x, y + 14, color_r, string.format("R: %s / %s", r_pos_str, r_neg_str))
+    -- Show L/R with bipolar peak values (pos/neg dB) in top-right corner
+    local text_x = x + width - 95
+    r.ImGui_DrawList_AddText(draw_list, text_x, y + 4, color_l, string.format("L: %s / %s", l_pos_str, l_neg_str))
+    r.ImGui_DrawList_AddText(draw_list, text_x, y + 16, color_r, string.format("R: %s / %s", r_pos_str, r_neg_str))
 
     -- Border
     r.ImGui_DrawList_AddRect(draw_list, x, y, x + width, y + height, 0x444444FF, 4, 0, 1)
