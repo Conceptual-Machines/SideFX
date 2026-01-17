@@ -285,7 +285,7 @@ function M.draw(ctx, fx, opts)
             ctx:table_set_column_index(0)
             ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
             ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
-            if ctx:button("◀##collapse", 20, 20) then
+            if ctx:button("▼##collapse", 20, 20) then
                 state.bare_panel_collapsed[guid] = true
                 state_module.save_device_collapsed_states()
             end
