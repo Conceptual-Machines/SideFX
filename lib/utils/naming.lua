@@ -89,12 +89,17 @@ function M.is_bare_device_name(name)
     return name:match("^BD%d") ~= nil or name:match("_BD%d") ~= nil
 end
 
---- Check if a name indicates a post FX device (POST-prefix).
+--- Check if a name indicates a post FX device (POST-prefix or SideFX analyzers).
 -- @param name string FX name to check
 -- @return boolean
 function M.is_post_device_name(name)
     if not name then return false end
-    return name:match("^POST%d") ~= nil
+    -- Explicit POST naming
+    if name:match("^POST%d") then return true end
+    -- SideFX analyzers (oscilloscope, spectrum) are always post FX
+    if name:match("SideFX[_ ]Oscilloscope") then return true end
+    if name:match("SideFX[_ ]Spectrum") then return true end
+    return false
 end
 
 --- Check if a name indicates a chain container (R{n}_C{n} pattern, but not device).
