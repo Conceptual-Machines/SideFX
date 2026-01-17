@@ -220,7 +220,7 @@ function M.draw(ctx, fx, opts)
             -- Collapsed view: vertical strip with expand button, ON, X
             ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
             ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
-            if ctx:button("▶##expand", panel_width - 8, 20) then
+            if ctx:button("▶##expand", 20, 20) then
                 state.bare_panel_collapsed[guid] = false
                 state_module.save_device_collapsed_states()
             end
