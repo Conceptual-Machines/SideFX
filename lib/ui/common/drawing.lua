@@ -883,6 +883,38 @@ function M.draw_spectrum(ctx, label, width, height, slot)
         table.insert(curve_points, {x = px_x, y = point_y, mag = mag})
     end
 
+    -- Apply smoothing pass to curve points (3-point weighted average)
+    if #curve_points > 2 then
+        local smoothed = {}
+        for i = 1, #curve_points do
+            if i == 1 or i == #curve_points then
+                smoothed[i] = curve_points[i].y
+            else
+                -- Weighted average: 25% prev, 50% current, 25% next
+                smoothed[i] = curve_points[i-1].y * 0.25 +
+                              curve_points[i].y * 0.5 +
+                              curve_points[i+1].y * 0.25
+            end
+        end
+        -- Apply smoothed values
+        for i = 1, #curve_points do
+            curve_points[i].y = smoothed[i]
+        end
+        -- Second smoothing pass for extra smoothness
+        for i = 1, #curve_points do
+            if i == 1 or i == #curve_points then
+                smoothed[i] = curve_points[i].y
+            else
+                smoothed[i] = curve_points[i-1].y * 0.25 +
+                              curve_points[i].y * 0.5 +
+                              curve_points[i+1].y * 0.25
+            end
+        end
+        for i = 1, #curve_points do
+            curve_points[i].y = smoothed[i]
+        end
+    end
+
     -- Draw filled area under curve using triangles
     local fill_color = 0xCC990066  -- Semi-transparent orange/yellow
     for i = 1, #curve_points - 1 do

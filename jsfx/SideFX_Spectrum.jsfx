@@ -100,7 +100,11 @@ channel == 1 ? input = spl0 :                  // Left
     loop(num_bins,
       re = fft_buffer[i * 2];
       im = fft_buffer[i * 2 + 1];
-      mag = sqrt(re * re + im * im) / current_fft_size;
+      // Magnitude with proper scaling:
+      // - /current_fft_size for FFT normalization
+      // - *2 for one-sided spectrum (positive frequencies only)
+      // - *2 to compensate for Hann window coherent gain (~0.5)
+      mag = sqrt(re * re + im * im) * 4 / current_fft_size;
 
       // Convert to dB
       mag_db = mag > 0.00001 ? 20 * log10(mag) : -100;

@@ -48,17 +48,14 @@ pan_r_smooth = pan_r_smooth * smooth_coeff + pan_r * (1 - smooth_coeff);
 spl0 *= gain_smooth;
 spl1 *= gain_smooth;
 
-// Apply pan (constant power)
-tmp_l = spl0;
-tmp_r = spl1;
-spl0 = (tmp_l + tmp_r) * pan_l_smooth * 0.707;
-spl1 = (tmp_l + tmp_r) * pan_r_smooth * 0.707;
-
-// Maintain stereo width when not panned
-slider2 == 0 ? (
-  spl0 = tmp_l * gain_smooth;
-  spl1 = tmp_r * gain_smooth;
+// Apply pan (constant power) - only when pan is not centered
+slider2 != 0 ? (
+  tmp_l = spl0;
+  tmp_r = spl1;
+  spl0 = (tmp_l + tmp_r) * pan_l_smooth * 0.707;
+  spl1 = (tmp_l + tmp_r) * pan_r_smooth * 0.707;
 );
+// When pan is centered, keep stereo signal as-is (gain already applied above)
 
 // Phase invert
 spl0 *= phase_l;
