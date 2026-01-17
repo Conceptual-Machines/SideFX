@@ -34,6 +34,9 @@ Requirements (install via ReaPack):
       <source file="lib/fx/fx_utils.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/fx/fx_utils.lua</source>
       <source file="lib/modulator/modulator_constants.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/modulator/modulator_constants.lua</source>
       <source file="lib/modulator/modulator.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/modulator/modulator.lua</source>
+      <source file="lib/modulator/modulator_bake.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/modulator/modulator_bake.lua</source>
+      <source file="lib/modulator/modulator_presets.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/modulator/modulator_presets.lua</source>
+      <source file="lib/modulator/param_indices.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/modulator/param_indices.lua</source>
       <source file="lib/rack/rack_backend.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/rack/rack_backend.lua</source>
       <source file="lib/rack/rack.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/rack/rack.lua</source>
       <source file="lib/ui/chain/chain_column.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/chain/chain_column.lua</source>
@@ -43,7 +46,10 @@ Requirements (install via ReaPack):
       <source file="lib/ui/common/drawing.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/common/drawing.lua</source>
       <source file="lib/ui/common/icons.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/common/icons.lua</source>
       <source file="lib/ui/common/widgets.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/common/widgets.lua</source>
+      <source file="lib/ui/common/click_or_drag.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/common/click_or_drag.lua</source>
+      <source file="lib/ui/common/curve_editor.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/common/curve_editor.lua</source>
       <source file="lib/ui/device/device_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/device/device_panel.lua</source>
+      <source file="lib/ui/device/bare_device_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/device/bare_device_panel.lua</source>
       <source file="lib/ui/device/device_panel/collapsed_header.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/device/device_panel/collapsed_header.lua</source>
       <source file="lib/ui/device/device_panel/device_column.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/device/device_panel/device_column.lua</source>
       <source file="lib/ui/device/device_panel/header.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/device/device_panel/header.lua</source>
@@ -58,6 +64,7 @@ Requirements (install via ReaPack):
       <source file="lib/ui/main/browser_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/main/browser_panel.lua</source>
       <source file="lib/ui/main/main_window.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/main/main_window.lua</source>
       <source file="lib/ui/main/toolbar.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/main/toolbar.lua</source>
+      <source file="lib/ui/modulator/mod_matrix.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/modulator/mod_matrix.lua</source>
       <source file="lib/ui/rack/rack_panel_main.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/rack/rack_panel_main.lua</source>
       <source file="lib/ui/rack/rack_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/rack/rack_panel.lua</source>
       <source file="lib/ui/rack/rack_ui.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/rack/rack_ui.lua</source>
@@ -68,6 +75,7 @@ Requirements (install via ReaPack):
       <source file="lib/utils/presets.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/utils/presets.lua</source>
       <source file="lib/utils/json.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/utils/json.lua</source>
       <source file="lib/utils/track_detection.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/utils/track_detection.lua</source>
+      <source file="lib/utils/unit_detector.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/utils/unit_detector.lua</source>
       <source file="assets/icons/cancel.png">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/assets/icons/cancel.png</source>
       <source file="assets/icons/chain.png">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/assets/icons/chain.png</source>
       <source file="assets/icons/curve.png">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/assets/icons/curve.png</source>
