@@ -68,6 +68,57 @@ package.path = script_path .. "?.lua;"
     .. package.path
 
 --------------------------------------------------------------------------------
+-- Dependency Check
+--------------------------------------------------------------------------------
+
+local function check_dependencies()
+    local missing = {}
+
+    -- Check ReaImGui extension
+    if not r.ImGui_CreateContext then
+        table.insert(missing, "ReaImGui extension (install via ReaPack: Extensions > ReaPack > Browse packages)")
+    end
+
+    -- Check ReaWrap
+    local ok_reawrap = pcall(require, 'imgui')
+    if not ok_reawrap then
+        table.insert(missing, "ReaWrap library (install via ReaPack: Extensions > ReaPack > Browse packages)")
+    end
+
+    -- Check JSFX files
+    local jsfx_path = r.GetResourcePath() .. "/Effects/SideFX/"
+    local jsfx_files = {
+        "SideFX_Mixer.jsfx",
+        "SideFX_Utility.jsfx",
+        "SideFX_Modulator.jsfx"
+    }
+    for _, jsfx in ipairs(jsfx_files) do
+        local f = io.open(jsfx_path .. jsfx, "r")
+        if f then
+            f:close()
+        else
+            table.insert(missing, "JSFX: " .. jsfx .. " (should be in Effects/SideFX/)")
+        end
+    end
+
+    if #missing > 0 then
+        local msg = "SideFX is missing required dependencies:\n\n"
+        for i, dep in ipairs(missing) do
+            msg = msg .. i .. ". " .. dep .. "\n"
+        end
+        msg = msg .. "\nPlease install the missing dependencies and try again."
+        r.ShowMessageBox(msg, "SideFX - Missing Dependencies", 0)
+        return false
+    end
+
+    return true
+end
+
+if not check_dependencies() then
+    return  -- Exit script if dependencies are missing
+end
+
+--------------------------------------------------------------------------------
 -- Imports
 --------------------------------------------------------------------------------
 
