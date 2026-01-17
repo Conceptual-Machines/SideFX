@@ -63,6 +63,12 @@ See the [full documentation](https://conceptual-machines.github.io/SideFX/) for 
 
 ## Known Issues
 
+### Cannot dock window in fresh REAPER install
+
+On a fresh REAPER installation with no docked windows, SideFX may not dock into REAPER's docker. This is a REAPER/ReaImGui limitation where the docker needs to be "activated" first.
+
+**Workaround:** Dock any native REAPER window (e.g., Actions, Mixer) first, then SideFX will be able to dock.
+
 ### Multiple Serum instances don't receive MIDI
 
 When using multiple Serum (or Serum 2) instances on the same track, only the first instance receives MIDI by default. This is because REAPER's VST instruments default to "Replace MIDI bus" mode instead of "Merge with MIDI bus".
