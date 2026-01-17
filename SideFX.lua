@@ -1027,14 +1027,6 @@ local function draw_analyzers(ctx, avail_height)
 
                 ctx:spacing()
 
-                -- External UI button
-                if scope_fx and icons.button_bordered(ctx, "ui_scope", icons.Names.wrench, 18) then
-                    scope_fx:show(3)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("Open FX UI") end
-
-                ctx:spacing()
-
                 -- Popout button
                 if icons.button_bordered(ctx, "popout_scope_c", icons.Names.popout, 18) then
                     state.scope_popout = true
@@ -1088,15 +1080,8 @@ local function draw_analyzers(ctx, avail_height)
                     if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
                 end
 
-                -- External UI button
-                ctx:same_line(analyzer_w - 56)
-                if scope_fx and icons.button(ctx, "ui_scope_exp", icons.Names.wrench, 16) then
-                    scope_fx:show(3)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("Open FX UI") end
-
                 -- Popout button
-                ctx:same_line()
+                ctx:same_line(analyzer_w - 36)
                 if icons.button(ctx, "popout_scope", icons.Names.popout, 16) then
                     state.scope_popout = true
                 end
@@ -1148,14 +1133,6 @@ local function draw_analyzers(ctx, avail_height)
                 end
                 ctx:pop_style_color(2)
                 if ctx:is_item_hovered() then ctx:set_tooltip("Expand Spectrum") end
-
-                ctx:spacing()
-
-                -- External UI button
-                if spectrum_fx and icons.button_bordered(ctx, "ui_spectrum", icons.Names.wrench, 18) then
-                    spectrum_fx:show(3)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("Open FX UI") end
 
                 ctx:spacing()
 
@@ -1212,15 +1189,8 @@ local function draw_analyzers(ctx, avail_height)
                     if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
                 end
 
-                -- External UI button
-                ctx:same_line(analyzer_w - 56)
-                if spectrum_fx and icons.button(ctx, "ui_spectrum_exp", icons.Names.wrench, 16) then
-                    spectrum_fx:show(3)
-                end
-                if ctx:is_item_hovered() then ctx:set_tooltip("Open FX UI") end
-
                 -- Popout button
-                ctx:same_line()
+                ctx:same_line(analyzer_w - 36)
                 if icons.button(ctx, "popout_spectrum", icons.Names.popout, 16) then
                     state.spectrum_popout = true
                 end
