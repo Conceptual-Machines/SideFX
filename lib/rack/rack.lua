@@ -19,8 +19,8 @@ local state = state_module.state
 -- Constants
 --------------------------------------------------------------------------------
 
-M.MIXER_JSFX = "JS:SideFX/SideFX_Mixer"
-M.UTILITY_JSFX = "JS:SideFX/SideFX_Utility"
+M.MIXER_JSFX = "JS:SideFX/Utils/SideFX_Mixer"
+M.UTILITY_JSFX = "JS:SideFX/Utils/SideFX_Utility"
 
 --------------------------------------------------------------------------------
 -- Mixer Parameter Helpers
