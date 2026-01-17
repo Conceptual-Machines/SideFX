@@ -47,7 +47,7 @@ local script_path = ({ r.get_action_context() })[2]:match('^.+[\\//]')
 local scripts_folder = r.GetResourcePath() .. "/Scripts/"
 
 -- ReaWrap paths
-local reawrap_reapack = scripts_folder .. "ReaWrap/Libraries/lua/"
+local reawrap_reapack = scripts_folder .. "ReaWrap/lua/"
 local sidefx_parent = script_path:match("^(.+[/\\])SideFX[/\\]")
 local reawrap_dev = sidefx_parent and (sidefx_parent .. "ReaWrap/lua/") or ""
 
