@@ -451,7 +451,72 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         ctx:end_drag_drop_target()
     end
 
-    -- Extra padding at end to ensure scrolling doesn't cut off the + button
+    -- Post FX separator and drop zone
+    ctx:same_line()
+
+    -- Draw vertical separator line
+    local sep_x, sep_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+    r.ImGui_DrawList_AddLine(draw_list, sep_x + 4, sep_y, sep_x + 4, sep_y + add_btn_h, 0x666688FF, 2)
+    ctx:dummy(10, add_btn_h)
+
+    ctx:same_line()
+
+    -- Post FX drop zone
+    local post_is_hovered = (hovered_drop_zone == "post_fx")
+    local post_width = post_is_hovered and 80 or 60
+
+    if is_dragging then
+        ctx:push_style_color(imgui.Col.Button(), 0x88446644)
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0xAA668888)
+        ctx:push_style_color(imgui.Col.ButtonActive(), 0xCC88AAAA)
+    else
+        ctx:push_style_color(imgui.Col.Button(), 0x44335544)
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x66557788)
+        ctx:push_style_color(imgui.Col.ButtonActive(), 0x887799AA)
+    end
+
+    ctx:button("POST##post_fx", post_width, add_btn_h)
+    ctx:pop_style_color(3)
+
+    -- Track hover state
+    if ctx:is_item_hovered() then
+        hovered_drop_zone = "post_fx"
+    elseif hovered_drop_zone == "post_fx" then
+        hovered_drop_zone = nil
+    end
+
+    if ctx:is_item_hovered() then
+        ctx:set_tooltip("Post FX area\nDrag plugin here for post-processing")
+    end
+
+    -- Drop target for post FX
+    if ctx:begin_drag_drop_target() then
+        local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+        if accepted and plugin_name then
+            local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+            local drop_opts = shift_held and { bare = true, post = true } or { post = true }
+            add_plugin_by_name(plugin_name, nil, drop_opts)  -- nil = add at end, post = true marks as post FX
+        end
+        -- Accept FX reorder drops
+        local fx_accepted, fx_guid = ctx:accept_drag_drop_payload("FX_GUID")
+        if fx_accepted and fx_guid then
+            local dragged = state.track:find_fx_by_guid(fx_guid)
+            if dragged then
+                -- Move to end (post position)
+                local fx_count = state.track:get_fx_count()
+                r.TrackFX_CopyToTrack(
+                    state.track.pointer, dragged.pointer,
+                    state.track.pointer, fx_count,
+                    true  -- move
+                )
+                refresh_fx_list()
+            end
+        end
+        ctx:end_drag_drop_target()
+    end
+
+    -- Extra padding at end
     ctx:same_line()
     ctx:dummy(20, 1)
 end
