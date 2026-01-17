@@ -68,7 +68,8 @@ function M.add_modulator()
     local fx = state.track:add_fx_by_name(M.MODULATOR_JSFX, false, -1000)
     -- Select first preset (Sine) by default
     if fx and fx.pointer >= 0 then
-        r.TrackFX_SetPresetByIndex(state.track.pointer, fx.pointer, 0)
+        local presets = require('lib.modulator.modulator_presets')
+        presets.load_preset_by_name(state.track.pointer, fx.pointer, "Sine")
     end
     r.Undo_EndBlock("Add SideFX Modulator", -1)
     if fx and refresh_callback then
@@ -419,7 +420,8 @@ function M.add_modulator_to_device(device_container, modulator_type, track)
 
         -- Select first preset (Sine) by default
         if moved_modulator.pointer >= 0 then
-            r.TrackFX_SetPresetByIndex(track.pointer, moved_modulator.pointer, 0)
+            local presets = require('lib.modulator.modulator_presets')
+            presets.load_preset_by_name(track.pointer, moved_modulator.pointer, "Sine")
         end
     end
 
