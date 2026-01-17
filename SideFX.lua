@@ -288,8 +288,9 @@ renumber_device_chain = function()
 end
 
 -- Device operations (uses state singleton via device_module)
-local function add_plugin_to_track(plugin, position)
-    local result = device_module.add_plugin_to_track(plugin, position)
+local function add_plugin_to_track(plugin, position, opts)
+    opts = opts or {}
+    local result = device_module.add_plugin_to_track(plugin, position, opts)
     if result then
         -- Auto-select the newly created standalone device
         local device_guid = result:get_guid()
@@ -301,8 +302,10 @@ local function add_plugin_to_track(plugin, position)
     return result
 end
 
-local function add_plugin_by_name(plugin_name, position)
-    local result = device_module.add_plugin_by_name(plugin_name, position)
+local function add_plugin_by_name(plugin_name, position, opts)
+    opts = opts or {}
+    local plugin = { full_name = plugin_name, name = plugin_name }
+    local result = device_module.add_plugin_to_track(plugin, position, opts)
     if result then
         -- Auto-select the newly created standalone device
         local device_guid = result:get_guid()

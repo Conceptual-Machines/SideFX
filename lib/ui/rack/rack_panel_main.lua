@@ -299,8 +299,11 @@ local function draw_rack_drop_zone(ctx, rack, has_payload, state, add_chain_to_r
         -- Accept plugin drops
         local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
         if accepted and plugin_name then
+            -- Check for Shift key = add as bare device (no utility)
+            local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+            local opts = shift_held and { bare = true } or nil
             local plugin = { full_name = plugin_name, name = plugin_name }
-            add_chain_to_rack(rack, plugin)
+            add_chain_to_rack(rack, plugin, opts)
         end
 
         -- Accept rack drops

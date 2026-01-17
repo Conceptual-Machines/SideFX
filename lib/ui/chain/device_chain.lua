@@ -80,7 +80,10 @@ local function draw_drop_zone_indicator(ctx, zone_id, insert_pos, avail_height, 
         -- Accept plugin drops
         local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
         if accepted and plugin_name then
-            add_plugin_by_name(plugin_name, insert_pos)
+            -- Check for Shift key = add as bare device (no utility)
+            local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+            local opts = shift_held and { bare = true } or nil
+            add_plugin_by_name(plugin_name, insert_pos, opts)
         end
 
         -- Accept FX reorder drops
@@ -281,7 +284,10 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
             -- Accept plugin drops
             local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
             if accepted and plugin_name then
-                add_plugin_by_name(plugin_name, 0)
+                -- Check for Shift key = add as bare device (no utility)
+                local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+                local opts = shift_held and { bare = true } or nil
+                add_plugin_by_name(plugin_name, 0, opts)
             end
             -- Accept rack drops
             local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
@@ -381,8 +387,8 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
                         refresh_fx_list()
                     end
                 end,
-                on_plugin_drop = function(plugin_name, insert_pos)
-                    add_plugin_by_name(plugin_name, insert_pos)
+                on_plugin_drop = function(plugin_name, insert_pos, drop_opts)
+                    add_plugin_by_name(plugin_name, insert_pos, drop_opts)
                 end,
                 on_rack_drop = function(insert_pos)
                     add_rack_to_track(insert_pos)
@@ -428,7 +434,10 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
     if ctx:begin_drag_drop_target() then
         local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
         if accepted and plugin_name then
-            add_plugin_by_name(plugin_name, nil)  -- nil = add at end
+            -- Check for Shift key = add as bare device (no utility)
+            local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+            local opts = shift_held and { bare = true } or nil
+            add_plugin_by_name(plugin_name, nil, opts)  -- nil = add at end
         end
         -- Accept rack drops
         local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")

@@ -365,6 +365,27 @@ function M.get_next_device_index(track)
     return max_idx + 1
 end
 
+--- Count BD (bare devices) at top level to get next index.
+-- @param track Track ReaWrap Track object
+-- @return number Next bare device index
+function M.get_next_bare_device_index(track)
+    if not track then return 1 end
+    local max_idx = 0
+    for fx in track:iter_track_fx_chain() do
+        local parent = fx:get_parent_container()
+        if not parent then  -- Top level only
+            local ok, name = pcall(function() return fx:get_name() end)
+            if ok and name then
+                local idx = naming.parse_bare_device_index(name)
+                if idx then
+                    max_idx = math.max(max_idx, idx)
+                end
+            end
+        end
+    end
+    return max_idx + 1
+end
+
 --- Get next rack index for R-naming.
 -- @param track Track ReaWrap Track object
 -- @return number Next rack index

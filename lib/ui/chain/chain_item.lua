@@ -252,9 +252,9 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
                     callbacks.on_drop(dragged_guid, target_guid)
                 end
             end,
-            on_plugin_drop = function(plugin_name, insert_before_idx)
+            on_plugin_drop = function(plugin_name, insert_before_idx, drop_opts)
                 if callbacks.on_plugin_drop then
-                    callbacks.on_plugin_drop(plugin_name, container and container.pointer or insert_before_idx)
+                    callbacks.on_plugin_drop(plugin_name, container and container.pointer or insert_before_idx, drop_opts)
                 end
             end,
             on_rack_drop = function(insert_before_idx)

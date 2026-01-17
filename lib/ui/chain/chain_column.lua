@@ -124,9 +124,11 @@ local function draw_empty_chain_content(ctx, chain_content_h, has_payload, selec
     if ctx:begin_drag_drop_target() then
         local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
         if accepted and plugin_name then
-            r.ShowConsoleMsg(string.format("SideFX: Empty chain drag-drop accepted: plugin=%s\n", plugin_name))
+            -- Check for Shift key = add as bare device (no utility)
+            local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+            local opts = shift_held and { bare = true } or nil
             local plugin = { full_name = plugin_name, name = plugin_name }
-            add_device_to_chain(selected_chain, plugin)
+            add_device_to_chain(selected_chain, plugin, opts)
         end
         local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
         if rack_accepted then
@@ -161,8 +163,11 @@ local function draw_chain_add_button(ctx, chain_content_h, has_payload, selected
     if ctx:begin_drag_drop_target() then
         local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
         if accepted and plugin_name then
+            -- Check for Shift key = add as bare device (no utility)
+            local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+            local opts = shift_held and { bare = true } or nil
             local plugin = { full_name = plugin_name, name = plugin_name }
-            add_device_to_chain(selected_chain, plugin)
+            add_device_to_chain(selected_chain, plugin, opts)
         end
         local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
         if rack_accepted then
@@ -427,9 +432,9 @@ function M.draw(ctx, selected_chain, rack_h, opts)
                                             state.renaming_fx = dev_guid_inner
                                             state.rename_text = get_fx_display_name(dev)
                                         end,
-                                        on_plugin_drop = function(plugin_name, insert_before_idx)
+                                        on_plugin_drop = function(plugin_name, insert_before_idx, drop_opts)
                                             local plugin = { full_name = plugin_name, name = plugin_name }
-                                            add_device_to_chain(selected_chain, plugin)
+                                            add_device_to_chain(selected_chain, plugin, drop_opts)
                                         end,
                                     }, device_panel, get_device_main_fx, get_device_utility, state)
                                 end

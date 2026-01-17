@@ -98,7 +98,10 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
             local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
             if accepted_plugin and plugin_name then
                 if opts.on_plugin_drop then
-                    opts.on_plugin_drop(plugin_name, fx.pointer)
+                    -- Check for Shift key = add as bare device (no utility)
+                    local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+                    local drop_opts = shift_held and { bare = true } or nil
+                    opts.on_plugin_drop(plugin_name, fx.pointer, drop_opts)
                 end
                 interacted = true
             end

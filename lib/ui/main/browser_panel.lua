@@ -77,14 +77,20 @@ function M.draw(ctx, state, icon_font, icon_size, on_plugin_add, filter_plugins)
 
             -- Handle click (release without drag) = add plugin
             if action == "click" then
-                on_plugin_add(plugin)
+                -- Check for Shift key = add as bare device (no utility)
+                local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+                local opts = shift_held and { bare = true } or nil
+                on_plugin_add(plugin, nil, opts)
             end
 
             -- Handle drag = start drag-drop
             if action == "drag_start" or action == "dragging" then
                 if ctx:begin_drag_drop_source(r.ImGui_DragDropFlags_SourceAllowNullID()) then
                     ctx:set_drag_drop_payload("PLUGIN_ADD", plugin.full_name)
-                    ctx:text("Add: " .. plugin.name)
+                    -- Show hint if Shift held during drag
+                    local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+                    local label = shift_held and "Add (bare): " or "Add: "
+                    ctx:text(label .. plugin.name)
                     ctx:end_drag_drop_source()
                 end
             end
@@ -92,6 +98,14 @@ function M.draw(ctx, state, icon_font, icon_size, on_plugin_add, filter_plugins)
             -- Right-click context menu (use plugin full_name for unique ID)
             local menu_id = "PluginContextMenu_" .. (plugin.full_name:gsub("[^%w]", "_"))
             if ctx:begin_popup_context_item(menu_id) then
+                if ctx:menu_item("Add as Bare Device") then
+                    on_plugin_add(plugin, nil, { bare = true })
+                end
+                if ctx:menu_item("Add Post-FX") then
+                    -- nil position = add at end (post-fx)
+                    on_plugin_add(plugin, nil)
+                end
+                ctx:separator()
                 if ctx:menu_item("Select Parameters...") then
                     param_selector.open(plugin.name, plugin.full_name)
                 end
@@ -99,14 +113,14 @@ function M.draw(ctx, state, icon_font, icon_size, on_plugin_add, filter_plugins)
             end
 
             if r.ImGui_IsItemHovered(ctx.ctx) then
-                ctx:set_tooltip(plugin.full_name .. "\n(drag to chain or click to add)\n(right-click to select parameters)")
+                ctx:set_tooltip(plugin.full_name .. "\n(drag to chain or click to add, Shift=bare)\n(right-click for options)")
             end
 
             ctx:pop_id()
         end
         ctx:end_child()
     end
-    
+
     -- Draw parameter selector dialog if open
     if param_selector.is_open() then
         param_selector.draw(ctx, state)

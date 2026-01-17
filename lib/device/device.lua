@@ -29,9 +29,11 @@ M.MODULATOR_JSFX = "JS:SideFX/SideFX_Modulator"
 --- Add a plugin to the track wrapped in a D-container.
 -- @param plugin table Plugin info {full_name, name}
 -- @param position number|nil Insert position (nil = end of chain)
+-- @param opts table|nil Options: {bare = true} to skip adding utility (for analyzers)
 -- @return TrackFX|nil Device container (or raw FX for modulators)
-function M.add_plugin_to_track(plugin, position)
+function M.add_plugin_to_track(plugin, position, opts)
     if not state.track then return end
+    opts = opts or {}
 
     local name_lower = plugin.full_name:lower()
 
@@ -52,6 +54,22 @@ function M.add_plugin_to_track(plugin, position)
     -- Don't wrap mixer in containers (it should only be added by rack creation)
     if name_lower:find("sidefx_mixer") or name_lower:find("sidefx chain mixer") then
         return nil
+    end
+
+    -- Bare mode: add raw plugin without D-container (for analyzers, etc.)
+    if opts.bare then
+        r.Undo_BeginBlock()
+        local fx_position = position and (-1000 - position) or -1
+        local fx = state.track:add_fx_by_name(plugin.full_name, false, fx_position)
+        if fx and fx.pointer >= 0 then
+            -- Get next bare device index and rename with canonical name
+            local bare_idx = fx_utils.get_next_bare_device_index(state.track)
+            local short_name = naming.get_short_plugin_name(plugin.full_name)
+            local bare_name = naming.build_bare_device_name(bare_idx, short_name)
+            fx:set_named_config_param("renamed_name", bare_name)
+        end
+        r.Undo_EndBlock("SideFX: Add Plugin (bare)", -1)
+        return fx
     end
 
     r.Undo_BeginBlock()

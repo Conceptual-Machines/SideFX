@@ -576,8 +576,10 @@ end
 --- Add a chain (C-container) to an existing rack.
 -- @param rack TrackFX Rack container
 -- @param plugin table Plugin info {full_name, name}
+-- @param opts table|nil Options: {bare = true} to skip adding utility
 -- @return TrackFX|nil Chain container or nil on failure
-function M.add_chain_to_rack(rack, plugin)
+function M.add_chain_to_rack(rack, plugin, opts)
+    opts = opts or {}
     if not state.track then
         r.ShowConsoleMsg("SideFX ERROR: add_chain_to_rack - no track in state\n")
         return nil
@@ -650,9 +652,56 @@ function M.add_chain_to_rack(rack, plugin)
         return nil
     end
 
-    -- Build names
-    local short_name = naming.get_short_plugin_name(plugin.full_name)
+    -- Build chain name (needed for both bare and normal mode)
     local chain_name = naming.build_chain_name(rack_idx, chain_idx)
+
+    -- Bare mode: create chain with raw plugin (no D-container)
+    if opts.bare then
+        -- Create chain container
+        local chain = state.track:add_fx_by_name("Container", false, -1)
+        if not chain or chain.pointer < 0 then
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Chain to Rack (bare, failed)", -1)
+            return nil
+        end
+        local chain_guid = chain:get_guid()
+        chain:set_named_config_param("renamed_name", chain_name)
+
+        -- Add raw plugin to chain with canonical BD naming
+        local raw_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
+        if raw_fx and raw_fx.pointer >= 0 then
+            -- Rename with canonical bare device name (first bare device in new chain)
+            local short_name = naming.get_short_plugin_name(plugin.full_name)
+            local bare_name = naming.build_chain_bare_device_name(rack_idx, chain_idx, 1, short_name)
+            raw_fx:set_named_config_param("renamed_name", bare_name)
+            chain:add_fx_to_container(raw_fx, 0)
+        end
+
+        -- Move chain into rack
+        r.PreventUIRefresh(-1)
+        r.PreventUIRefresh(1)
+        rack = state.track:find_fx_by_guid(rack_guid)
+        if rack then
+            if rack.pointer and rack.pointer >= 0x2000000 and rack.refresh_pointer then
+                rack:refresh_pointer()
+            end
+            chain = state.track:find_fx_by_guid(chain_guid)
+            if chain then
+                local insert_pos = fx_utils.count_chains_in_rack(rack) + 1  -- After mixer
+                rack:add_fx_to_container(chain, insert_pos)
+            end
+        end
+
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Chain to Rack (bare)", -1)
+        if chain_guid then
+            return state.track:find_fx_by_guid(chain_guid)
+        end
+        return nil
+    end
+
+    -- Build names for normal mode
+    local short_name = naming.get_short_plugin_name(plugin.full_name)
     local device_name = naming.build_chain_device_name(rack_idx, chain_idx, 1, short_name)
     local fx_name = naming.build_chain_device_fx_name(rack_idx, chain_idx, 1, short_name)
     local util_name = naming.build_chain_device_util_name(rack_idx, chain_idx, 1)
@@ -841,9 +890,11 @@ end
 --- Add a device to an existing chain.
 -- @param chain TrackFX Chain container
 -- @param plugin table Plugin info {full_name, name}
+-- @param opts table|nil Options: {bare = true} to skip adding utility
 -- @return TrackFX|nil Device container or nil on failure
-function M.add_device_to_chain(chain, plugin)
+function M.add_device_to_chain(chain, plugin, opts)
     if not state.track or not chain or not plugin then return nil end
+    opts = opts or {}
     if not fx_utils.is_chain_container(chain) then return nil end
 
     r.Undo_BeginBlock()
@@ -878,6 +929,49 @@ function M.add_device_to_chain(chain, plugin)
         r.ShowConsoleMsg("SideFX: Found FX is not a chain container: " .. tostring(chain_name) .. "\n")
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Device to Chain (failed)", -1)
+        return nil
+    end
+
+    -- Bare mode: add raw plugin directly to chain (no D-container)
+    if opts.bare then
+        -- Parse hierarchy for naming
+        chain_name = chain:get_name()
+        local hierarchy = naming.parse_hierarchy(chain_name)
+        local rack_idx = hierarchy.rack_idx or 1
+        local chain_idx = hierarchy.chain_idx or 1
+
+        -- Count existing bare devices in this chain to get next index
+        local bare_count = 0
+        for child in chain:iter_container_children() do
+            local ok, child_name = pcall(function() return child:get_name() end)
+            if ok and child_name and naming.is_bare_device_name(child_name) then
+                local idx = naming.parse_bare_device_index(child_name)
+                if idx then
+                    bare_count = math.max(bare_count, idx)
+                end
+            end
+        end
+        local bare_idx = bare_count + 1
+
+        local raw_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
+        if raw_fx and raw_fx.pointer >= 0 then
+            -- Rename with canonical name
+            local short_name = naming.get_short_plugin_name(plugin.full_name)
+            local bare_name = naming.build_chain_bare_device_name(rack_idx, chain_idx, bare_idx, short_name)
+            raw_fx:set_named_config_param("renamed_name", bare_name)
+
+            local insert_pos = chain:get_container_child_count()
+            chain:add_fx_to_container(raw_fx, insert_pos)
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Plugin to Chain (bare)", -1)
+            -- Re-find the FX after move
+            local raw_guid = raw_fx:get_guid()
+            if raw_guid then
+                return state.track:find_fx_by_guid(raw_guid)
+            end
+        end
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Plugin to Chain (bare, failed)", -1)
         return nil
     end
 
