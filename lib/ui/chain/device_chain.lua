@@ -259,14 +259,27 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         ::continue_fx_loop::
     end
 
+    -- Detect drag state for styling
+    local has_plugin = ctx:get_drag_drop_payload("PLUGIN_ADD")
+    local has_fx = ctx:get_drag_drop_payload("FX_GUID")
+    local has_rack = ctx:get_drag_drop_payload("RACK_ADD")
+    local is_dragging = has_plugin or has_fx or has_rack
+    local drop_h = avail_height - 10
+
+    -- Use a table to pin Post FX area to the right
+    local post_fx_width = 80
+    if not ctx:begin_table("chain_layout", 2, r.ImGui_TableFlags_SizingStretchProp()) then
+        return
+    end
+    ctx:table_setup_column("chain", imgui.TableColumnFlags.WidthStretch())
+    ctx:table_setup_column("post", imgui.TableColumnFlags.WidthFixed(), post_fx_width)
+    ctx:table_next_row()
+
+    -- Column 1: Main chain area
+    ctx:table_set_column_index(0)
+
     if #display_fx == 0 then
         -- Empty chain - full height drop zone (always visible)
-        local has_plugin = ctx:get_drag_drop_payload("PLUGIN_ADD")
-        local has_fx = ctx:get_drag_drop_payload("FX_GUID")
-        local has_rack = ctx:get_drag_drop_payload("RACK_ADD")
-        local is_dragging = has_plugin or has_fx or has_rack
-        local drop_h = avail_height - 10
-
         if is_dragging then
             ctx:push_style_color(imgui.Col.Button(), 0x4488FF44)
             ctx:push_style_color(imgui.Col.ButtonHovered(), 0x66AAFF88)
@@ -290,8 +303,8 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
             if accepted and plugin_name then
                 -- Check for Shift key = add as bare device (no utility)
                 local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
-                local opts = shift_held and { bare = true } or nil
-                add_plugin_by_name(plugin_name, 0, opts)
+                local drop_opts = shift_held and { bare = true } or nil
+                add_plugin_by_name(plugin_name, 0, drop_opts)
             end
             -- Accept rack drops
             local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
@@ -300,171 +313,161 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
             end
             ctx:end_drag_drop_target()
         end
-        return
-    end
-
-    -- Drop zone before first device (only visible when dragging, so no layout shift)
-    local first_item = display_fx[1]
-    local drew_first_zone = false
-    if first_item then
-        drew_first_zone = draw_drop_zone_indicator(
-            ctx,
-            "zone_first",
-            0,  -- Insert at position 0 (before first device)
-            avail_height,
-            add_plugin_by_name,
-            add_rack_to_track,
-            refresh_fx_list,
-            state,
-            true  -- no_same_line = true (first item, nothing before it)
-        )
-    end
-
-    -- Draw each FX as a device panel, horizontally
-    local display_idx = 0
-    for _, item in ipairs(display_fx) do
-        -- Check before processing each item - previous iteration may have invalidated
-        if state.deletion_pending or state.fx_list_invalid then
-            break
-        end
-
-        local fx = item.fx
-        display_idx = display_idx + 1
-        ctx:push_id("device_" .. display_idx)
-
-        local is_container = fx:is_container()
-
-        if display_idx == 1 then
-            -- First device: add same_line if we drew the first drop zone
-            if drew_first_zone then
-                ctx:same_line()
-            end
-        else
-            -- Subsequent devices: draw drop zone indicator between devices
-            draw_drop_zone_indicator(
+    else
+        -- Drop zone before first device (only visible when dragging, so no layout shift)
+        local first_item = display_fx[1]
+        local drew_first_zone = false
+        if first_item then
+            drew_first_zone = draw_drop_zone_indicator(
                 ctx,
-                "zone_" .. display_idx,
-                item.original_idx,  -- Insert position (before this device)
+                "zone_first",
+                0,  -- Insert at position 0 (before first device)
                 avail_height,
                 add_plugin_by_name,
                 add_rack_to_track,
                 refresh_fx_list,
-                state
+                state,
+                true  -- no_same_line = true (first item, nothing before it)
             )
-            ctx:same_line()
         end
 
-        if item.is_rack then
-            -- Draw rack with chain column
-            chain_item.draw_rack_item(ctx, fx, avail_height, {
-                on_drop = function(dragged_guid, target_guid)
-                    -- Handle FX/container reordering (works for both devices and racks)
-                    local dragged = state.track:find_fx_by_guid(dragged_guid)
-                    local target = state.track:find_fx_by_guid(target_guid)
-                    if dragged and target then
-                        r.TrackFX_CopyToTrack(
-                            state.track.pointer, dragged.pointer,
-                            state.track.pointer, target.pointer,
-                            true  -- move
-                        )
-                        refresh_fx_list()
-                    end
-                end,
-            })
-        elseif is_container then
-            -- Draw unknown container
-            chain_item.draw_container_item(ctx, fx)
+        -- Draw each FX as a device panel, horizontally
+        local display_idx = 0
+        for _, item in ipairs(display_fx) do
+            -- Check before processing each item - previous iteration may have invalidated
+            if state.deletion_pending or state.fx_list_invalid then
+                break
+            end
+
+            local fx = item.fx
+            display_idx = display_idx + 1
+            ctx:push_id("device_" .. display_idx)
+
+            local is_container_fx = fx:is_container()
+
+            if display_idx == 1 then
+                -- First device: add same_line if we drew the first drop zone
+                if drew_first_zone then
+                    ctx:same_line()
+                end
+            else
+                -- Subsequent devices: draw drop zone indicator between devices
+                draw_drop_zone_indicator(
+                    ctx,
+                    "zone_" .. display_idx,
+                    item.original_idx,  -- Insert position (before this device)
+                    avail_height,
+                    add_plugin_by_name,
+                    add_rack_to_track,
+                    refresh_fx_list,
+                    state
+                )
+                ctx:same_line()
+            end
+
+            if item.is_rack then
+                -- Draw rack with chain column
+                chain_item.draw_rack_item(ctx, fx, avail_height, {
+                    on_drop = function(dragged_guid, target_guid)
+                        -- Handle FX/container reordering (works for both devices and racks)
+                        local dragged = state.track:find_fx_by_guid(dragged_guid)
+                        local target = state.track:find_fx_by_guid(target_guid)
+                        if dragged and target then
+                            r.TrackFX_CopyToTrack(
+                                state.track.pointer, dragged.pointer,
+                                state.track.pointer, target.pointer,
+                                true  -- move
+                            )
+                            refresh_fx_list()
+                        end
+                    end,
+                })
+            elseif is_container_fx then
+                -- Draw unknown container
+                chain_item.draw_container_item(ctx, fx)
+            else
+                -- Draw device (full UI or fallback)
+                chain_item.draw_device_item(ctx, fx, item, avail_height, {
+                    missing_utility = item.missing_utility,  -- Pass missing utility flag
+                    on_drop = function(dragged_guid, target_guid)
+                        -- Handle FX/container reordering
+                        local dragged = state.track:find_fx_by_guid(dragged_guid)
+                        local target = state.track:find_fx_by_guid(target_guid)
+                        if dragged and target then
+                            r.TrackFX_CopyToTrack(
+                                state.track.pointer, dragged.pointer,
+                                state.track.pointer, target.pointer,
+                                true  -- move
+                            )
+                            refresh_fx_list()
+                        end
+                    end,
+                    on_plugin_drop = function(plugin_name, insert_pos, plugin_drop_opts)
+                        add_plugin_by_name(plugin_name, insert_pos, plugin_drop_opts)
+                    end,
+                    on_rack_drop = function(insert_pos)
+                        add_rack_to_track(insert_pos)
+                    end,
+                })
+            end
+
+            ctx:pop_id()
+
+            -- Break immediately if deletion or invalidation occurred - remaining items have stale pointers
+            if state.deletion_pending or state.fx_list_invalid then
+                break
+            end
+        end
+
+        -- Always show add button at end of chain (full height drop zone)
+        ctx:same_line()
+
+        if is_dragging then
+            ctx:push_style_color(imgui.Col.Button(), 0x4488FF44)
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x66AAFF88)
+            ctx:push_style_color(imgui.Col.ButtonActive(), 0x88CCFFAA)
         else
-            -- Draw device (full UI or fallback)
-            chain_item.draw_device_item(ctx, fx, item, avail_height, {
-                missing_utility = item.missing_utility,  -- Pass missing utility flag
-                on_drop = function(dragged_guid, target_guid)
-                    -- Handle FX/container reordering
-                    local dragged = state.track:find_fx_by_guid(dragged_guid)
-                    local target = state.track:find_fx_by_guid(target_guid)
-                    if dragged and target then
-                        r.TrackFX_CopyToTrack(
-                            state.track.pointer, dragged.pointer,
-                            state.track.pointer, target.pointer,
-                            true  -- move
-                        )
-                        refresh_fx_list()
-                    end
-                end,
-                on_plugin_drop = function(plugin_name, insert_pos, drop_opts)
-                    add_plugin_by_name(plugin_name, insert_pos, drop_opts)
-                end,
-                on_rack_drop = function(insert_pos)
-                    add_rack_to_track(insert_pos)
-                end,
-            })
+            ctx:push_style_color(imgui.Col.Button(), 0x3A4A5A44)
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x4A6A8A88)
+            ctx:push_style_color(imgui.Col.ButtonActive(), 0x5A8ABAAA)
         end
 
-        ctx:pop_id()
+        ctx:button("+##add_end", 40, drop_h)
+        ctx:pop_style_color(3)
 
-        -- Break immediately if deletion or invalidation occurred - remaining items have stale pointers
-        if state.deletion_pending or state.fx_list_invalid then
-            break
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip("Drag plugin or rack here")
         end
-    end
 
-    -- Always show add button at end of chain (full height drop zone)
-    ctx:same_line()
-
-    local add_btn_h = avail_height - 10
-    local has_plugin = ctx:get_drag_drop_payload("PLUGIN_ADD")
-    local has_fx = ctx:get_drag_drop_payload("FX_GUID")
-    local has_rack = ctx:get_drag_drop_payload("RACK_ADD")
-    local is_dragging = has_plugin or has_fx or has_rack
-
-    if is_dragging then
-        ctx:push_style_color(imgui.Col.Button(), 0x4488FF44)
-        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x66AAFF88)
-        ctx:push_style_color(imgui.Col.ButtonActive(), 0x88CCFFAA)
-    else
-        ctx:push_style_color(imgui.Col.Button(), 0x3A4A5A44)
-        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x4A6A8A88)
-        ctx:push_style_color(imgui.Col.ButtonActive(), 0x5A8ABAAA)
-    end
-
-    ctx:button("+##add_end", 40, add_btn_h)
-    ctx:pop_style_color(3)
-
-    if ctx:is_item_hovered() then
-        ctx:set_tooltip("Drag plugin or rack here")
-    end
-
-    -- Drop target for plugins and racks
-    if ctx:begin_drag_drop_target() then
-        local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
-        if accepted and plugin_name then
-            -- Check for Shift key = add as bare device (no utility)
-            local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
-            local opts = shift_held and { bare = true } or nil
-            add_plugin_by_name(plugin_name, nil, opts)  -- nil = add at end
+        -- Drop target for plugins and racks
+        if ctx:begin_drag_drop_target() then
+            local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+            if accepted and plugin_name then
+                -- Check for Shift key = add as bare device (no utility)
+                local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+                local add_opts = shift_held and { bare = true } or nil
+                add_plugin_by_name(plugin_name, nil, add_opts)  -- nil = add at end
+            end
+            -- Accept rack drops
+            local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+            if rack_accepted then
+                add_rack_to_track(nil)  -- nil = add at end
+            end
+            ctx:end_drag_drop_target()
         end
-        -- Accept rack drops
-        local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
-        if rack_accepted then
-            add_rack_to_track(nil)  -- nil = add at end
-        end
-        ctx:end_drag_drop_target()
-    end
+    end  -- end of else (non-empty chain)
 
-    -- Post FX separator and drop zone
-    ctx:same_line()
+    -- Column 2: Post FX area (pinned to right)
+    ctx:table_set_column_index(1)
 
-    -- Draw vertical separator line
+    -- Draw vertical separator line on left edge
     local sep_x, sep_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
     local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-    r.ImGui_DrawList_AddLine(draw_list, sep_x + 4, sep_y, sep_x + 4, sep_y + add_btn_h, 0x666688FF, 2)
-    ctx:dummy(10, add_btn_h)
-
-    ctx:same_line()
+    r.ImGui_DrawList_AddLine(draw_list, sep_x, sep_y, sep_x, sep_y + drop_h, 0x666688FF, 2)
 
     -- Post FX drop zone
     local post_is_hovered = (hovered_drop_zone == "post_fx")
-    local post_width = post_is_hovered and 80 or 60
+    local post_width = post_is_hovered and 76 or 76
 
     if is_dragging then
         ctx:push_style_color(imgui.Col.Button(), 0x88446644)
@@ -476,7 +479,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         ctx:push_style_color(imgui.Col.ButtonActive(), 0x887799AA)
     end
 
-    ctx:button("POST##post_fx", post_width, add_btn_h)
+    ctx:button("POST##post_fx", post_width, drop_h)
     ctx:pop_style_color(3)
 
     -- Track hover state
@@ -495,8 +498,8 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
         if accepted and plugin_name then
             local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
-            local drop_opts = shift_held and { bare = true, post = true } or { post = true }
-            add_plugin_by_name(plugin_name, nil, drop_opts)  -- nil = add at end, post = true marks as post FX
+            local post_opts = shift_held and { bare = true, post = true } or { post = true }
+            add_plugin_by_name(plugin_name, nil, post_opts)  -- nil = add at end, post = true marks as post FX
         end
         -- Accept FX reorder drops
         local fx_accepted, fx_guid = ctx:accept_drag_drop_payload("FX_GUID")
@@ -516,9 +519,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         ctx:end_drag_drop_target()
     end
 
-    -- Extra padding at end
-    ctx:same_line()
-    ctx:dummy(20, 1)
+    ctx:end_table()
 end
 
 return M
