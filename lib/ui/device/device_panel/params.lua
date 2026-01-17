@@ -1,5 +1,15 @@
 --[[
 Parameters Column Module - Draws device parameter grid with sliders
+
+Architecture:
+- Baseline value: The user-controlled value (stored in REAPER's mod.baseline)
+- Modulated value: The live value from REAPER (baseline + LFO modulation)
+- Editing value: The value being dragged (tracked locally during interaction)
+
+When modulated:
+- Slider shows BASELINE (stable, user-controlled)
+- Never shows modulated value in slider
+- Modulation indicators show range separately
 ]]
 
 local M = {}
@@ -8,6 +18,71 @@ local unit_detector = require('lib.utils.unit_detector')
 local state_module = require('lib.core.state')
 local modulator_module = require('lib.modulator.modulator')
 local bake_module = require('lib.modulator.modulator_bake')
+
+-- Track editing state per parameter (cleared when not dragging)
+local editing_values = {}  -- {[link_key] = value}
+
+--------------------------------------------------------------------------------
+-- Value Resolution (determines what value to display/use)
+--------------------------------------------------------------------------------
+
+--- Get the baseline value for a parameter
+-- Priority: state.link_baselines > any_link.baseline > param_val
+-- @param link_key Unique key for this param (fx_guid .. "_" .. param_idx)
+-- @param any_link Link info from any modulator (or nil)
+-- @param param_val Current REAPER parameter value (may be modulated)
+-- @param state The UI state table
+-- @return number The baseline value (unmodulated)
+local function get_baseline_value(link_key, any_link, param_val, state)
+    -- First check UI state (most up-to-date, survives frame rebuilds)
+    if link_key and state and state.link_baselines and state.link_baselines[link_key] then
+        return state.link_baselines[link_key]
+    end
+    -- Then check link info from REAPER
+    if any_link then
+        return any_link.baseline or 0
+    end
+    -- Default to current param value
+    return param_val
+end
+
+--- Get the display value for the slider
+-- Priority: editing value > baseline > param value
+-- @param link_key Unique key for this param (fx_guid .. "_" .. param_idx)
+-- @param any_link Link info from any modulator (or nil)
+-- @param param_val Current REAPER parameter value
+-- @param is_active Whether the slider is currently being dragged
+-- @param state The UI state table
+-- @return number The value to display in the slider
+local function get_display_value(link_key, any_link, param_val, is_active, state)
+    -- If actively editing, use the editing value
+    if is_active and link_key and editing_values[link_key] then
+        return editing_values[link_key]
+    end
+    -- Otherwise use baseline (or param_val if not modulated)
+    return get_baseline_value(link_key, any_link, param_val, state)
+end
+
+--- Update editing value during drag
+-- @param link_key Unique key for this param
+-- @param value The new value being dragged to
+local function set_editing_value(link_key, value)
+    if link_key then
+        editing_values[link_key] = value
+    end
+end
+
+--- Clear editing value when drag ends
+-- @param link_key Unique key for this param
+local function clear_editing_value(link_key)
+    if link_key then
+        editing_values[link_key] = nil
+    end
+end
+
+--------------------------------------------------------------------------------
+-- Parameter Cell Drawing
+--------------------------------------------------------------------------------
 
 --- Draw a single parameter cell (label + slider + modulation overlay)
 -- @param ctx ImGui context
@@ -40,8 +115,10 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
         -- Check if this param has modulation from ANY modulator (for baseline value)
         local any_link = all_mod_links and all_mod_links[param_idx]
 
-        -- Check if link is disabled
+        -- Unique key for this parameter (used for editing state tracking)
         local link_key = fx_guid and (fx_guid .. "_" .. param_idx) or nil
+
+        -- Check if link is disabled
         local is_link_disabled = link and link_key and state and state.link_disabled and state.link_disabled[link_key]
 
         -- Param name (truncated) - highlight if modulated by SELECTED LFO, grey if disabled
@@ -83,21 +160,9 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
         local avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
         local slider_w = avail_w * 0.8
         ctx:set_next_item_width(slider_w)
-        
+
         -- Get slider position BEFORE drawing
         local slider_x, slider_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-        
-        -- Unipolar uses: baseline + (lfo * scale)
-        -- baseline = initial value, scale = depth
-        -- Use any_link (from ANY modulator) for baseline so slider stays stable when switching LFOs
-        local base_val = param_val  -- Default: actual current value
-        if any_link then
-            local baseline = any_link.baseline or 0
-            base_val = baseline
-        end
-
-        -- Draw the slider with the BASELINE value if modulated by ANY LFO, otherwise current value
-        local display_val = any_link and base_val or param_val
 
         -- Check for user override first, otherwise auto-detect
         local unit_override, range_min, range_max
@@ -107,8 +172,6 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
         local unit_info = unit_override and unit_detector.get_unit_info(unit_override, range_min, range_max)
         local is_percentage = ok_fmt and param_formatted and param_formatted:match("%%$")
 
-        local changed, new_val = false, display_val
-
         -- Check if Shift is held for mod depth adjustment (applies to ALL parameter types)
         -- Only activate when mouse is hovering over this slider's area
         local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
@@ -117,6 +180,10 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
         local is_hovering_slider = mouse_x >= slider_x and mouse_x <= slider_x + slider_w
                                and mouse_y >= slider_y and mouse_y <= slider_y + slider_h_check
         local is_mod_depth_mode = link and shift_held and is_hovering_slider and not is_link_disabled
+
+        -- Get display value (baseline or editing value, NEVER modulated)
+        local display_val = get_display_value(link_key, any_link, param_val, false, state)
+        local changed, new_val = false, display_val
 
         if is_mod_depth_mode then
             -- Shift+drag: adjust modulation depth instead of parameter value
@@ -239,37 +306,57 @@ local function draw_param_cell(ctx, fx, param_idx, opts)
                 slider_format = "##"
             end
 
+            -- Use editing value if we're in the middle of dragging (from previous frame)
+            local slider_input_val = get_display_value(link_key, any_link, param_val, editing_values[link_key] ~= nil, state)
+
             local slider_in_text_mode
-            changed, new_val, slider_in_text_mode = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, display_val, 0.0, 1.0, slider_format, nil, slider_mult, nil, text_input_enabled)
+            changed, new_val, slider_in_text_mode = drawing.slider_double_fine(ctx, "##slider_" .. param_name .. "_" .. param_idx, slider_input_val, 0.0, 1.0, slider_format, nil, slider_mult, nil, text_input_enabled)
+
+            -- Track editing state: update while dragging, clear when released
+            local is_slider_active = r.ImGui_IsItemActive(ctx.ctx)
+            local was_slider_active = r.ImGui_IsItemDeactivated(ctx.ctx)
+
+            if changed then
+                -- User changed the value - track it for next frame
+                set_editing_value(link_key, new_val)
+            end
+
+            if was_slider_active then
+                -- Drag ended - clear editing state
+                clear_editing_value(link_key)
+            end
 
             -- Overlay text on slider (only when not in text input mode)
-            -- When linked by ANY LFO: show static baseline, but show live value while dragging
-            -- When not linked: show plugin's current formatted value
+            -- Shows: editing value while dragging, baseline when modulated, plugin value otherwise
             if not slider_in_text_mode then
                 local overlay_text = nil
-                local is_dragging = r.ImGui_IsItemActive(ctx.ctx)
-                if any_link then
-                    if is_dragging and ok_fmt and param_formatted then
-                        -- User is dragging: show live value as they adjust baseline
+                local show_value = nil  -- The numeric value to format
+
+                if is_slider_active and editing_values[link_key] then
+                    -- Currently dragging: show the value being edited
+                    show_value = editing_values[link_key]
+                elseif any_link then
+                    -- Modulated but not dragging: show baseline from state (most up-to-date)
+                    local baseline = get_baseline_value(link_key, any_link, param_val, state)
+                    show_value = baseline
+                elseif not unit_info or unit_info.use_plugin_format then
+                    -- No unit override or wants plugin format: show plugin's value
+                    if ok_fmt and param_formatted then
                         overlay_text = param_formatted
-                    elseif any_link.baseline_formatted then
-                        -- Not dragging: show cached baseline formatted value (static)
-                        overlay_text = any_link.baseline_formatted
-                    else
-                        -- Fallback: compute from baseline if we have a computable unit
-                        local baseline = any_link.baseline or 0
-                        if unit_info and not unit_info.use_plugin_format then
-                            local display_mult = unit_info.display_mult or 1
-                            local fmt = unit_info.format or "%.1f"
-                            overlay_text = string.format(fmt, baseline * display_mult)
-                        else
-                            -- Last resort: show as percentage
-                            overlay_text = string.format("%.1f%%", baseline * 100)
-                        end
                     end
-                elseif ok_fmt and param_formatted then
-                    -- Not modulated: show plugin's formatted value
-                    overlay_text = param_formatted
+                end
+                -- Note: when unit_info exists and use_plugin_format is false,
+                -- the slider already shows the converted value, no overlay needed
+
+                -- Format show_value if we have one and no overlay_text yet
+                if show_value and not overlay_text then
+                    if unit_info and not unit_info.use_plugin_format then
+                        local display_mult = unit_info.display_mult or 1
+                        local fmt = unit_info.format or "%.1f"
+                        overlay_text = string.format(fmt, show_value * display_mult)
+                    else
+                        overlay_text = string.format("%.1f%%", show_value * 100)
+                    end
                 end
 
                 if overlay_text then
