@@ -102,8 +102,9 @@ local function collect_device_links(device)
     local ok_name, name = pcall(function() return device:get_name() end)
     if not ok_name or not name then return all_links end
 
-    -- Check if this is a device container (D{n}: ...)
-    local device_num, device_name = name:match("^D(%d+): (.+)$")
+    -- Check if this is a device container (D{n}: ... or R1_C1_D{n}: ...)
+    -- Match either top-level "D1: Name" or nested "R1_C1_D1: Name" patterns
+    local device_num, device_name = name:match("D(%d+): (.+)$")
     if not device_num then return all_links end
 
     local ok_guid, device_guid = pcall(function() return device:get_guid() end)

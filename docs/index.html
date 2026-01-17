@@ -201,6 +201,15 @@
             color: #c86432;
         }
 
+        /* Inline icons */
+        .icon {
+            width: 18px;
+            height: 18px;
+            vertical-align: middle;
+            margin: 0 2px;
+            display: inline-block;
+        }
+
         /* Screenshots */
         .screenshot {
             margin: 1.5rem 0;
@@ -371,9 +380,11 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
             <h3>Container-Based Architecture</h3>
             <p>SideFX uses REAPER 7's <strong>Container FX</strong> as its primary building block. Every device, rack, and chain you create is actually a container with a specific naming convention:</p>
             <ul>
-                <li><strong>Devices</strong> (<code>D1:</code>, <code>D2:</code>, etc.) - Containers wrapping individual plugins</li>
+                <li><strong>Devices</strong> (<code>D1:</code>, <code>D2:</code>, etc.) - Containers wrapping individual plugins with utility controls</li>
+                <li><strong>Bare Devices</strong> (<code>BD1:</code>, <code>BD2:</code>, etc.) - Lightweight plugins without container wrapper</li>
                 <li><strong>Racks</strong> (<code>R1</code>, <code>R2</code>, etc.) - Containers for parallel processing</li>
                 <li><strong>Chains</strong> (<code>C1</code>, <code>C2</code>, etc.) - Containers for each parallel path within a rack</li>
+                <li><strong>Post FX</strong> (<code>POST1:</code>, <code>POST2:</code>, etc.) - Analyzers and metering at end of chain</li>
             </ul>
             <p>This approach gives SideFX full control over the FX structure while leveraging REAPER's native container capabilities.</p>
 
@@ -383,6 +394,18 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
 ├── D1_FX: Plugin Name (your plugin)
 └── D1_Util (SideFX_Utility JSFX)</code></pre>
             <p>The utility JSFX provides additional controls like pre/post gain and routing options that appear in the device sidebar.</p>
+
+            <h3>Bare Devices (BD-containers)</h3>
+            <p><strong>Bare devices</strong> are a lightweight alternative to full D-containers. They display the plugin directly without wrapping it in a container:</p>
+            <pre><code>BD1: Plugin Name (the plugin itself, no container)</code></pre>
+            <p>Bare devices have these characteristics:</p>
+            <ul>
+                <li><strong>No utility controls</strong> - No pre/post gain, mix, or delta controls</li>
+                <li><strong>No modulator support</strong> - Cannot add LFO modulators</li>
+                <li><strong>Simpler UI</strong> - Compact panel showing only the plugin's parameters</li>
+                <li><strong>Lower overhead</strong> - No container wrapper or utility JSFX</li>
+            </ul>
+            <p>Bare devices are useful for simple plugins that don't need the extra controls, or when you want to minimize CPU overhead. Post FX (oscilloscope, spectrum analyzer) are always bare devices.</p>
 
             <h3>Rack Structure (R-containers)</h3>
             <p>Racks enable parallel processing by splitting audio into multiple chains:</p>
@@ -537,6 +560,8 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
             <h2 id="post-fx">Post FX</h2>
             <p>The Post FX area sits at the end of your device chain, after all your main effects and racks. It's designed for analysis tools and final-stage processing that should always come last in the signal flow.</p>
 
+            <img src="images/post-fx.png" alt="Post FX area with analyzers" class="screenshot" style="max-width: 300px;">
+
             <h3>What is Post FX?</h3>
             <p>Post FX is a dedicated section that appears to the right of your main device chain. Unlike regular devices:</p>
             <ul>
@@ -555,6 +580,8 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
             <h3 id="analyzers">Analyzers</h3>
             <p>SideFX includes built-in audio analysis tools that live in the Post FX area.</p>
 
+            <img src="images/analyzers.png" alt="Oscilloscope and Spectrum analyzer panels" class="screenshot" style="max-width: 500px;">
+
             <h4>Available Analyzers</h4>
             <table>
                 <tr>
@@ -572,15 +599,15 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
             </table>
 
             <h4>Adding Analyzers</h4>
-            <p>Click the <strong>Scope</strong> or <strong>Spectrum</strong> button in the toolbar to add an analyzer. Analyzers appear in the Post FX area at the end of your device chain.</p>
+            <p>Click the <img src="images/icons/oscilloscope.png" alt="Scope" class="icon"> <strong>Scope</strong> or <img src="images/icons/spectrum.png" alt="Spectrum" class="icon"> <strong>Spectrum</strong> button in the toolbar to add an analyzer. Analyzers appear in the Post FX area at the end of your device chain.</p>
 
             <h4>Analyzer Controls</h4>
             <p>Each analyzer panel provides these controls in the header:</p>
             <ul>
                 <li><strong>Collapse/Expand</strong> (▼/▶) - Toggle between full view and compact strip</li>
-                <li><strong>Freeze</strong> (pause icon) - Pause the display to inspect a moment in time</li>
-                <li><strong>Popout</strong> - Open the analyzer in a separate resizable window</li>
-                <li><strong>Power</strong> (on/off) - Enable or bypass the analyzer</li>
+                <li><strong>Freeze</strong> <img src="images/icons/pause.png" alt="Pause" class="icon"> - Pause the display to inspect a moment in time</li>
+                <li><strong>Popout</strong> <img src="images/icons/pop-out.png" alt="Popout" class="icon"> - Open the analyzer in a separate resizable window</li>
+                <li><strong>Power</strong> <img src="images/icons/on.png" alt="Power" class="icon"> - Enable or bypass the analyzer</li>
                 <li><strong>Delete</strong> (X) - Remove the analyzer from the chain</li>
             </ul>
 
@@ -588,7 +615,7 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
             <p>When collapsed, analyzers display as a narrow vertical strip showing only the essential controls: expand button, popout, power, and delete. This saves screen space while keeping analyzers accessible.</p>
 
             <h4>Popout Windows</h4>
-            <p>Click the popout button to open an analyzer in its own resizable window. This is useful for larger displays or when you want to keep the analyzer visible while working on other parts of your chain. The inline panel hides when popped out.</p>
+            <p>Click the <img src="images/icons/pop-out.png" alt="Popout" class="icon"> popout button to open an analyzer in its own resizable window. This is useful for larger displays or when you want to keep the analyzer visible while working on other parts of your chain. The inline panel hides when popped out.</p>
 
             <h4>Bypass Behavior</h4>
             <p>When an analyzer is bypassed (power off), the visualization area shows only the grid and labels — the actual waveform or spectrum data is cleared. This provides a clear visual indication that the analyzer is inactive while maintaining the panel structure.</p>
@@ -600,7 +627,7 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
 
             <h3>Creating a Rack</h3>
             <ol>
-                <li>Click the <strong>+ Rack</strong> button in the toolbar (or drag it to a specific position)</li>
+                <li>Click the <img src="images/icons/rack.png" alt="Rack" class="icon"> <strong>Rack</strong> button in the toolbar (or drag it to a specific position)</li>
                 <li>A new rack appears with one empty chain</li>
                 <li>Drag plugins from the browser into the chain</li>
             </ol>
@@ -646,11 +673,22 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
             </ol>
 
             <h3>Linking Parameters</h3>
+            <p>To link a parameter to a modulator:</p>
             <ol>
-                <li>Select a target parameter from the dropdown</li>
-                <li>Adjust the modulation depth and offset</li>
-                <li>The parameter will now move with the LFO</li>
+                <li>Add a modulator to the device</li>
+                <li><strong>Right-click</strong> any parameter slider in the device</li>
+                <li>Select <strong>Link to LFO 1</strong> (or LFO 2, etc.)</li>
+                <li>The parameter will now be modulated by the LFO</li>
             </ol>
+
+            <p>Modifier keys when linking:</p>
+            <ul>
+                <li><kbd>Ctrl</kbd> + right-click: Link in <strong>bipolar</strong> mode (modulates above and below the current value)</li>
+                <li><kbd>Alt</kbd> + right-click: Link with <strong>negative</strong> depth (inverted modulation)</li>
+                <li><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + right-click: Both bipolar and negative</li>
+            </ul>
+
+            <img src="images/mod-amount.png" alt="Parameter link context menu" class="screenshot" style="max-width: 350px;">
 
             <h3>Modulator Controls</h3>
             <table>
@@ -660,19 +698,31 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
                 </tr>
                 <tr>
                     <td><strong>Rate</strong></td>
-                    <td>LFO speed (Hz or synced to tempo)</td>
+                    <td>LFO speed in Hz (when in Free mode)</td>
                 </tr>
                 <tr>
-                    <td><strong>Depth</strong></td>
-                    <td>Modulation amount (0-100%)</td>
+                    <td><strong>Free/Sync</strong></td>
+                    <td>Toggle between free-running Hz rate or tempo-synced divisions</td>
+                </tr>
+                <tr>
+                    <td><strong>Sync Rate</strong></td>
+                    <td>Tempo-synced rate (1/4, 1/8, 1/16, etc.) when Sync is enabled</td>
+                </tr>
+                <tr>
+                    <td><strong>Trigger</strong></td>
+                    <td>LFO restart mode: Free (continuous), Transport (restart on play), MIDI (restart on note), Audio (restart on transient). Click to expand advanced settings for MIDI/Audio trigger configuration.</td>
+                </tr>
+                <tr>
+                    <td><strong>Loop/One-shot</strong></td>
+                    <td>Toggle between looping LFO or single envelope playback</td>
                 </tr>
                 <tr>
                     <td><strong>Phase</strong></td>
-                    <td>LFO starting position</td>
+                    <td>LFO starting position (0-360°)</td>
                 </tr>
                 <tr>
                     <td><strong>Curve</strong></td>
-                    <td>LFO shape (click to edit)</td>
+                    <td>LFO shape display (click to open curve editor)</td>
                 </tr>
             </table>
 
@@ -680,7 +730,7 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
             <p>Click the curve display to open the curve editor. Create custom LFO shapes by adding and moving control points. Use bezier handles for smooth curves.</p>
 
             <figure class="screenshot">
-                <img src="images/curve-editor.png" alt="Curve editor">
+                <img src="images/curve-editor.png" alt="Curve editor" style="max-width: 400px;">
                 <figcaption>The curve editor with a custom LFO shape</figcaption>
             </figure>
 
@@ -691,8 +741,10 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
             <h3>Mod Matrix</h3>
             <p>The Mod Matrix provides a unified view of all parameter links within a device, making it easy to manage multiple modulation assignments at once.</p>
 
+            <img src="images/mod-matrix.png" alt="Mod Matrix dialog showing parameter links" class="screenshot" style="max-width: 450px;">
+
             <h4>Opening the Mod Matrix</h4>
-            <p>Click the <strong>matrix icon</strong> in the device header to open the Mod Matrix dialog for that device. The dialog shows all parameter links from all modulators in the device.</p>
+            <p>Click the <img src="images/icons/matrix.png" alt="Matrix" class="icon"> matrix button in the modulator header to open the Mod Matrix dialog for that device. The dialog shows all parameter links from all modulators in the device.</p>
 
             <h4>Matrix Columns</h4>
             <table>
@@ -789,7 +841,7 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
 
             <h3>Saving a Preset</h3>
             <ol>
-                <li>Click the <strong>floppy disk icon</strong> in the toolbar</li>
+                <li>Click the <img src="images/icons/save.png" alt="Save" class="icon"> save button in the toolbar</li>
                 <li>Enter a name for your preset</li>
                 <li>Click <strong>Save</strong></li>
             </ol>
@@ -801,7 +853,7 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
 
             <h3>Loading a Preset</h3>
             <ol>
-                <li>Click the <strong>floppy disk icon</strong> in the toolbar</li>
+                <li>Click the <img src="images/icons/save.png" alt="Save" class="icon"> save button in the toolbar</li>
                 <li>Select a preset from the list</li>
                 <li>Click <strong>Load</strong></li>
             </ol>
@@ -822,7 +874,7 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
             <!-- ============================================================ -->
 
             <h2 id="settings">Settings</h2>
-            <p>Click the gear icon in the toolbar to access settings.</p>
+            <p>Click the <img src="images/icons/gear.png" alt="Settings" class="icon"> gear button in the toolbar to access settings.</p>
 
             <h3>Display</h3>
             <ul>
