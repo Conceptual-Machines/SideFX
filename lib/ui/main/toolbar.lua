@@ -124,11 +124,15 @@ function M.draw(ctx, state, icon_font, icon_size, get_fx_display_name, callbacks
         end
 
         -- Track name (if enabled) - styled as breadcrumb button
-        if config.get('show_track_name') then
-            ctx:same_line()
-            draw_separator()
-            ctx:same_line()
-            draw_breadcrumb_button(ctx, state.track_name, "track_name")
+        -- Fetch fresh from track object to handle renames
+        if config.get('show_track_name') and state.track then
+            local ok, track_name = pcall(function() return state.track:get_name() end)
+            if ok and track_name then
+                ctx:same_line()
+                draw_separator()
+                ctx:same_line()
+                draw_breadcrumb_button(ctx, track_name, "track_name")
+            end
         end
 
         -- Breadcrumb trail (for navigating into containers)
