@@ -94,6 +94,12 @@ Requirements (install via ReaPack):
         <source file="assets/icons/spectrum.png">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/assets/icons/spectrum.png</source>
         <source file="assets/icons/sync.png">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/assets/icons/sync.png</source>
         <source file="assets/icons/wrench.png">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/assets/icons/wrench.png</source>
+        <!-- JSFX plugins installed to Effects/SideFX/ -->
+        <source file="../Effects/SideFX/SideFX_Mixer.jsfx">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Mixer.jsfx</source>
+        <source file="../Effects/SideFX/SideFX_Utility.jsfx">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Utility.jsfx</source>
+        <source file="../Effects/SideFX/SideFX_Modulator.jsfx">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Modulator.jsfx</source>
+        <source file="../Effects/SideFX/SideFX_Oscilloscope.jsfx">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Oscilloscope.jsfx</source>
+        <source file="../Effects/SideFX/SideFX_Spectrum.jsfx">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Spectrum.jsfx</source>
       </version>
     </reapack>
   </category>
