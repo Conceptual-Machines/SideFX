@@ -280,21 +280,6 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
     local is_dragging = has_plugin or has_fx or has_rack
     local drop_h = avail_height - 10
 
-    -- Calculate post FX column width based on content
-    local post_device_width = 170  -- Width per post device (collapsed bare panel width)
-    local post_fx_width = math.max(80, #post_chain * post_device_width + 20)
-
-    -- Use a table to pin Post FX area to the right
-    if not ctx:begin_table("chain_layout", 2, r.ImGui_TableFlags_SizingStretchProp()) then
-        return
-    end
-    ctx:table_setup_column("chain", imgui.TableColumnFlags.WidthStretch())
-    ctx:table_setup_column("post", imgui.TableColumnFlags.WidthFixed(), post_fx_width)
-    ctx:table_next_row()
-
-    -- Column 1: Main chain area
-    ctx:table_set_column_index(0)
-
     if #main_chain == 0 then
         -- Empty chain - full height drop zone (always visible)
         if is_dragging then
@@ -474,16 +459,15 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         end
     end  -- end of else (non-empty chain)
 
-    -- Column 2: Post FX area (pinned to right)
-    ctx:table_set_column_index(1)
+    -- Post FX area (flows right after main chain)
+    ctx:same_line()
 
-    -- Draw vertical separator line on left edge
+    -- Draw vertical separator line
     local sep_x, sep_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
     local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-    r.ImGui_DrawList_AddLine(draw_list, sep_x, sep_y, sep_x, sep_y + drop_h, 0x666688FF, 2)
+    r.ImGui_DrawList_AddLine(draw_list, sep_x + 4, sep_y, sep_x + 4, sep_y + drop_h, 0x666688FF, 2)
+    ctx:dummy(10, drop_h)
 
-    -- Small spacer after separator
-    ctx:dummy(4, 1)
     ctx:same_line()
 
     -- Render existing post FX devices
@@ -565,7 +549,9 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         ctx:end_drag_drop_target()
     end
 
-    ctx:end_table()
+    -- Extra padding at end
+    ctx:same_line()
+    ctx:dummy(20, 1)
 end
 
 return M
