@@ -493,11 +493,13 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         ctx:set_tooltip("Post FX area\nDrag plugin here for post-processing")
     end
 
-    -- Drop target for post FX (always creates bare devices)
+    -- Drop target for post FX (always creates bare devices at end)
     if ctx:begin_drag_drop_target() then
         local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
         if accepted and plugin_name then
-            add_plugin_by_name(plugin_name, nil, { bare = true, post = true })
+            -- Explicitly get FX count to ensure it's added at the very end
+            local fx_count = state.track:get_fx_count()
+            add_plugin_by_name(plugin_name, fx_count, { bare = true, post = true })
         end
         -- Accept FX reorder drops
         local fx_accepted, fx_guid = ctx:accept_drag_drop_payload("FX_GUID")
