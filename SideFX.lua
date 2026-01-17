@@ -999,6 +999,18 @@ local function draw_analyzers(ctx, avail_height)
 
                 ctx:spacing()
 
+                -- ON/OFF button
+                if scope_fx then
+                    local enabled = r.TrackFX_GetEnabled(state.track.pointer, scope_fx.pointer)
+                    local on_tint = enabled and 0x88FF88FF or 0x888888FF
+                    if icons.button_bordered(ctx, "on_scope_c", icons.Names.on, 18, on_tint) then
+                        r.TrackFX_SetEnabled(state.track.pointer, scope_fx.pointer, not enabled)
+                    end
+                    if ctx:is_item_hovered() then ctx:set_tooltip(enabled and "Bypass" or "Enable") end
+                end
+
+                ctx:spacing()
+
                 -- Delete button
                 if icons.button_bordered(ctx, "del_scope_c", icons.Names.cancel, 18, 0xFF6666FF) then
                     toggle_scope()
@@ -1045,11 +1057,22 @@ local function draw_analyzers(ctx, avail_height)
                 end
 
                 -- Popout button
-                ctx:same_line(analyzer_w - 36)
+                ctx:same_line(analyzer_w - 56)
                 if icons.button(ctx, "popout_scope", icons.Names.popout, 16) then
                     state.scope_popout = true
                 end
                 if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
+
+                -- ON/OFF button
+                ctx:same_line()
+                if scope_fx then
+                    local enabled = r.TrackFX_GetEnabled(state.track.pointer, scope_fx.pointer)
+                    local on_tint = enabled and 0x88FF88FF or 0x888888FF
+                    if icons.button(ctx, "on_scope", icons.Names.on, 16, on_tint) then
+                        r.TrackFX_SetEnabled(state.track.pointer, scope_fx.pointer, not enabled)
+                    end
+                    if ctx:is_item_hovered() then ctx:set_tooltip(enabled and "Bypass" or "Enable") end
+                end
 
                 ctx:same_line()
                 if icons.button(ctx, "del_scope", icons.Names.cancel, 16, 0xFF6666FF) then
@@ -1108,6 +1131,18 @@ local function draw_analyzers(ctx, avail_height)
 
                 ctx:spacing()
 
+                -- ON/OFF button
+                if spectrum_fx then
+                    local enabled = r.TrackFX_GetEnabled(state.track.pointer, spectrum_fx.pointer)
+                    local on_tint = enabled and 0x88FF88FF or 0x888888FF
+                    if icons.button_bordered(ctx, "on_spectrum_c", icons.Names.on, 18, on_tint) then
+                        r.TrackFX_SetEnabled(state.track.pointer, spectrum_fx.pointer, not enabled)
+                    end
+                    if ctx:is_item_hovered() then ctx:set_tooltip(enabled and "Bypass" or "Enable") end
+                end
+
+                ctx:spacing()
+
                 -- Delete button
                 if icons.button_bordered(ctx, "del_spectrum_c", icons.Names.cancel, 18, 0xFF6666FF) then
                     toggle_spectrum()
@@ -1154,11 +1189,22 @@ local function draw_analyzers(ctx, avail_height)
                 end
 
                 -- Popout button
-                ctx:same_line(analyzer_w - 36)
+                ctx:same_line(analyzer_w - 56)
                 if icons.button(ctx, "popout_spectrum", icons.Names.popout, 16) then
                     state.spectrum_popout = true
                 end
                 if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
+
+                -- ON/OFF button
+                ctx:same_line()
+                if spectrum_fx then
+                    local enabled = r.TrackFX_GetEnabled(state.track.pointer, spectrum_fx.pointer)
+                    local on_tint = enabled and 0x88FF88FF or 0x888888FF
+                    if icons.button(ctx, "on_spectrum", icons.Names.on, 16, on_tint) then
+                        r.TrackFX_SetEnabled(state.track.pointer, spectrum_fx.pointer, not enabled)
+                    end
+                    if ctx:is_item_hovered() then ctx:set_tooltip(enabled and "Bypass" or "Enable") end
+                end
 
                 ctx:same_line()
                 if icons.button(ctx, "del_spectrum", icons.Names.cancel, 16, 0xFF6666FF) then
