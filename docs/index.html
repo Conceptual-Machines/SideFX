@@ -274,7 +274,7 @@
                     <li><a href="#quick-start">Quick Start</a></li>
                     <li><a href="#browser">Plugin Browser</a></li>
                     <li><a href="#devices">Devices</a></li>
-                    <li><a href="#analyzers">Analyzers</a></li>
+                    <li><a href="#post-fx">Post FX</a></li>
                     <li><a href="#racks">Racks &amp; Chains</a></li>
                     <li><a href="#modulators">Modulators</a></li>
                     <li><a href="#baking">Baking Automation</a></li>
@@ -534,10 +534,28 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
 
             <!-- ============================================================ -->
 
-            <h2 id="analyzers">Analyzers</h2>
-            <p>SideFX includes built-in audio analysis tools to visualize your signal in real-time.</p>
+            <h2 id="post-fx">Post FX</h2>
+            <p>The Post FX area sits at the end of your device chain, after all your main effects and racks. It's designed for analysis tools and final-stage processing that should always come last in the signal flow.</p>
 
-            <h3>Available Analyzers</h3>
+            <h3>What is Post FX?</h3>
+            <p>Post FX is a dedicated section that appears to the right of your main device chain. Unlike regular devices:</p>
+            <ul>
+                <li><strong>Always at the end</strong> - Post FX devices stay after your main chain, regardless of how you reorder other devices</li>
+                <li><strong>Bare devices</strong> - Post FX plugins are added without the D-container wrapper (no utility controls or modulator support)</li>
+                <li><strong>Named with POST prefix</strong> - Post FX devices use <code>POST1:</code>, <code>POST2:</code> naming to distinguish them from main chain devices</li>
+            </ul>
+
+            <h3>Adding Post FX</h3>
+            <p>Drag a plugin from the browser and drop it on the Post FX area (the bordered region at the right edge of the chain). The plugin will be added as a bare device with the POST prefix.</p>
+
+            <div class="tip">
+                <strong>Tip:</strong> Post FX is ideal for metering plugins, analyzers, loudness meters, or any tool you want to monitor your final output without affecting the main processing chain.
+            </div>
+
+            <h3 id="analyzers">Analyzers</h3>
+            <p>SideFX includes built-in audio analysis tools that live in the Post FX area.</p>
+
+            <h4>Available Analyzers</h4>
             <table>
                 <tr>
                     <th>Analyzer</th>
@@ -553,10 +571,10 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
                 </tr>
             </table>
 
-            <h3>Adding Analyzers</h3>
+            <h4>Adding Analyzers</h4>
             <p>Click the <strong>Scope</strong> or <strong>Spectrum</strong> button in the toolbar to add an analyzer. Analyzers appear in the Post FX area at the end of your device chain.</p>
 
-            <h3>Analyzer Controls</h3>
+            <h4>Analyzer Controls</h4>
             <p>Each analyzer panel provides these controls in the header:</p>
             <ul>
                 <li><strong>Collapse/Expand</strong> (▼/▶) - Toggle between full view and compact strip</li>
@@ -566,18 +584,14 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
                 <li><strong>Delete</strong> (X) - Remove the analyzer from the chain</li>
             </ul>
 
-            <h3>Collapsed View</h3>
+            <h4>Collapsed View</h4>
             <p>When collapsed, analyzers display as a narrow vertical strip showing only the essential controls: expand button, popout, power, and delete. This saves screen space while keeping analyzers accessible.</p>
 
-            <h3>Popout Windows</h3>
+            <h4>Popout Windows</h4>
             <p>Click the popout button to open an analyzer in its own resizable window. This is useful for larger displays or when you want to keep the analyzer visible while working on other parts of your chain. The inline panel hides when popped out.</p>
 
-            <h3>Bypass Behavior</h3>
+            <h4>Bypass Behavior</h4>
             <p>When an analyzer is bypassed (power off), the visualization area shows only the grid and labels — the actual waveform or spectrum data is cleared. This provides a clear visual indication that the analyzer is inactive while maintaining the panel structure.</p>
-
-            <div class="tip">
-                <strong>Tip:</strong> Analyzers are added as "bare devices" (without the D-container wrapper) since they don't need the utility controls or modulator support that regular devices have.
-            </div>
 
             <!-- ============================================================ -->
 
