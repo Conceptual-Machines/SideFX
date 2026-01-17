@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <index version="1" name="SideFX" commit="HEAD">
-  <category name="Various">
+  <category name="Scripts">
     <reapack name="SideFX.lua" type="script" desc="SideFX - Smart FX Container Manager">
       <metadata>
         <description><![CDATA[Smart FX container management for REAPER 7+.
@@ -8,7 +8,8 @@
 Requirements (install via ReaPack):
 - ReaWrap >= 0.7.3
 - ReaImGui extension
-- RPP-Parser (ReaTeam Scripts > Development)]]></description>
+- SideFX JSFX (from this repository)
+- RPP-Parser (ReaTeam Scripts > Development) - optional, for presets]]></description>
         <link rel="homepage">https://github.com/Conceptual-Machines/SideFX</link>
       </metadata>
       <version name="0.2.0" author="Nomad Monad" time="2026-01-16T00:00:00Z">
@@ -94,12 +95,33 @@ Requirements (install via ReaPack):
         <source file="assets/icons/spectrum.png">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/assets/icons/spectrum.png</source>
         <source file="assets/icons/sync.png">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/assets/icons/sync.png</source>
         <source file="assets/icons/wrench.png">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/assets/icons/wrench.png</source>
-        <!-- JSFX plugins installed to Effects/SideFX/ -->
-        <source file="../Effects/SideFX/SideFX_Mixer.jsfx">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Mixer.jsfx</source>
-        <source file="../Effects/SideFX/SideFX_Utility.jsfx">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Utility.jsfx</source>
-        <source file="../Effects/SideFX/SideFX_Modulator.jsfx">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Modulator.jsfx</source>
-        <source file="../Effects/SideFX/SideFX_Oscilloscope.jsfx">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Oscilloscope.jsfx</source>
-        <source file="../Effects/SideFX/SideFX_Spectrum.jsfx">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Spectrum.jsfx</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="SideFX">
+    <reapack name="SideFX_Mixer.jsfx" type="effect" desc="SideFX Mixer - 16-chain parallel mixer">
+      <version name="0.2.0" author="Nomad Monad" time="2026-01-16T00:00:00Z">
+        <source>https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Mixer.jsfx</source>
+      </version>
+    </reapack>
+    <reapack name="SideFX_Utility.jsfx" type="effect" desc="SideFX Utility - Pre/post gain and routing">
+      <version name="0.2.0" author="Nomad Monad" time="2026-01-16T00:00:00Z">
+        <source>https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Utility.jsfx</source>
+      </version>
+    </reapack>
+    <reapack name="SideFX_Modulator.jsfx" type="effect" desc="SideFX Modulator - Bezier curve LFO">
+      <version name="0.2.0" author="Nomad Monad" time="2026-01-16T00:00:00Z">
+        <source>https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Modulator.jsfx</source>
+      </version>
+    </reapack>
+    <reapack name="SideFX_Oscilloscope.jsfx" type="effect" desc="SideFX Oscilloscope - Waveform display">
+      <version name="0.2.0" author="Nomad Monad" time="2026-01-16T00:00:00Z">
+        <source>https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Oscilloscope.jsfx</source>
+      </version>
+    </reapack>
+    <reapack name="SideFX_Spectrum.jsfx" type="effect" desc="SideFX Spectrum - Frequency analyzer">
+      <version name="0.2.0" author="Nomad Monad" time="2026-01-16T00:00:00Z">
+        <source>https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Spectrum.jsfx</source>
       </version>
     </reapack>
   </category>
