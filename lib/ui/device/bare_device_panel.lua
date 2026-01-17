@@ -23,6 +23,7 @@ M.config = {
     header_height = 28,
     param_height = 46,
     padding = 6,
+    collapsed_width = 50,  -- Width when collapsed
 }
 
 M.colors = {
@@ -155,8 +156,19 @@ function M.draw(ctx, fx, opts)
     local ok_guid, guid = pcall(function() return fx:get_guid() end)
     if not ok_guid or not guid then return false end
 
-    local ok_name, _ = pcall(function() return fx:get_name() end)
-    local name = ok_name and fx_naming.get_display_name(fx) or "Unknown"
+    -- Get clean plugin name (strip BD prefix and format prefixes)
+    local naming = require('lib.utils.naming')
+    local ok_name, raw_name = pcall(function() return fx:get_name() end)
+    local name = "Unknown"
+    if ok_name and raw_name then
+        -- Check for custom display name first
+        if state.display_names and state.display_names[guid] then
+            name = state.display_names[guid]
+        else
+            -- Strip SideFX prefixes (BD1:, etc.) to get clean plugin name
+            name = naming.strip_sidefx_prefixes(raw_name)
+        end
+    end
 
     local ok_enabled, enabled = pcall(function() return fx:get_enabled() end)
     enabled = ok_enabled and enabled or true
@@ -165,16 +177,30 @@ function M.draw(ctx, fx, opts)
     local visible_params = get_visible_params(fx)
     local visible_count = #visible_params
 
+    -- Check collapsed state
+    state.bare_panel_collapsed = state.bare_panel_collapsed or {}
+    local is_collapsed = state.bare_panel_collapsed[guid] or false
+
     -- Calculate dimensions
     local avail_height = opts.avail_height or 400
-    local usable_height = avail_height - cfg.header_height - cfg.padding * 2
-    local params_per_column = math.floor(usable_height / cfg.param_height)
-    params_per_column = math.max(1, params_per_column)
-    local num_columns = math.ceil(visible_count / params_per_column)
-    num_columns = math.max(1, num_columns)
+    local panel_width, panel_height, num_columns, params_per_column
 
-    local panel_width = cfg.column_width * num_columns + cfg.padding * 2
-    local panel_height = avail_height
+    if is_collapsed then
+        -- Collapsed: narrow vertical strip
+        panel_width = cfg.collapsed_width
+        panel_height = avail_height
+        num_columns = 0
+        params_per_column = 0
+    else
+        -- Expanded: full panel
+        local usable_height = avail_height - cfg.header_height - cfg.padding * 2
+        params_per_column = math.floor(usable_height / cfg.param_height)
+        params_per_column = math.max(1, params_per_column)
+        num_columns = math.ceil(visible_count / params_per_column)
+        num_columns = math.max(1, num_columns)
+        panel_width = cfg.column_width * num_columns + cfg.padding * 2
+        panel_height = avail_height
+    end
 
     local interacted = false
 
@@ -190,8 +216,63 @@ function M.draw(ctx, fx, opts)
 
     -- Begin child for content
     if ctx:begin_child("bare_panel_" .. guid, panel_width, panel_height, 0, imgui.WindowFlags.NoScrollbar()) then
-        -- Header row
-        if ctx:begin_table("bare_header_" .. guid, 5, r.ImGui_TableFlags_SizingFixedFit()) then
+        if is_collapsed then
+            -- Collapsed view: vertical strip with expand button, ON, X
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+            if ctx:button("▶##expand", panel_width - 8, 20) then
+                state.bare_panel_collapsed[guid] = false
+                state_module.save_device_collapsed_states()
+            end
+            ctx:pop_style_color(2)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Expand: " .. name)
+            end
+
+            ctx:spacing()
+
+            -- UI button
+            if icons.button_bordered(ctx, "ui_" .. guid, icons.Names.wrench, 18) then
+                pcall(function() fx:show(3) end)
+                interacted = true
+            end
+
+            ctx:spacing()
+
+            -- ON/OFF
+            local on_tint = enabled and 0x88FF88FF or 0x888888FF
+            if icons.button_bordered(ctx, "on_" .. guid, icons.Names.on, 18, on_tint) then
+                pcall(function() fx:set_enabled(not enabled) end)
+                interacted = true
+            end
+
+            ctx:spacing()
+
+            -- Delete
+            if icons.button_bordered(ctx, "del_" .. guid, icons.Names.cancel, 18, 0xFF6666FF) then
+                if opts.on_delete then
+                    opts.on_delete(fx)
+                else
+                    pcall(function() fx:delete() end)
+                end
+                interacted = true
+            end
+
+            -- Vertical name (rotated text not supported, show truncated)
+            ctx:spacing()
+            ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
+            local short_name = name:sub(1, 6)
+            ctx:text(short_name)
+            ctx:pop_style_color()
+
+            ctx:end_child()
+            ctx:pop_id()
+            return interacted
+        end
+
+        -- Expanded view: Header row
+        if ctx:begin_table("bare_header_" .. guid, 6, r.ImGui_TableFlags_SizingFixedFit()) then
+            ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 22)
             ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
             ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch())
             ctx:table_setup_column("ui", imgui.TableColumnFlags.WidthFixed(), 22)
@@ -200,8 +281,21 @@ function M.draw(ctx, fx, opts)
 
             ctx:table_next_row()
 
-            -- Drag handle
+            -- Collapse button
             ctx:table_set_column_index(0)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+            if ctx:button("◀##collapse", 20, 20) then
+                state.bare_panel_collapsed[guid] = true
+                state_module.save_device_collapsed_states()
+            end
+            ctx:pop_style_color(2)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Collapse panel")
+            end
+
+            -- Drag handle
+            ctx:table_set_column_index(1)
             ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
             ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
             ctx:button("≡##drag", 20, 20)  -- Drag handle button (interaction via drag/drop)
@@ -224,7 +318,7 @@ function M.draw(ctx, fx, opts)
             end
 
             -- Name (editable)
-            ctx:table_set_column_index(1)
+            ctx:table_set_column_index(2)
 
             if state.renaming_fx == guid and not rename_active[guid] then
                 rename_active[guid] = true
@@ -264,7 +358,7 @@ function M.draw(ctx, fx, opts)
             end
 
             -- UI button
-            ctx:table_set_column_index(2)
+            ctx:table_set_column_index(3)
             if icons.button_bordered(ctx, "ui_" .. guid, icons.Names.wrench, 18) then
                 pcall(function() fx:show(3) end)
                 interacted = true
@@ -274,7 +368,7 @@ function M.draw(ctx, fx, opts)
             end
 
             -- ON/OFF
-            ctx:table_set_column_index(3)
+            ctx:table_set_column_index(4)
             local on_tint = enabled and 0x88FF88FF or 0x888888FF
             if icons.button_bordered(ctx, "on_" .. guid, icons.Names.on, 18, on_tint) then
                 pcall(function() fx:set_enabled(not enabled) end)
@@ -285,7 +379,7 @@ function M.draw(ctx, fx, opts)
             end
 
             -- Delete
-            ctx:table_set_column_index(4)
+            ctx:table_set_column_index(5)
             if icons.button_bordered(ctx, "del_" .. guid, icons.Names.cancel, 18, 0xFF6666FF) then
                 if opts.on_delete then
                     opts.on_delete(fx)
