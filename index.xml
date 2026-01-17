@@ -6,7 +6,7 @@
         <description><![CDATA[Smart FX container management for REAPER 7+.
 
 Requirements (install via ReaPack):
-- ReaWrap >= 0.7.3
+- ReaWrap >= 0.8.1
 - ReaImGui extension
 - SideFX JSFX (from this repository)
 - RPP-Parser (ReaTeam Scripts > Development) - optional, for presets]]></description>
