@@ -46,14 +46,16 @@ end
 --- Add a chain to a rack
 -- @param rack TrackFX Rack container
 -- @param plugin table Plugin info {full_name, name}
+-- @param opts table|nil Options: {bare = true} to skip adding utility
 -- @return TrackFX|nil Chain FX or nil on failure
-function M.add_chain_to_rack(rack, plugin)
+function M.add_chain_to_rack(rack, plugin, opts)
+    opts = opts or {}
     -- Get rack info before adding chain (while reference is still valid)
     local rack_guid = rack:get_guid()
     local rack_parent = rack:get_parent_container()
     local is_nested = (rack_parent ~= nil)
 
-    local chain = rack_module.add_chain_to_rack(rack, plugin)
+    local chain = rack_module.add_chain_to_rack(rack, plugin, opts)
     if chain then
         -- Get chain GUID (stable identifier)
         local chain_guid = chain:get_guid()
@@ -155,8 +157,10 @@ end
 --- Add a device to a chain
 -- @param chain TrackFX Chain container
 -- @param plugin table Plugin info {full_name, name}
+-- @param opts table|nil Options: {bare = true} to skip adding utility
 -- @return TrackFX|nil Device FX or nil on failure
-function M.add_device_to_chain(chain, plugin)
+function M.add_device_to_chain(chain, plugin, opts)
+    opts = opts or {}
     -- Get chain GUID before adding device (GUIDs are stable)
     local chain_guid = chain:get_guid()
     if not chain_guid then
@@ -173,7 +177,7 @@ function M.add_device_to_chain(chain, plugin)
         is_nested = (rack_parent ~= nil)
     end
 
-    local device = rack_module.add_device_to_chain(chain, plugin)
+    local device = rack_module.add_device_to_chain(chain, plugin, opts)
     if device then
         local state = state_module.state
         -- Force the chain to be expanded/selected so user can see the device that was just added

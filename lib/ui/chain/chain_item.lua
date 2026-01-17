@@ -7,6 +7,7 @@
 local imgui = require('imgui')
 local r = reaper
 local rack_ui = require('lib.ui.rack.rack_ui')
+local bare_device_panel = require('lib.ui.device.bare_device_panel')
 
 local M = {}
 
@@ -15,12 +16,14 @@ local get_fx_display_name
 local device_panel
 local state
 local icon_font
+local header_font
 local refresh_fx_list
 local add_plugin_by_name
 local add_rack_to_track
 local get_device_utility
 local draw_selected_chain_column_if_expanded
 local draw_rack_panel
+local on_mod_matrix
 
 --- Initialize with dependencies
 function M.init(deps)
@@ -28,12 +31,14 @@ function M.init(deps)
     device_panel = deps.device_panel
     state = deps.state
     icon_font = deps.icon_font
+    header_font = deps.header_font
     refresh_fx_list = deps.refresh_fx_list
     add_plugin_by_name = deps.add_plugin_by_name
     add_rack_to_track = deps.add_rack_to_track
     get_device_utility = deps.get_device_utility
     draw_selected_chain_column_if_expanded = deps.draw_selected_chain_column_if_expanded
     draw_rack_panel = deps.draw_rack_panel
+    on_mod_matrix = deps.on_mod_matrix
 end
 
 --- Draw fallback device panel UI (when device_panel module not loaded)
@@ -205,8 +210,24 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
     local is_selected = (#state.expanded_path == 1 and state.expanded_path[1] == device_guid)
 
     ctx:begin_group()
-    if device_panel then
-        -- Use full device panel
+    if item.is_bare then
+        -- Use simplified bare device panel (no modulators, no utility)
+        bare_device_panel.draw(ctx, fx, {
+            avail_height = avail_height - 10,
+            on_delete = function(fx_to_delete)
+                local state_module = require('lib.core.state')
+                state_module.state.deletion_pending = true
+                fx_to_delete:delete()
+                state_module.state.fx_list = nil
+            end,
+            on_drop = function(dragged_guid, target_guid)
+                if callbacks.on_drop then
+                    callbacks.on_drop(dragged_guid, target_guid)
+                end
+            end,
+        })
+    elseif device_panel then
+        -- Use full device panel for D-containers
         device_panel.draw(ctx, fx, {
             avail_height = avail_height - 10,
             utility = utility,  -- Paired SideFX_Utility for gain/pan
@@ -214,6 +235,7 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
             container_name = container_name,
             missing_utility = item.missing_utility,  -- Flag for warning icon
             icon_font = icon_font,
+            header_font = header_font,
             track = state.track,
             refresh_fx_list = refresh_fx_list,
             is_selected = is_selected,  -- For border highlighting
@@ -247,9 +269,9 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
                     callbacks.on_drop(dragged_guid, target_guid)
                 end
             end,
-            on_plugin_drop = function(plugin_name, insert_before_idx)
+            on_plugin_drop = function(plugin_name, insert_before_idx, drop_opts)
                 if callbacks.on_plugin_drop then
-                    callbacks.on_plugin_drop(plugin_name, container and container.pointer or insert_before_idx)
+                    callbacks.on_plugin_drop(plugin_name, container and container.pointer or insert_before_idx, drop_opts)
                 end
             end,
             on_rack_drop = function(insert_before_idx)
@@ -257,6 +279,7 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
                     callbacks.on_rack_drop(container and container.pointer or insert_before_idx)
                 end
             end,
+            on_mod_matrix = on_mod_matrix,
         })
     else
         -- Fallback UI with on_select callback

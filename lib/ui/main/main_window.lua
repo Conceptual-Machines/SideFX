@@ -6,6 +6,7 @@
 
 local imgui = require('imgui')
 local r = reaper
+local icons = require('lib.ui.common.icons')
 
 local M = {}
 
@@ -153,7 +154,7 @@ end
 --   - draw_plugin_browser: function (ctx) -> nil
 --   - draw_device_chain: function (ctx, fx_list, width, height) -> nil
 --   - refresh_fx_list: function () -> nil
---   - EmojImGui: EmojImGui module
+--   - icons: Icons module
 -- @return table {on_close, on_draw}
 function M.create_callbacks(opts)
     local state = opts.state
@@ -166,12 +167,14 @@ function M.create_callbacks(opts)
     local draw_toolbar = opts.draw_toolbar
     local draw_plugin_browser = opts.draw_plugin_browser
     local draw_device_chain = opts.draw_device_chain
+    local draw_analyzers = opts.draw_analyzers
     local refresh_fx_list = opts.refresh_fx_list
-    local EmojImGui = opts.EmojImGui
+    -- icons module is imported at module level
 
     -- Font references (passed in so they can be updated)
     local default_font_ref = opts.default_font_ref or { value = opts.default_font }
     local icon_font_ref = opts.icon_font_ref or { value = opts.icon_font }
+    local header_font_ref = opts.header_font_ref or { value = nil }
 
     local callbacks = {
         on_close = function(self)
@@ -206,6 +209,8 @@ function M.create_callbacks(opts)
                     -- ImGui_CreateFont takes: family_or_file, size (flags are optional via separate call)
                     default_font_ref.value = r.ImGui_CreateFont(family, 14)
                     if default_font_ref.value then
+                        -- Attach font to context for lifecycle management
+                        r.ImGui_Attach(ctx.ctx, default_font_ref.value)
                         break
                     end
                 end
@@ -213,17 +218,46 @@ function M.create_callbacks(opts)
                 -- If no font was created, try with a generic name
                 if not default_font_ref.value then
                     default_font_ref.value = r.ImGui_CreateFont("", 14)
+                    if default_font_ref.value then
+                        r.ImGui_Attach(ctx.ctx, default_font_ref.value)
+                    end
+                end
+            end
+
+            -- Create bold font for headers on first frame
+            if not header_font_ref.value then
+                local font_families = {
+                    "Segoe UI",
+                    "Helvetica Neue",
+                    "Arial",
+                    "DejaVu Sans",
+                }
+                for _, family in ipairs(font_families) do
+                    header_font_ref.value = r.ImGui_CreateFont(family, 14)
+                    if header_font_ref.value then
+                        r.ImGui_Attach(ctx.ctx, header_font_ref.value)
+                        break
+                    end
+                end
+                if not header_font_ref.value then
+                    header_font_ref.value = r.ImGui_CreateFont("", 14)
+                    if header_font_ref.value then
+                        r.ImGui_Attach(ctx.ctx, header_font_ref.value)
+                    end
                 end
             end
 
             -- Push default font if available
+            local main_font_pushed = false
             if default_font_ref.value then
-                ctx:push_font(default_font_ref.value, 14)
+                local ok = pcall(ctx.push_font, ctx, default_font_ref.value, 14)
+                main_font_pushed = ok
             end
 
-            -- Load icon font on first frame
+            -- Preload icons on first frame
             if not icon_font_ref.value then
-                icon_font_ref.value = EmojImGui.Asset.Font(ctx.ctx, "OpenMoji")
+                icons.preload_all(ctx.ctx)
+                icon_font_ref.value = true  -- Mark as initialized
             end
 
             -- Track change detection
@@ -270,11 +304,19 @@ function M.create_callbacks(opts)
                 clear_multi_select()
                 refresh_fx_list()
 
+                -- Update analyzer state for new track
+                if opts.update_analyzer_state then
+                    opts.update_analyzer_state()
+                end
 
                 -- Load expansion state for new track
                 if state.track then
                     state_module.load_expansion_state()
                     state_module.load_display_names()
+                    state_module.load_link_scales()
+                    state_module.load_expanded_mod_slots()
+                    state_module.load_mod_sidebar_collapsed()
+                    state_module.load_device_collapsed_states()
                 end
             else
                 -- Process any pending modulator additions (deferred from previous frame)
@@ -391,16 +433,36 @@ function M.create_callbacks(opts)
                         local filtered_fx = {}
                         for _, fx in ipairs(state.top_level_fx) do
                             -- Validate FX is still accessible (track may have been deleted)
-                            local ok = pcall(function()
+                            local ok, name = pcall(function()
                                 return fx:get_name()
                             end)
-                            if ok then
-                                table.insert(filtered_fx, fx)
+                            if ok and name then
+                                -- Filter out analyzer JSFX (they're drawn separately)
+                                -- Note: JSFX desc has space ("SideFX Oscilloscope"), file has underscore
+                                local name_lower = name:lower()
+                                local is_analyzer = name_lower:find("sidefx[_ ]oscilloscope") or name_lower:find("sidefx[_ ]spectrum")
+                                if not is_analyzer then
+                                    table.insert(filtered_fx, fx)
+                                end
                             end
                         end
 
                         -- Draw the horizontal device chain (includes modulators)
-                        draw_device_chain(ctx, filtered_fx, chain_w, avail_h, icon_font_ref)
+                        -- Use smaller font for chain content
+                        local font_pushed = false
+                        if default_font_ref.value then
+                            local ok = pcall(r.ImGui_PushFont, ctx.ctx, default_font_ref.value, 12)
+                            font_pushed = ok
+                        end
+                        draw_device_chain(ctx, filtered_fx, chain_w, avail_h, icon_font_ref, header_font_ref)
+
+                        -- Draw analyzer visualizations at end of chain
+                        if draw_analyzers then
+                            draw_analyzers(ctx, avail_h)
+                        end
+                        if font_pushed then
+                            r.ImGui_PopFont(ctx.ctx)
+                        end
                     end
                 end
 
@@ -411,7 +473,7 @@ function M.create_callbacks(opts)
             reaper_theme:unapply(ctx)
 
             -- Pop default font if we pushed it
-            if default_font_ref.value then
+            if main_font_pushed then
                 ctx:pop_font()
             end
 
@@ -431,12 +493,15 @@ function M.create_callbacks(opts)
                 state.last_save_frame = ctx.frame_count
             end
             
-            -- Draw modal dialogs (settings, presets, etc.)
+            -- Draw modal dialogs (settings, presets, mod matrix, etc.)
             if opts.settings_dialog then
                 opts.settings_dialog.draw(ctx)
             end
             if opts.preset_dialog then
                 opts.preset_dialog.draw(ctx)
+            end
+            if opts.mod_matrix then
+                opts.mod_matrix.draw(ctx, state)
             end
         end,
     }

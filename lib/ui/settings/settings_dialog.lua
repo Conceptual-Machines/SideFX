@@ -63,17 +63,10 @@ function M.draw(ctx)
         state_mod.load_config()
     end
 
-    -- Show/Hide Mix Control
-    local show_mix = config.get('show_mix_control')
-    if ctx:checkbox("Show Mix Control", show_mix) then
-        config.set('show_mix_control', not show_mix)
-        state_mod.load_config()
-    end
-
-    -- Show/Hide Delta Control
-    local show_delta = config.get('show_delta_control')
-    if ctx:checkbox("Show Delta Control", show_delta) then
-        config.set('show_delta_control', not show_delta)
+    -- Show/Hide Mix & Delta Controls
+    local show_mix_delta = config.get('show_mix_delta')
+    if ctx:checkbox("Show Mix & Delta Controls", show_mix_delta) then
+        config.set('show_mix_delta', not show_mix_delta)
         state_mod.load_config()
     end
 

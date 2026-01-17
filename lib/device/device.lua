@@ -29,9 +29,11 @@ M.MODULATOR_JSFX = "JS:SideFX/SideFX_Modulator"
 --- Add a plugin to the track wrapped in a D-container.
 -- @param plugin table Plugin info {full_name, name}
 -- @param position number|nil Insert position (nil = end of chain)
+-- @param opts table|nil Options: {bare = true} to skip adding utility (for analyzers)
 -- @return TrackFX|nil Device container (or raw FX for modulators)
-function M.add_plugin_to_track(plugin, position)
+function M.add_plugin_to_track(plugin, position, opts)
     if not state.track then return end
+    opts = opts or {}
 
     local name_lower = plugin.full_name:lower()
 
@@ -52,6 +54,29 @@ function M.add_plugin_to_track(plugin, position)
     -- Don't wrap mixer in containers (it should only be added by rack creation)
     if name_lower:find("sidefx_mixer") or name_lower:find("sidefx chain mixer") then
         return nil
+    end
+
+    -- Bare mode: add raw plugin without D-container (for analyzers, etc.)
+    if opts.bare then
+        r.Undo_BeginBlock()
+        local fx_position = position and (-1000 - position) or -1
+        local fx = state.track:add_fx_by_name(plugin.full_name, false, fx_position)
+        if fx and fx.pointer >= 0 then
+            local short_name = naming.get_short_plugin_name(plugin.full_name)
+            local device_name
+            if opts.post then
+                -- Post FX device (at end of chain)
+                local post_idx = fx_utils.get_next_post_device_index(state.track)
+                device_name = naming.build_post_device_name(post_idx, short_name)
+            else
+                -- Regular bare device
+                local bare_idx = fx_utils.get_next_bare_device_index(state.track)
+                device_name = naming.build_bare_device_name(bare_idx, short_name)
+            end
+            fx:set_named_config_param("renamed_name", device_name)
+        end
+        r.Undo_EndBlock(opts.post and "SideFX: Add Post FX" or "SideFX: Add Plugin (bare)", -1)
+        return fx
     end
 
     r.Undo_BeginBlock()
@@ -114,6 +139,8 @@ function M.add_plugin_to_track(plugin, position)
                 if util_inside then
                     local util_name = naming.build_device_util_name(device_idx)
                     util_inside:set_named_config_param("renamed_name", util_name)
+                    -- Initialize gain to 0dB
+                    util_inside:set_param(0, 0)
                 end
             end
         else
@@ -314,6 +341,8 @@ local function convert_single_fx_to_device(fx_info, device_idx)
         local util_inside = fx_utils.get_device_utility(container)
         if util_inside then
             util_inside:set_named_config_param("renamed_name", util_name)
+            -- Initialize gain to 0dB (use raw dB value, not normalized)
+            util_inside:set_param(0, 0)
         end
     end
 

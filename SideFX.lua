@@ -6,7 +6,6 @@
 --   [nomain] lib/ui/*.lua
 -- @depends ReaWrap>=0.7.3
 -- @depends ReaImGui
--- @depends talagan_EmojImGui
 -- @link https://github.com/Conceptual-Machines/SideFX
 -- @about
 --   # SideFX
@@ -52,16 +51,12 @@ local reawrap_reapack = scripts_folder .. "ReaWrap/Libraries/lua/"
 local sidefx_parent = script_path:match("^(.+[/\\])SideFX[/\\]")
 local reawrap_dev = sidefx_parent and (sidefx_parent .. "ReaWrap/lua/") or ""
 
--- EmojImGui path
-local emojimgui_path = scripts_folder .. "ReaTeam Scripts/Development/talagan_EmojImGui/"
-
--- Load EmojImGui FIRST with ReaImGui's builtin path (before ReaWrap's imgui shadows it)
-local reaimgui_path = r.ImGui_GetBuiltinPath and (r.ImGui_GetBuiltinPath() .. "/?.lua;") or ""
-package.path = reaimgui_path .. emojimgui_path .. "?.lua;" .. package.path
-local EmojImGui = require('emojimgui')
-
--- Clear the cached ReaImGui 'imgui' so we can load ReaWrap's version
-package.loaded['imgui'] = nil
+-- Force reload all lib modules during development
+for name in pairs(package.loaded) do
+    if name:match("^lib%.") then
+        package.loaded[name] = nil
+    end
+end
 
 -- NOW set up ReaWrap paths (these will shadow ReaImGui's imgui with ReaWrap's imgui)
 package.path = script_path .. "?.lua;"
@@ -71,6 +66,57 @@ package.path = script_path .. "?.lua;"
     .. reawrap_reapack .. "?.lua;"
     .. reawrap_reapack .. "?/init.lua;"
     .. package.path
+
+--------------------------------------------------------------------------------
+-- Dependency Check
+--------------------------------------------------------------------------------
+
+local function check_dependencies()
+    local missing = {}
+
+    -- Check ReaImGui extension
+    if not r.ImGui_CreateContext then
+        table.insert(missing, "ReaImGui extension (install via ReaPack: Extensions > ReaPack > Browse packages)")
+    end
+
+    -- Check ReaWrap
+    local ok_reawrap = pcall(require, 'imgui')
+    if not ok_reawrap then
+        table.insert(missing, "ReaWrap library (install via ReaPack: Extensions > ReaPack > Browse packages)")
+    end
+
+    -- Check JSFX files
+    local jsfx_path = r.GetResourcePath() .. "/Effects/SideFX/"
+    local jsfx_files = {
+        "SideFX_Mixer.jsfx",
+        "SideFX_Utility.jsfx",
+        "SideFX_Modulator.jsfx"
+    }
+    for _, jsfx in ipairs(jsfx_files) do
+        local f = io.open(jsfx_path .. jsfx, "r")
+        if f then
+            f:close()
+        else
+            table.insert(missing, "JSFX: " .. jsfx .. " (should be in Effects/SideFX/)")
+        end
+    end
+
+    if #missing > 0 then
+        local msg = "SideFX is missing required dependencies:\n\n"
+        for i, dep in ipairs(missing) do
+            msg = msg .. i .. ". " .. dep .. "\n"
+        end
+        msg = msg .. "\nPlease install the missing dependencies and try again."
+        r.ShowMessageBox(msg, "SideFX - Missing Dependencies", 0)
+        return false
+    end
+
+    return true
+end
+
+if not check_dependencies() then
+    return  -- Exit script if dependencies are missing
+end
 
 --------------------------------------------------------------------------------
 -- Imports
@@ -97,6 +143,7 @@ local constants = require('lib.core.constants')
 
 -- UI modules
 local widgets = require('lib.ui.common.widgets')
+package.loaded['lib.ui.common.drawing'] = nil  -- Force reload during dev
 local drawing = require('lib.ui.common.drawing')
 local chain_item = require('lib.ui.chain.chain_item')
 local browser_panel = require('lib.ui.main.browser_panel')
@@ -110,23 +157,21 @@ local main_window = require('lib.ui.main.main_window')
 local toolbar = require('lib.ui.main.toolbar')
 local drag_drop = require('lib.ui.common.drag_drop')
 local rack_ui = require('lib.ui.rack.rack_ui')
+local icons = require('lib.ui.common.icons')
 
 --------------------------------------------------------------------------------
--- Icons (using OpenMoji font)
+-- Icons
 --------------------------------------------------------------------------------
 
-local Icons = constants.Icons
-local icon_font = nil
+-- Initialize icons module with script path
+icons.init(script_path)
+
 local icon_size = 16
 local default_font = nil
 
 -- Font references (updated by main_window when fonts are loaded)
 local default_font_ref = { value = nil }
-local icon_font_ref = { value = nil }
-
-local function icon_text(icon_id)
-    return constants.icon_text(EmojImGui, icon_id)
-end
+local icon_font_ref = { value = nil }  -- Kept for API compatibility
 
 --------------------------------------------------------------------------------
 -- State (from lib/state.lua)
@@ -294,8 +339,9 @@ renumber_device_chain = function()
 end
 
 -- Device operations (uses state singleton via device_module)
-local function add_plugin_to_track(plugin, position)
-    local result = device_module.add_plugin_to_track(plugin, position)
+local function add_plugin_to_track(plugin, position, opts)
+    opts = opts or {}
+    local result = device_module.add_plugin_to_track(plugin, position, opts)
     if result then
         -- Auto-select the newly created standalone device
         local device_guid = result:get_guid()
@@ -307,8 +353,10 @@ local function add_plugin_to_track(plugin, position)
     return result
 end
 
-local function add_plugin_by_name(plugin_name, position)
-    local result = device_module.add_plugin_by_name(plugin_name, position)
+local function add_plugin_by_name(plugin_name, position, opts)
+    opts = opts or {}
+    local plugin = { full_name = plugin_name, name = plugin_name }
+    local result = device_module.add_plugin_to_track(plugin, position, opts)
     if result then
         -- Auto-select the newly created standalone device
         local device_guid = result:get_guid()
@@ -377,6 +425,98 @@ local function convert_chain_to_devices(chain)
     local result = container_module.convert_chain_to_devices(chain)
     if result and #result > 0 then refresh_fx_list() end
     return result
+end
+
+--------------------------------------------------------------------------------
+-- Scope/Spectrum Utilities (singleton analyzers)
+--------------------------------------------------------------------------------
+
+local SCOPE_JSFX_NAME = "SideFX_Oscilloscope"
+local SPECTRUM_JSFX_NAME = "SideFX_Spectrum"
+-- Patterns to match both "SideFX Oscilloscope" (desc) and "SideFX_Oscilloscope" (file)
+local SCOPE_PATTERN = "SideFX[_ ]Oscilloscope"
+local SPECTRUM_PATTERN = "SideFX[_ ]Spectrum"
+
+--- Find scope/spectrum FX on track by name pattern
+local function find_analyzer_fx(track, pattern)
+    if not track then return nil end
+    local fx_count = track:get_track_fx_count()
+    for i = 0, fx_count - 1 do
+        local ok, fx = pcall(function() return track:get_track_fx(i) end)
+        if ok and fx then
+            local ok_name, name = pcall(function() return fx:get_name() end)
+            if ok_name and name and name:find(pattern) then
+                return fx, i
+            end
+        end
+    end
+    return nil
+end
+
+--- Check if scope exists on current track
+local function has_scope_on_track()
+    return find_analyzer_fx(state.track, SCOPE_PATTERN) ~= nil
+end
+
+--- Check if spectrum exists on current track
+local function has_spectrum_on_track()
+    return find_analyzer_fx(state.track, SPECTRUM_PATTERN) ~= nil
+end
+
+--- Update analyzer state flags
+local function update_analyzer_state()
+    state.has_scope = find_analyzer_fx(state.track, SCOPE_PATTERN) ~= nil
+    state.has_spectrum = find_analyzer_fx(state.track, SPECTRUM_PATTERN) ~= nil
+end
+
+--- Get track slot (0-15) for GMEM isolation
+local function get_track_slot()
+    if not state.track then return 0 end
+    -- Use track index mod 16 as slot
+    local track_idx = math.floor(state.track:get_info_value("IP_TRACKNUMBER"))
+    return (track_idx - 1) % 16  -- 0-indexed, wrap to 0-15
+end
+
+--- Toggle oscilloscope on/off
+local function toggle_scope()
+    if not state.track then return end
+    local existing_fx = find_analyzer_fx(state.track, SCOPE_PATTERN)
+    if existing_fx then
+        -- Remove it
+        existing_fx:delete()
+        state.has_scope = false
+    else
+        -- Add at end of chain (use file name for adding)
+        local fx_idx = r.TrackFX_AddByName(state.track.pointer, "JS:" .. SCOPE_JSFX_NAME, false, -1)
+        if fx_idx >= 0 then
+            -- Set slot parameter (slider7, param index 6) to isolate GMEM
+            local slot = get_track_slot()
+            r.TrackFX_SetParamNormalized(state.track.pointer, fx_idx, 6, slot / 15)
+        end
+        state.has_scope = true
+    end
+    refresh_fx_list()
+end
+
+--- Toggle spectrum analyzer on/off
+local function toggle_spectrum()
+    if not state.track then return end
+    local existing_fx = find_analyzer_fx(state.track, SPECTRUM_PATTERN)
+    if existing_fx then
+        -- Remove it
+        existing_fx:delete()
+        state.has_spectrum = false
+    else
+        -- Add at end of chain (use file name for adding)
+        local fx_idx = r.TrackFX_AddByName(state.track.pointer, "JS:" .. SPECTRUM_JSFX_NAME, false, -1)
+        if fx_idx >= 0 then
+            -- Set slot parameter (slider7, param index 6) to isolate GMEM
+            local slot = get_track_slot()
+            r.TrackFX_SetParamNormalized(state.track.pointer, fx_idx, 6, slot / 15)
+        end
+        state.has_spectrum = true
+    end
+    refresh_fx_list()
 end
 
 --------------------------------------------------------------------------------
@@ -475,6 +615,7 @@ local is_modulator_fx = fx_utils.is_modulator_fx
 -- Settings and Preset dialogs
 local settings_dialog = require('lib.ui.settings.settings_dialog')
 local preset_dialog = require('lib.ui.presets.preset_dialog')
+local mod_matrix = require('lib.ui.modulator.mod_matrix')
 local presets_mod = require('lib.utils.presets')
 
 local function draw_toolbar(ctx, icon_font_ref)
@@ -493,6 +634,8 @@ local function draw_toolbar(ctx, icon_font_ref)
         on_collapse_from_depth = collapse_from_depth,
         on_config = function() settings_dialog.open(ctx) end,
         on_preset = function() preset_dialog.open(ctx) end,
+        on_toggle_scope = toggle_scope,
+        on_toggle_spectrum = toggle_spectrum,
     })
 end
 
@@ -553,6 +696,7 @@ draw_chain_column = function(ctx, selected_chain, rack_h)
         draw_rack_panel = draw_rack_panel,
         icon_font = icon_font_ref.value,
         default_font = default_font_ref.value,
+        on_mod_matrix = function(device, device_name) mod_matrix.open(device, device_name) end,
     })
 end
 
@@ -579,7 +723,7 @@ local function draw_selected_chain_column_if_expanded(ctx, rack_data, rack_guid)
             end
 end
 
-local function draw_device_chain(ctx, fx_list, avail_width, avail_height, icon_font_ref)
+local function draw_device_chain(ctx, fx_list, avail_width, avail_height, icon_font_ref, header_font_ref)
     device_chain.draw(ctx, fx_list, avail_width, avail_height, {
         state = state,
         get_fx_display_name = get_fx_display_name,
@@ -593,9 +737,554 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height, icon_f
         is_utility_fx = is_utility_fx,
         chain_item = chain_item,
         icon_font = icon_font_ref and icon_font_ref.value or nil,
+        header_font = header_font_ref and header_font_ref.value or nil,
         draw_selected_chain_column_if_expanded = draw_selected_chain_column_if_expanded,
         draw_rack_panel = draw_rack_panel,
+        on_mod_matrix = function(device, device_name) mod_matrix.open(device, device_name) end,
     })
+end
+
+-- Default analyzer panel sizes (can be adjusted via state)
+local DEFAULT_ANALYZER_W = 600
+local DEFAULT_ANALYZER_H = 200
+
+--- Draw analyzer visualizations (scope/spectrum) at end of chain
+--- Draw scope controls (shared between inline and popout) - single row
+-- @param suffix string Optional suffix for widget IDs (e.g., "_pop" for popout)
+local function draw_scope_controls(ctx, scope_fx, analyzer_w, suffix)
+    suffix = suffix or ""
+    local ch_w = 50  -- Smaller width for channel selector
+    local ctrl_w = (analyzer_w - 20 - ch_w) / 4  -- 4 main controls + smaller channel
+
+    -- Time window slider (param 0) - 1-500 ms
+    ctx:push_item_width(ctrl_w)
+    local time_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 0)
+    local time_ms = 1 + time_val * 499
+    local changed, new_time = r.ImGui_SliderDouble(ctx.ctx, "##scope_time" .. suffix, time_ms, 1, 500, "%.0fms")
+    if changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 0, (new_time - 1) / 499)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Time window") end
+    ctx:pop_item_width()
+
+    ctx:same_line()
+
+    -- Gain slider (param 1) - -24 to +24 dB
+    ctx:push_item_width(ctrl_w)
+    local gain_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 1)
+    local gain_db = -24 + gain_val * 48
+    local gain_changed, new_gain = r.ImGui_SliderDouble(ctx.ctx, "##scope_gain" .. suffix, gain_db, -24, 24, "%.0fdB")
+    if gain_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 1, (new_gain + 24) / 48)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Gain") end
+    ctx:pop_item_width()
+
+    ctx:same_line()
+
+    -- Trigger mode combo (param 2)
+    ctx:push_item_width(ctrl_w)
+    local trig_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 2)
+    local trig_mode = math.floor(trig_val * 2 + 0.5)
+    local trig_changed, new_trig = r.ImGui_Combo(ctx.ctx, "##scope_trig" .. suffix, trig_mode, "Auto\0Rise\0Fall\0")
+    if trig_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 2, new_trig / 2)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Trigger mode") end
+    ctx:pop_item_width()
+
+    ctx:same_line()
+
+    -- Trigger level slider (param 3) - -1 to +1
+    ctx:push_item_width(ctrl_w)
+    local level_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 3)
+    local level = -1 + level_val * 2
+    local level_changed, new_level = r.ImGui_SliderDouble(ctx.ctx, "##scope_level" .. suffix, level, -1, 1, "%.2f")
+    if level_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 3, (new_level + 1) / 2)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Trigger level") end
+    ctx:pop_item_width()
+
+    ctx:same_line()
+
+    -- Channel combo (param 4) - smaller
+    ctx:push_item_width(ch_w)
+    local ch_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 4)
+    local ch_mode = math.floor(ch_val * 2 + 0.5)
+    local ch_changed, new_ch = r.ImGui_Combo(ctx.ctx, "##scope_ch" .. suffix, ch_mode, "St\0L\0R\0")
+    if ch_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 4, new_ch / 2)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Channel") end
+    ctx:pop_item_width()
+end
+
+--- Draw spectrum controls (shared between inline and popout) - single row
+-- @param suffix string Optional suffix for widget IDs (e.g., "_pop" for popout)
+local function draw_spectrum_controls(ctx, spectrum_fx, analyzer_w, suffix)
+    suffix = suffix or ""
+    local ch_w = 50  -- Smaller width for channel selector
+    local ctrl_w = (analyzer_w - 20 - ch_w) / 4  -- 4 main controls + smaller channel
+
+    -- FFT size combo (param 0) - 0-8 maps to 64-16384
+    ctx:push_item_width(ctrl_w)
+    local fft_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 0)
+    local fft_idx = math.floor(fft_val * 8 + 0.5)
+    local n = "\x00"
+    local fft_options = "64"..n.."128"..n.."256"..n.."512"..n.."1k"..n.."2k"..n.."4k"..n.."8k"..n.."16k"..n..n
+    local fft_changed, new_fft = r.ImGui_Combo(ctx.ctx, "##spec_fft" .. suffix, fft_idx, fft_options)
+    if fft_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 0, new_fft / 8)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("FFT size") end
+    ctx:pop_item_width()
+
+    ctx:same_line()
+
+    -- Floor dB slider (param 1) - -90 to -12 dB
+    ctx:push_item_width(ctrl_w)
+    local floor_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 1)
+    local floor_db = -90 + floor_val * 78
+    local floor_changed, new_floor = r.ImGui_SliderDouble(ctx.ctx, "##spec_floor" .. suffix, floor_db, -90, -12, "%.0fdB")
+    if floor_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 1, (new_floor + 90) / 78)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Floor level") end
+    ctx:pop_item_width()
+
+    ctx:same_line()
+
+    -- Smoothing slider (param 2) - 0 to 0.95
+    ctx:push_item_width(ctrl_w)
+    local smooth_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 2)
+    local smooth = smooth_val * 0.95
+    local smooth_changed, new_smooth = r.ImGui_SliderDouble(ctx.ctx, "##spec_smooth" .. suffix, smooth * 100, 0, 95, "%.0f%%")
+    if smooth_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 2, new_smooth / 100 / 0.95)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Smoothing") end
+    ctx:pop_item_width()
+
+    ctx:same_line()
+
+    -- Slope slider (param 3) - 0 to 12 dB/oct
+    ctx:push_item_width(ctrl_w)
+    local slope_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 3)
+    local slope = slope_val * 12
+    local slope_changed, new_slope = r.ImGui_SliderDouble(ctx.ctx, "##spec_slope" .. suffix, slope, 0, 12, "%.0f/oct")
+    if slope_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 3, new_slope / 12)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Slope (high freq boost)") end
+    ctx:pop_item_width()
+
+    ctx:same_line()
+
+    -- Channel combo (param 4) - smaller
+    ctx:push_item_width(ch_w)
+    local ch_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 4)
+    local ch_mode = math.floor(ch_val * 2 + 0.5)
+    local ch_changed, new_ch = r.ImGui_Combo(ctx.ctx, "##spec_ch" .. suffix, ch_mode, "St\0L\0R\0")
+    if ch_changed then
+        r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 4, new_ch / 2)
+    end
+    if ctx:is_item_hovered() then ctx:set_tooltip("Channel") end
+    ctx:pop_item_width()
+end
+
+--- Draw analyzer popout windows (called from main render)
+local function draw_analyzer_popouts(ctx)
+    local drawing = require('lib.ui.common.drawing')
+    local imgui = require('imgui')
+
+    if not state.track then return end
+
+    -- Connect to JSFX GMEM namespace
+    r.gmem_attach("SideFX")
+
+    local slot = get_track_slot()
+
+    -- Scope popout window
+    if state.scope_popout and state.has_scope then
+        local scope_fx = find_analyzer_fx(state.track, SCOPE_PATTERN)
+
+        ctx:set_next_window_size(650, 400, imgui.Cond.FirstUseEver())
+        local window_flags = 0
+        local visible, open = ctx:begin_window("Oscilloscope##popout", true, window_flags)
+        if visible then
+            -- Header with controls
+            if scope_fx then
+                -- Freeze toggle
+                local freeze_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 5)
+                local is_frozen = freeze_val > 0.5
+                ctx:push_style_color(imgui.Col.Button(), is_frozen and 0x4488FFFF or 0x444444FF)
+                if ctx:button(is_frozen and "||" or ">", 24, 20) then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 5, is_frozen and 0 or 1)
+                end
+                ctx:pop_style_color()
+                if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
+            end
+
+            -- Visualization - use available space
+            local avail_w, avail_h = ctx:get_content_region_avail()
+            local viz_h = avail_h - 60  -- Leave room for controls
+            local is_enabled = scope_fx and r.TrackFX_GetEnabled(state.track.pointer, scope_fx.pointer)
+            local scope_pop_hovered = drawing.draw_oscilloscope(ctx, "##scope_popout_viz", avail_w, viz_h, slot, is_enabled)
+            if scope_pop_hovered and is_enabled then
+                ctx:set_tooltip("Oscilloscope - Stereo waveform display\nL (green) / R (magenta)\nLogarithmic dB scale")
+            end
+
+            -- Controls
+            if scope_fx then
+                draw_scope_controls(ctx, scope_fx, avail_w, "_pop")
+            end
+
+            ctx:end_window()
+        end
+        if not open then
+            state.scope_popout = false
+        end
+    end
+
+    -- Spectrum popout window
+    if state.spectrum_popout and state.has_spectrum then
+        local spectrum_fx = find_analyzer_fx(state.track, SPECTRUM_PATTERN)
+
+        ctx:set_next_window_size(650, 400, imgui.Cond.FirstUseEver())
+        local window_flags = 0
+        local visible, open = ctx:begin_window("Spectrum Analyzer##popout", true, window_flags)
+        if visible then
+            -- Header with controls
+            if spectrum_fx then
+                -- Freeze toggle
+                local freeze_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 5)
+                local is_frozen = freeze_val > 0.5
+                ctx:push_style_color(imgui.Col.Button(), is_frozen and 0x4488FFFF or 0x444444FF)
+                if ctx:button(is_frozen and "||" or ">", 24, 20) then
+                    r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 5, is_frozen and 0 or 1)
+                end
+                ctx:pop_style_color()
+                if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
+            end
+
+            -- Visualization - use available space
+            local avail_w, avail_h = ctx:get_content_region_avail()
+            local viz_h = avail_h - 60  -- Leave room for controls
+            local is_enabled = spectrum_fx and r.TrackFX_GetEnabled(state.track.pointer, spectrum_fx.pointer)
+            local spectrum_pop_hovered = drawing.draw_spectrum(ctx, "##spectrum_popout_viz", avail_w, viz_h, slot, is_enabled)
+            if spectrum_pop_hovered and is_enabled then
+                ctx:set_tooltip("Spectrum Analyzer - Frequency response\nLogarithmic frequency scale (20Hz-20kHz)\nClick/drag: Adjust floor dB")
+            end
+
+            -- Controls
+            if spectrum_fx then
+                draw_spectrum_controls(ctx, spectrum_fx, avail_w, "_pop")
+            end
+
+            ctx:end_window()
+        end
+        if not open then
+            state.spectrum_popout = false
+        end
+    end
+end
+
+local function draw_analyzers(ctx, avail_height)
+    local drawing = require('lib.ui.common.drawing')
+    local imgui = require('imgui')
+
+    -- Draw popout windows first (always, even if inline panels are hidden)
+    draw_analyzer_popouts(ctx)
+
+    local has_any = state.has_scope or state.has_spectrum
+    if not has_any then return end
+
+    -- Check if any inline panels should be shown
+    local show_inline_scope = state.has_scope and not state.scope_popout
+    local show_inline_spectrum = state.has_spectrum and not state.spectrum_popout
+    if not show_inline_scope and not show_inline_spectrum then return end
+
+    -- Connect to JSFX GMEM namespace (required to read GMEM data)
+    r.gmem_attach("SideFX")
+
+    ctx:same_line()
+
+    -- Get sizes from state or use defaults
+    local analyzer_w = state.analyzer_width or DEFAULT_ANALYZER_W
+    local controls_h = 26  -- Single row of controls
+    local header_h = 26
+    local padding = 16
+    local analyzer_h = avail_height - controls_h - header_h - padding
+    local panel_h = avail_height - 4
+
+    -- Get current track slot for GMEM isolation
+    local slot = get_track_slot()
+
+    -- Draw scope if active and not popped out
+    -- Params: 0=Time, 1=Gain, 2=TrigMode, 3=TrigLevel, 4=Channel, 5=Freeze, 6=Slot
+    if show_inline_scope then
+        local scope_fx = find_analyzer_fx(state.track, SCOPE_PATTERN)
+        local is_collapsed = state.scope_collapsed or false
+
+        ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1AFF)
+        local no_scroll = r.ImGui_WindowFlags_NoScrollbar() | r.ImGui_WindowFlags_NoScrollWithMouse()
+        local scope_w = is_collapsed and 50 or (analyzer_w + 12)
+
+        if ctx:begin_child("scope_panel", scope_w, panel_h, imgui.ChildFlags.Border(), no_scroll) then
+            if is_collapsed then
+                -- Collapsed view: vertical strip with buttons
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+                if ctx:button("▶##expand_scope", 20, 20) then
+                    state.scope_collapsed = false
+                end
+                ctx:pop_style_color(2)
+                if ctx:is_item_hovered() then ctx:set_tooltip("Expand Scope") end
+
+                ctx:spacing()
+
+                -- Popout button
+                if icons.button_bordered(ctx, "popout_scope_c", icons.Names.popout, 18) then
+                    state.scope_popout = true
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
+
+                ctx:spacing()
+
+                -- ON/OFF button
+                if scope_fx then
+                    local enabled = r.TrackFX_GetEnabled(state.track.pointer, scope_fx.pointer)
+                    local on_tint = enabled and 0x88FF88FF or 0x888888FF
+                    if icons.button_bordered(ctx, "on_scope_c", icons.Names.on, 18, on_tint) then
+                        r.TrackFX_SetEnabled(state.track.pointer, scope_fx.pointer, not enabled)
+                    end
+                    if ctx:is_item_hovered() then ctx:set_tooltip(enabled and "Bypass" or "Enable") end
+                end
+
+                ctx:spacing()
+
+                -- Delete button
+                if icons.button_bordered(ctx, "del_scope_c", icons.Names.cancel, 18, 0xFF6666FF) then
+                    toggle_scope()
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Remove") end
+
+                ctx:spacing()
+                ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
+                ctx:text("Sco")
+                ctx:pop_style_color()
+            else
+                -- Expanded view
+                -- Header background
+                local hdr_x, hdr_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+                local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                r.ImGui_DrawList_AddRectFilled(draw_list, hdr_x - 4, hdr_y - 4, hdr_x + analyzer_w + 8, hdr_y + 20, 0x252525FF, 0)
+
+                -- Collapse button
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+                if ctx:button("▼##collapse_scope", 20, 20) then
+                    state.scope_collapsed = true
+                end
+                ctx:pop_style_color(2)
+                if ctx:is_item_hovered() then ctx:set_tooltip("Collapse") end
+
+                ctx:same_line()
+
+                -- Header row with icon, title, and controls
+                icons.image(ctx, icons.Names.oscilloscope, 14)
+                ctx:same_line()
+                ctx:text("Scope")
+
+                if scope_fx then
+                    -- Freeze toggle (param 5)
+                    ctx:same_line()
+                    local freeze_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 5)
+                    local is_frozen = freeze_val > 0.5
+                    local freeze_tint = is_frozen and 0x4488FFFF or 0xCCCCCCFF
+                    if icons.button(ctx, "freeze_scope", icons.Names.pause, 16, freeze_tint) then
+                        r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 5, is_frozen and 0 or 1)
+                    end
+                    if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
+                end
+
+                -- Popout button
+                ctx:same_line(analyzer_w - 56)
+                if icons.button(ctx, "popout_scope", icons.Names.popout, 16) then
+                    state.scope_popout = true
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
+
+                -- ON/OFF button
+                ctx:same_line()
+                if scope_fx then
+                    local enabled = r.TrackFX_GetEnabled(state.track.pointer, scope_fx.pointer)
+                    local on_tint = enabled and 0x88FF88FF or 0x888888FF
+                    if icons.button(ctx, "on_scope", icons.Names.on, 16, on_tint) then
+                        r.TrackFX_SetEnabled(state.track.pointer, scope_fx.pointer, not enabled)
+                    end
+                    if ctx:is_item_hovered() then ctx:set_tooltip(enabled and "Bypass" or "Enable") end
+                end
+
+                ctx:same_line()
+                if icons.button(ctx, "del_scope", icons.Names.cancel, 16, 0xFF6666FF) then
+                    toggle_scope()
+                end
+
+                -- Spacing after header
+                ctx:dummy(0, 4)
+
+                -- Visualization
+                local is_enabled = scope_fx and r.TrackFX_GetEnabled(state.track.pointer, scope_fx.pointer)
+                local scope_hovered = drawing.draw_oscilloscope(ctx, "##scope_viz", analyzer_w, analyzer_h, slot, is_enabled)
+                if scope_hovered and is_enabled then
+                    ctx:set_tooltip("Oscilloscope - Stereo waveform display\nL (green) / R (magenta)\nLogarithmic dB scale")
+                end
+
+                -- Controls
+                if scope_fx then
+                    draw_scope_controls(ctx, scope_fx, analyzer_w)
+                end
+            end
+
+            ctx:end_child()
+        end
+        ctx:pop_style_color()
+        ctx:same_line()
+    end
+
+    -- Draw spectrum if active and not popped out
+    -- Params: 0=FFTSize, 1=Floor, 2=Smoothing, 3=Slope, 4=Channel, 5=Freeze, 6=Slot
+    if show_inline_spectrum then
+        local spectrum_fx = find_analyzer_fx(state.track, SPECTRUM_PATTERN)
+        local is_collapsed = state.spectrum_collapsed or false
+
+        ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1AFF)
+        local no_scroll = r.ImGui_WindowFlags_NoScrollbar() | r.ImGui_WindowFlags_NoScrollWithMouse()
+        local spectrum_w = is_collapsed and 50 or (analyzer_w + 12)
+
+        if ctx:begin_child("spectrum_panel", spectrum_w, panel_h, imgui.ChildFlags.Border(), no_scroll) then
+            if is_collapsed then
+                -- Collapsed view: vertical strip with buttons
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+                if ctx:button("▶##expand_spectrum", 20, 20) then
+                    state.spectrum_collapsed = false
+                end
+                ctx:pop_style_color(2)
+                if ctx:is_item_hovered() then ctx:set_tooltip("Expand Spectrum") end
+
+                ctx:spacing()
+
+                -- Popout button
+                if icons.button_bordered(ctx, "popout_spectrum_c", icons.Names.popout, 18) then
+                    state.spectrum_popout = true
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
+
+                ctx:spacing()
+
+                -- ON/OFF button
+                if spectrum_fx then
+                    local enabled = r.TrackFX_GetEnabled(state.track.pointer, spectrum_fx.pointer)
+                    local on_tint = enabled and 0x88FF88FF or 0x888888FF
+                    if icons.button_bordered(ctx, "on_spectrum_c", icons.Names.on, 18, on_tint) then
+                        r.TrackFX_SetEnabled(state.track.pointer, spectrum_fx.pointer, not enabled)
+                    end
+                    if ctx:is_item_hovered() then ctx:set_tooltip(enabled and "Bypass" or "Enable") end
+                end
+
+                ctx:spacing()
+
+                -- Delete button
+                if icons.button_bordered(ctx, "del_spectrum_c", icons.Names.cancel, 18, 0xFF6666FF) then
+                    toggle_spectrum()
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Remove") end
+
+                ctx:spacing()
+                ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
+                ctx:text("Spe")
+                ctx:pop_style_color()
+            else
+                -- Expanded view
+                -- Header background
+                local hdr_x, hdr_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+                local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                r.ImGui_DrawList_AddRectFilled(draw_list, hdr_x - 4, hdr_y - 4, hdr_x + analyzer_w + 8, hdr_y + 20, 0x252525FF, 0)
+
+                -- Collapse button
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+                if ctx:button("▼##collapse_spectrum", 20, 20) then
+                    state.spectrum_collapsed = true
+                end
+                ctx:pop_style_color(2)
+                if ctx:is_item_hovered() then ctx:set_tooltip("Collapse") end
+
+                ctx:same_line()
+
+                -- Header row with icon, title, and controls
+                icons.image(ctx, icons.Names.spectrum, 14)
+                ctx:same_line()
+                ctx:text("Spectrum")
+
+                if spectrum_fx then
+                    -- Freeze toggle (param 5)
+                    ctx:same_line()
+                    local freeze_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 5)
+                    local is_frozen = freeze_val > 0.5
+                    local freeze_tint = is_frozen and 0x4488FFFF or 0xCCCCCCFF
+                    if icons.button(ctx, "freeze_spectrum", icons.Names.pause, 16, freeze_tint) then
+                        r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 5, is_frozen and 0 or 1)
+                    end
+                    if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
+                end
+
+                -- Popout button
+                ctx:same_line(analyzer_w - 56)
+                if icons.button(ctx, "popout_spectrum", icons.Names.popout, 16) then
+                    state.spectrum_popout = true
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
+
+                -- ON/OFF button
+                ctx:same_line()
+                if spectrum_fx then
+                    local enabled = r.TrackFX_GetEnabled(state.track.pointer, spectrum_fx.pointer)
+                    local on_tint = enabled and 0x88FF88FF or 0x888888FF
+                    if icons.button(ctx, "on_spectrum", icons.Names.on, 16, on_tint) then
+                        r.TrackFX_SetEnabled(state.track.pointer, spectrum_fx.pointer, not enabled)
+                    end
+                    if ctx:is_item_hovered() then ctx:set_tooltip(enabled and "Bypass" or "Enable") end
+                end
+
+                ctx:same_line()
+                if icons.button(ctx, "del_spectrum", icons.Names.cancel, 16, 0xFF6666FF) then
+                    toggle_spectrum()
+                end
+
+                -- Spacing after header
+                ctx:dummy(0, 4)
+
+                -- Visualization
+                local is_enabled = spectrum_fx and r.TrackFX_GetEnabled(state.track.pointer, spectrum_fx.pointer)
+                local spectrum_hovered = drawing.draw_spectrum(ctx, "##spectrum_viz", analyzer_w, analyzer_h, slot, is_enabled)
+                if spectrum_hovered and is_enabled then
+                    ctx:set_tooltip("Spectrum Analyzer - Frequency response\nLogarithmic frequency scale (20Hz-20kHz)\nClick/drag: Adjust floor dB")
+                end
+
+                -- Controls
+                if spectrum_fx then
+                    draw_spectrum_controls(ctx, spectrum_fx, analyzer_w)
+                end
+            end
+
+            ctx:end_child()
+        end
+        ctx:pop_style_color()
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -613,6 +1302,7 @@ local function main()
 
     state.track, state.track_name = get_selected_track()
     refresh_fx_list()
+    update_analyzer_state()
     scan_plugins()
     
     -- Initialize presets module
@@ -628,15 +1318,18 @@ local function main()
     -- Load parameter unit overrides (global, not per-track)
     state_module.load_param_unit_overrides()
 
-    -- Load expansion state and display names for current track
+    -- Load expansion state, display names, link scales, and mod slots for current track
     if state.track then
         state_module.load_expansion_state()
         state_module.load_display_names()
+        state_module.load_link_scales()
+        state_module.load_expanded_mod_slots()
+        state_module.load_mod_sidebar_collapsed()
+        state_module.load_device_collapsed_states()
     end
 
     -- Initialize module-level font references (will be updated by main_window when fonts load)
     default_font_ref.value = default_font
-    icon_font_ref.value = icon_font
 
     -- Create window callbacks
     local window_callbacks = main_window.create_callbacks({
@@ -644,20 +1337,22 @@ local function main()
         state_module = state_module,
         device_module = device_module,
         default_font = default_font,
-        icon_font = icon_font,
         reaper_theme = reaper_theme,
         get_selected_track = get_selected_track,
         check_fx_changes = check_fx_changes,
         clear_multi_select = clear_multi_select,
+        update_analyzer_state = update_analyzer_state,
         draw_toolbar = draw_toolbar,
         draw_plugin_browser = draw_plugin_browser,
         draw_device_chain = draw_device_chain,
+        draw_analyzers = draw_analyzers,
         refresh_fx_list = refresh_fx_list,
-        EmojImGui = EmojImGui,
+        icons = icons,
         default_font_ref = default_font_ref,
         icon_font_ref = icon_font_ref,
         settings_dialog = settings_dialog,
         preset_dialog = preset_dialog,
+        mod_matrix = mod_matrix,
     })
 
     Window.run({

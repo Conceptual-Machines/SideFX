@@ -9,6 +9,7 @@ local state_module = require('lib.core.state')
 local config = require('lib.core.config')
 local PARAM = require('lib.modulator.modulator_constants')
 local drawing = require('lib.ui.common.drawing')
+local icons = require('lib.ui.common.icons')
 local modulator_module = require('lib.modulator.modulator')
 local curve_editor = require('lib.ui.common.curve_editor')
 local modulator_presets = require('lib.modulator.modulator_presets')
@@ -18,6 +19,195 @@ local modulator_bake = require('lib.modulator.modulator_bake')
 local MODULATOR_TYPES = {
     {name = "Bezier LFO", jsfx = "SideFX_Modulator"}
 }
+
+-- Helper: Get project safely
+local function get_project()
+    local Project = require('project')
+    local ok, project = pcall(function() return Project:new() end)
+    if ok and project then return project end
+    return nil
+end
+
+-- Helper: Find track by GUID
+local function find_track_by_guid(target_guid)
+    if not target_guid then return nil end
+
+    local project = get_project()
+    if not project then return nil end
+
+    local ok, iter = pcall(function() return project:iter_tracks() end)
+    if not ok or not iter then return nil end
+
+    for track in iter do
+        local ok_guid, track_guid = pcall(function() return track:get_guid() end)
+        if ok_guid and track_guid == target_guid then
+            return track
+        end
+    end
+
+    return nil
+end
+
+-- Helper: Get all tracks in project for source selection dropdown
+local function get_available_tracks(exclude_track)
+    local tracks = {}
+    local exclude_guid = nil
+    if exclude_track then
+        local ok, guid = pcall(function() return exclude_track:get_guid() end)
+        if ok then exclude_guid = guid end
+    end
+
+    local project = get_project()
+    if not project then return tracks end
+
+    local ok, iter = pcall(function() return project:iter_tracks() end)
+    if not ok or not iter then return tracks end
+
+    local i = 0
+    for track in iter do
+        local ok_guid, track_guid = pcall(function() return track:get_guid() end)
+        if ok_guid and (not exclude_guid or track_guid ~= exclude_guid) then
+            local ok_name, track_name = pcall(function() return track:get_name() end)
+            local name = (ok_name and track_name and track_name ~= "") and track_name or ("Track " .. (i + 1))
+            table.insert(tracks, {
+                track = track,
+                guid = track_guid,
+                name = name,
+                index = i
+            })
+        end
+        i = i + 1
+    end
+
+    return tracks
+end
+
+-- Helper: Find or create audio sidechain send (channels 3/4)
+local function find_or_create_audio_sidechain_send(source_track, dest_track)
+    if not source_track or not dest_track then return nil end
+
+    -- Check if send already exists
+    local ok_count, send_count = pcall(function() return source_track:get_num_sends() end)
+    if ok_count and send_count then
+        for i = 0, send_count - 1 do
+            local ok_dest, send_dest = pcall(function()
+                return r.GetTrackSendInfo_Value(source_track.pointer, 0, i, "P_DESTTRACK")
+            end)
+            if ok_dest and send_dest == dest_track.pointer then
+                -- Check if it's routing to channels 3/4
+                local ok_chan, dest_chan = pcall(function()
+                    return r.GetTrackSendInfo_Value(source_track.pointer, 0, i, "I_DSTCHAN")
+                end)
+                if ok_chan and dest_chan == 2 then  -- Channel index 2 = channels 3/4
+                    return i  -- Send already exists and configured correctly
+                end
+            end
+        end
+    end
+
+    -- Create new send
+    local send_idx = r.CreateTrackSend(source_track.pointer, dest_track.pointer)
+    if send_idx >= 0 then
+        -- Configure send to output to channels 3/4 (dest channel index 2)
+        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_DSTCHAN", 2)
+        -- Set to post-fader
+        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_SENDMODE", 0)
+        -- Ensure source track's main send to parent/master stays enabled
+        r.SetMediaTrackInfo_Value(source_track.pointer, "B_MAINSEND", 1)
+        return send_idx
+    end
+
+    return nil
+end
+
+-- Helper: Find or create MIDI send
+local function find_or_create_midi_send(source_track, dest_track)
+    if not source_track or not dest_track then return nil end
+
+    -- Check if MIDI send already exists
+    local ok_count, send_count = pcall(function() return source_track:get_num_sends() end)
+    if ok_count and send_count then
+        for i = 0, send_count - 1 do
+            local ok_dest, send_dest = pcall(function()
+                return r.GetTrackSendInfo_Value(source_track.pointer, 0, i, "P_DESTTRACK")
+            end)
+            if ok_dest and send_dest == dest_track.pointer then
+                -- Check if MIDI is enabled on this send
+                local ok_midi, midi_flags = pcall(function()
+                    return r.GetTrackSendInfo_Value(source_track.pointer, 0, i, "I_MIDIFLAGS")
+                end)
+                -- MIDI flags: 0 = all MIDI disabled, non-zero = some MIDI enabled
+                if ok_midi and midi_flags and midi_flags ~= 0 then
+                    return i  -- MIDI send already exists
+                end
+            end
+        end
+    end
+
+    -- Create new send
+    local send_idx = r.CreateTrackSend(source_track.pointer, dest_track.pointer)
+    if send_idx >= 0 then
+        -- Set audio to None (source channel -1)
+        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_SRCCHAN", -1)
+        -- Enable MIDI on Bus 2:
+        -- Bit 10 (1024): MIDI to instruments
+        -- Bit 23 (0x800000): Bus 2 destination
+        -- Source/dest channels: 0 = all (when bus is set)
+        local midi_flags = 1024 + 0x800000  -- MIDI to instruments + Bus 2
+        r.SetTrackSendInfo_Value(source_track.pointer, 0, send_idx, "I_MIDIFLAGS", midi_flags)
+        -- Ensure source track's main send to parent/master stays enabled
+        r.SetMediaTrackInfo_Value(source_track.pointer, "B_MAINSEND", 1)
+        return send_idx
+    end
+
+    return nil
+end
+
+-- Helper: Remove send if it exists
+local function remove_send_to_track(source_track, dest_track)
+    if not source_track or not dest_track then return end
+
+    local ok_count, send_count = pcall(function() return source_track:get_num_sends() end)
+    if not ok_count or not send_count then return end
+
+    -- Find and remove sends in reverse order to avoid index shifting
+    for i = send_count - 1, 0, -1 do
+        local ok_dest, send_dest = pcall(function()
+            return r.GetTrackSendInfo_Value(source_track.pointer, 0, i, "P_DESTTRACK")
+        end)
+        if ok_dest and send_dest == dest_track.pointer then
+            r.RemoveTrackSend(source_track.pointer, 0, i)
+        end
+    end
+end
+
+-- Helper: Clean up sends for all modulators in a device container
+-- Call this before deleting a device to remove any external source sends
+local function cleanup_device_sends(device_container, dest_track)
+    if not device_container or not dest_track then return end
+
+    local state = state_module.state
+
+    -- Get all modulators in this device
+    local ok, iter = pcall(function() return device_container:iter_container_children() end)
+    if not ok or not iter then return end
+
+    for child in iter do
+        local ok_name, name = pcall(function() return child:get_name() end)
+        if ok_name and name and name:match("SideFX[_ ]Modulator") then
+            -- This is a modulator - check if it has an external source
+            local ok_guid, mod_guid = pcall(function() return child:get_guid() end)
+            if ok_guid and mod_guid and state.modulator_source_track and state.modulator_source_track[mod_guid] then
+                local src_guid = state.modulator_source_track[mod_guid]
+                local src_track = find_track_by_guid(src_guid)
+                if src_track then
+                    remove_send_to_track(src_track, dest_track)
+                end
+                state.modulator_source_track[mod_guid] = nil
+            end
+        end
+    end
+end
 
 -- Helper function to get modulators for a device
 local function get_device_modulators(device_container)
@@ -34,7 +224,7 @@ local function get_device_modulators(device_container)
 
     for child in iter do
         local ok_name, name = pcall(function() return child:get_name() end)
-        if ok_name and name and (name:match("SideFX_Modulator") or name:match("SideFX Modulator")) then
+        if ok_name and name and name:match("SideFX[_ ]Modulator") then
             table.insert(modulators, child)
         end
     end
@@ -79,6 +269,8 @@ local function draw_modulator_grid(ctx, guid, modulators, expanded_slot_idx, slo
                         else
                             state.expanded_mod_slot[state_guid] = slot_idx
                         end
+                        -- Persist expanded mod slot state
+                        state_module.save_expanded_mod_slots()
                         interacted = true
                     end
 
@@ -92,6 +284,7 @@ local function draw_modulator_grid(ctx, guid, modulators, expanded_slot_idx, slo
                             if ok_del then
                                 -- Clear expansion state for this slot
                                 state.expanded_mod_slot[state_guid] = nil
+                                state_module.save_expanded_mod_slots()
                                 -- Refresh FX list
                                 if opts.refresh_fx_list then
                                     opts.refresh_fx_list()
@@ -141,7 +334,7 @@ local function draw_modulator_grid(ctx, guid, modulators, expanded_slot_idx, slo
     return interacted
 end
 
--- Helper: Draw preset dropdown, save button, and UI icon
+-- Helper: Draw preset dropdown, save button, and curve editor icons
 local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor_key, cfg, state, opts)
     local interacted = false
     local mod_guid = expanded_modulator:get_guid()
@@ -177,13 +370,13 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
         current_preset_name = cached_names[0] or "Sine"
     end
 
-    -- Use table for preset row: Preset (stretch) | Save (fixed) | UI (fixed)
+    -- Use table for preset row: Preset (stretch) | Save | Curve
     local table_flags = r.ImGui_TableFlags_SizingFixedFit()
     local icon_btn_size = 24
     if ctx:begin_table("preset_row_" .. guid, 3, table_flags) then
         r.ImGui_TableSetupColumn(ctx.ctx, "Preset", r.ImGui_TableColumnFlags_WidthStretch(), 1)
         r.ImGui_TableSetupColumn(ctx.ctx, "Save", r.ImGui_TableColumnFlags_WidthFixed(), icon_btn_size)
-        r.ImGui_TableSetupColumn(ctx.ctx, "UI", r.ImGui_TableColumnFlags_WidthFixed(), icon_btn_size)
+        r.ImGui_TableSetupColumn(ctx.ctx, "Curve", r.ImGui_TableColumnFlags_WidthFixed(), icon_btn_size)
 
         ctx:table_next_row()
 
@@ -229,16 +422,9 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
             ctx:set_tooltip("Waveform Preset")
         end
 
-        -- Column 2: Save button with icon
+        -- Column 2: Save button
         ctx:table_set_column_index(1)
-        local constants = require('lib.core.constants')
-        local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
-        local save_icon = constants.icon_text(emojimgui, constants.Icons.floppy_disk)
-
-        if opts.icon_font then
-            ctx:push_font(opts.icon_font, 14)
-        end
-        if ctx:button(save_icon .. "##save_" .. guid, icon_btn_size, 0) then
+        if icons.button_bordered(ctx, "save_preset_" .. guid, icons.Names.save, 18) then
             -- Open save preset popup, pre-fill with current preset name
             state.save_preset_popup = state.save_preset_popup or {}
             state.save_preset_popup[mod_guid] = {
@@ -248,16 +434,13 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
             }
             interacted = true
         end
-        if opts.icon_font then
-            ctx:pop_font()
-        end
         if ctx:is_item_hovered() then
             ctx:set_tooltip("Save Preset")
         end
 
-        -- Column 3: UI icon
+        -- Column 3: Curve editor button
         ctx:table_set_column_index(2)
-        if drawing.draw_ui_icon(ctx, "##ui_" .. guid, icon_btn_size, icon_btn_size, opts.icon_font) then
+        if icons.button_bordered(ctx, "curve_editor_" .. guid, icons.Names.curve, 18) then
             state.curve_editor_popup = state.curve_editor_popup or {}
             state.curve_editor_popup[editor_key] = state.curve_editor_popup[editor_key] or {}
             state.curve_editor_popup[editor_key].open_requested = true
@@ -307,63 +490,78 @@ local function draw_curve_editor_section(ctx, expanded_modulator, editor_key, st
     return interacted
 end
 
--- Helper: Draw Free/Sync and Rate controls
-local function draw_rate_controls(ctx, guid, expanded_modulator)
+-- Helper: Draw rate and trigger controls in a table layout
+-- Columns: Free/Sync | Rate slider/dropdown (stretch) | Trigger dropdown | Gear | Monitor dot
+local function draw_rate_and_trigger_row(ctx, guid, expanded_modulator, opts, advanced_popup_id)
     local interacted = false
+    local ok_trig, trig_idx = false, nil
+    local open_advanced_popup = false
+
     local tempo_mode = expanded_modulator:get_param(PARAM.PARAM_TEMPO_MODE)
+    if not tempo_mode then
+        return interacted, ok_trig, trig_idx
+    end
 
-    if tempo_mode then
-        local is_free = tempo_mode < 0.5
+    local is_free = tempo_mode < 0.5
 
-        -- Free button
-        if is_free then
-            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-        end
-        if ctx:button("Free##tempo_" .. guid, 52, 0) then
+    -- Get trigger mode for monitor dot column
+    local trigger_mode_val
+    ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_TRIGGER_MODE) end)
+    if ok_trig then
+        trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
+    end
+
+    local table_flags = r.ImGui_TableFlags_SizingFixedFit()
+    if ctx:begin_table("rate_trigger_row_" .. guid, 5, table_flags) then
+        r.ImGui_TableSetupColumn(ctx.ctx, "FreeSyncBtns", r.ImGui_TableColumnFlags_WidthFixed(), 44)
+        r.ImGui_TableSetupColumn(ctx.ctx, "Rate", r.ImGui_TableColumnFlags_WidthStretch(), 1)
+        r.ImGui_TableSetupColumn(ctx.ctx, "Trigger", r.ImGui_TableColumnFlags_WidthFixed(), 58)
+        r.ImGui_TableSetupColumn(ctx.ctx, "Gear", r.ImGui_TableColumnFlags_WidthFixed(), 22)
+        r.ImGui_TableSetupColumn(ctx.ctx, "Monitor", r.ImGui_TableColumnFlags_WidthFixed(), 18)
+
+        ctx:table_next_row()
+
+        -- Column 1: Free/Sync buttons
+        ctx:table_set_column_index(0)
+        local free_tint = is_free and 0x88FF88FF or 0x888888FF
+        if icons.button_bordered(ctx, "free_" .. guid, icons.Names.free, 18, free_tint) then
             expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 0)
             interacted = true
         end
-        if is_free then
-            ctx:pop_style_color()
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip("Free running (Hz)")
         end
 
-        ctx:same_line(0, 0)
+        ctx:same_line(0, 2)
 
-        -- Sync button
-        if not is_free then
-            ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
-        end
-        if ctx:button("Sync##tempo_" .. guid, 52, 0) then
+        local sync_tint = (not is_free) and 0x88FF88FF or 0x888888FF
+        if icons.button_bordered(ctx, "sync_" .. guid, icons.Names.sync, 18, sync_tint) then
             expanded_modulator:set_param(PARAM.PARAM_TEMPO_MODE, 1)
             interacted = true
         end
-        if not is_free then
-            ctx:pop_style_color()
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip("Tempo sync")
         end
 
-        ctx:same_line()
-
-        -- Rate slider/dropdown - fill remaining width
+        -- Column 2: Rate slider/dropdown (stretches)
+        ctx:table_set_column_index(1)
+        local rate_avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
         if tempo_mode < 0.5 then
-            -- Free mode - show Hz slider using normalized 0-1 range for fine control
+            -- Free mode - show Hz slider
             local ok_rate, rate_norm = pcall(function() return expanded_modulator:get_param_normalized(1) end)
             if ok_rate then
-                -- Get slider position BEFORE drawing
                 local slider_x, slider_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-                local avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
                 ctx:set_next_item_width(-1)
 
-                -- Use normalized 0-1 for slider (like FX params), display as space, overlay Hz text
-                -- Default: 1Hz = (1 - 0.01) / 9.99 ≈ 0.099
                 local default_norm = (1.0 - 0.01) / 9.99
                 local changed, new_norm = drawing.slider_double_fine(ctx, "##rate_" .. guid, rate_norm, 0.0, 1.0, " ", nil, 1, default_norm)
 
                 -- Overlay Hz value on slider
                 local rate_hz = 0.01 + rate_norm * 9.99
-                local hz_text = string.format("%.2f Hz", rate_hz)
+                local hz_text = string.format("%.1fHz", rate_hz)
                 local text_w = r.ImGui_CalcTextSize(ctx.ctx, hz_text)
                 local slider_h = r.ImGui_GetFrameHeight(ctx.ctx)
-                local text_x = slider_x + (avail_w - text_w) / 2
+                local text_x = slider_x + (rate_avail_w - text_w) / 2
                 local text_y = slider_y + (slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
                 local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
                 r.ImGui_DrawList_AddText(draw_list, text_x, text_y, 0xFFFFFFFF, hz_text)
@@ -394,184 +592,222 @@ local function draw_rate_controls(ctx, guid, expanded_modulator)
                 end
             end
         end
-    end
 
-    return interacted
-end
-
--- Helper: Draw trigger mode dropdown and advanced button
-local function draw_trigger_and_advanced_button(ctx, guid, expanded_modulator, opts)
-    local interacted = false
-    local ok_trig, trigger_mode_val = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_TRIGGER_MODE) end)
-    local trig_idx = nil
-    
-    if ok_trig then
-        local trigger_modes = {"Free", "Transport", "MIDI", "Audio"}
-        trig_idx = math.floor(trigger_mode_val * 3 + 0.5)
-        ctx:set_next_item_width(80)
-        if ctx:begin_combo("##trigger_mode_" .. guid, trigger_modes[trig_idx + 1] or "Free") then
-            for i, mode_name in ipairs(trigger_modes) do
-                if ctx:selectable(mode_name, i - 1 == trig_idx) then
-                    expanded_modulator:set_param_normalized(PARAM.PARAM_TRIGGER_MODE, (i - 1) / 3)
-                    interacted = true
+        -- Column 3: Trigger dropdown
+        ctx:table_set_column_index(2)
+        if ok_trig then
+            local trigger_modes = {"Free", "Trnsp", "MIDI", "Audio"}
+            r.ImGui_PushStyleVar(ctx.ctx, r.ImGui_StyleVar_FramePadding(), 4, 2)
+            ctx:set_next_item_width(-1)
+            if ctx:begin_combo("##trigger_mode_" .. guid, trigger_modes[trig_idx + 1] or "Free") then
+                for i, mode_name in ipairs(trigger_modes) do
+                    if ctx:selectable(mode_name, i - 1 == trig_idx) then
+                        expanded_modulator:set_param_normalized(PARAM.PARAM_TRIGGER_MODE, (i - 1) / 3)
+                        interacted = true
+                    end
                 end
+                ctx:end_combo()
             end
-            ctx:end_combo()
+            r.ImGui_PopStyleVar(ctx.ctx)
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("Trigger Mode")
+            end
+        end
+
+        -- Column 4: Gear button (opens advanced settings)
+        ctx:table_set_column_index(3)
+        if icons.button_bordered(ctx, "advanced_" .. guid, icons.Names.gear, 18) then
+            open_advanced_popup = true
+            interacted = true
         end
         if ctx:is_item_hovered() then
-            ctx:set_tooltip("Trigger Mode")
+            ctx:set_tooltip("Advanced Settings")
         end
-    end
-    
-    ctx:same_line()
 
-    -- Advanced button with gear icon
-    local constants = require('lib.core.constants')
-    local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
-    local gear_icon = constants.icon_text(emojimgui, constants.Icons.gear)
+        -- Column 5: Monitor dot (only for MIDI/Audio modes) - all the way right
+        ctx:table_set_column_index(4)
+        if ok_trig and trig_idx >= 2 then
+            local ok_triggered, triggered_val = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_TRIGGERED) end)
+            local show_flash = ok_triggered and triggered_val and triggered_val > 0.5
 
-    local advanced_popup_id = "Advanced##adv_popup_" .. guid
-    if opts.icon_font then
-        ctx:push_font(opts.icon_font, 14)
+            local dot_color = show_flash and 0x00FF00FF or 0x444444FF
+            local dot_x, dot_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+            r.ImGui_DrawList_AddCircleFilled(draw_list, dot_x + 8, dot_y + 10, 4, dot_color)
+            r.ImGui_Dummy(ctx.ctx, 16, 0)
+        end
+
+        ctx:end_table()
     end
-    if ctx:button(gear_icon .. "##adv_btn_" .. guid, 24, 0) then
+
+    -- Open popup after table ends (must be at same level as BeginPopup)
+    if open_advanced_popup then
         r.ImGui_OpenPopup(ctx.ctx, advanced_popup_id)
     end
-    if opts.icon_font then
-        ctx:pop_font()
-    end
-    if ctx:is_item_hovered() then
-        ctx:set_tooltip("Advanced Settings")
-    end
-    
-    return interacted, ok_trig, trig_idx, advanced_popup_id
+
+    return interacted, ok_trig, trig_idx
 end
 
 -- Helper: Get existing parameter links for a modulator
 local function get_existing_param_links(fx, expanded_modulator, PARAM)
     local existing_links = {}
     local expected_mod_idx = nil
-    local my_parent = fx:get_parent_container()
-    
-    if my_parent then
-        local children = my_parent:get_container_children()
-        local mod_guid = expanded_modulator:get_guid()
-        for i, child in ipairs(children) do
-            if child:get_guid() == mod_guid then
-                expected_mod_idx = i - 1
-                break
-            end
+    local state = state_module.state
+
+    -- Get FX GUID first (works even if pointer is stale)
+    local ok_fx_guid, fx_guid = pcall(function() return fx:get_guid() end)
+    if not ok_fx_guid or not fx_guid then
+        return existing_links
+    end
+
+    -- Re-find fx by GUID to ensure fresh pointer (handles stale references after FX list changes)
+    if state.track then
+        local fresh_fx = state.track:find_fx_by_guid(fx_guid)
+        if fresh_fx then
+            fx = fresh_fx
         end
     end
-    
-    if expected_mod_idx ~= nil then
-        local ok_params, param_count = pcall(function() return fx:get_num_params() end)
-        if ok_params and param_count then
-            for param_idx = 0, param_count - 1 do
-                local link_info = fx:get_param_link_info(param_idx)
-                if link_info and link_info.effect == expected_mod_idx and link_info.param == PARAM.PARAM_OUTPUT then
-                    local ok_pname, param_name = pcall(function() return fx:get_param_name(param_idx) end)
-                    if ok_pname and param_name then
-                        table.insert(existing_links, {
-                            param_idx = param_idx,
-                            param_name = param_name,
-                            scale = link_info.scale or 1.0,
-                            offset = link_info.offset or 0
-                        })
-                    end
+
+    -- Get modulator GUID and re-find if needed
+    local ok_mod_guid, mod_guid = pcall(function() return expanded_modulator:get_guid() end)
+    if not ok_mod_guid or not mod_guid then
+        return existing_links
+    end
+
+    if state.track then
+        local fresh_mod = state.track:find_fx_by_guid(mod_guid)
+        if fresh_mod then
+            expanded_modulator = fresh_mod
+        end
+    end
+
+    local ok_parent, my_parent = pcall(function() return fx:get_parent_container() end)
+    if not ok_parent or not my_parent then
+        return existing_links
+    end
+
+    local ok_children, children = pcall(function() return my_parent:get_container_children() end)
+    if not ok_children or not children then
+        return existing_links
+    end
+
+    for i, child in ipairs(children) do
+        local ok_child_guid, child_guid = pcall(function() return child:get_guid() end)
+        if ok_child_guid and child_guid == mod_guid then
+            expected_mod_idx = i - 1
+            break
+        end
+    end
+
+    if expected_mod_idx == nil then
+        return existing_links
+    end
+
+    local ok_params, param_count = pcall(function() return fx:get_num_params() end)
+    if ok_params and param_count then
+        for param_idx = 0, param_count - 1 do
+            local link_info = fx:get_param_link_info(param_idx)
+            if link_info and link_info.effect == expected_mod_idx and link_info.param == PARAM.PARAM_OUTPUT then
+                local ok_pname, param_name = pcall(function() return fx:get_param_name(param_idx) end)
+                if ok_pname and param_name then
+                    table.insert(existing_links, {
+                        param_idx = param_idx,
+                        param_name = param_name,
+                        scale = link_info.scale or 1.0,
+                        offset = link_info.offset or 0
+                    })
                 end
             end
         end
     end
-    
+
     return existing_links
 end
 
--- Helper: Draw link parameter dropdown
-local function draw_link_param_dropdown(ctx, guid, fx, expanded_modulator, existing_links, state, PARAM)
-    local interacted = false
-    
-    ctx:same_line()
-    
-    local target_device = fx
-    if target_device then
-        local ok_params, param_count = pcall(function() return target_device:get_num_params() end)
-        if ok_params and param_count and param_count > 0 then
-            local current_param_name = "Link..."
-            ctx:set_next_item_width(-1)
-            if ctx:begin_combo("##link_param_" .. guid, current_param_name) then
-                for param_idx = 0, param_count - 1 do
-                    local ok_pname, param_name = pcall(function() return target_device:get_param_name(param_idx) end)
-                    if ok_pname and param_name then
-                        local is_linked = false
-                        for _, link in ipairs(existing_links) do
-                            if link.param_idx == param_idx then
-                                is_linked = true
-                                break
-                            end
-                        end
-                        if ctx:selectable(param_name .. (is_linked and " ✓" or ""), false) then
-                            local initial_value = target_device:get_param_normalized(param_idx) or 0
-                            local default_depth = 0.5
-                            local success = target_device:create_param_link(
-                                expanded_modulator,
-                                PARAM.PARAM_OUTPUT,
-                                param_idx,
-                                default_depth
-                            )
-                            if success then
-                                local plink_prefix = string.format("param.%d.plink.", param_idx)
-                                local mod_prefix = string.format("param.%d.mod.", param_idx)
-                                target_device:set_named_config_param(mod_prefix .. "baseline", tostring(initial_value))
-                                target_device:set_named_config_param(plink_prefix .. "offset", "0")
-                                
-                                local link_key = guid .. "_" .. param_idx
-                                state.link_baselines = state.link_baselines or {}
-                                state.link_baselines[link_key] = initial_value
-                                state.link_bipolar = state.link_bipolar or {}
-                                state.link_bipolar[link_key] = false
-                                
-                                interacted = true
-                            end
-                        end
-                    end
-                end
-                ctx:end_combo()
-            end
-            if ctx:is_item_hovered() then
-                ctx:set_tooltip("Link to parameter")
-            end
-        end
-    end
-    
-    return interacted
-end
-
 -- Helper: Draw advanced settings popup
-local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, advanced_popup_id, ok_trig, PARAM)
+local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, advanced_popup_id, ok_trig, PARAM, opts)
     local interacted = false
-    
-    r.ImGui_SetNextWindowSize(ctx.ctx, 250, 0, imgui.Cond.FirstUseEver())
+    local state = state_module.state
+
+    r.ImGui_SetNextWindowSize(ctx.ctx, 280, 0, imgui.Cond.FirstUseEver())
     if r.ImGui_BeginPopup(ctx.ctx, advanced_popup_id) then
         ctx:text("Advanced Settings")
         ctx:separator()
-        
+
+        -- Get current track for send management
+        local current_track = opts and opts.track
+
         if ok_trig and trig_idx == 2 then
             -- MIDI trigger mode
             ctx:text("MIDI Source")
+
+            -- Use MIDI_SOURCE param: 0 = Internal, 1 = External
             local midi_src = expanded_modulator:get_param(PARAM.PARAM_MIDI_SOURCE)
-            if midi_src then
-                if ctx:radio_button("This Track##midi_src_" .. guid, midi_src < 0.5) then
-                    expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 0)
-                    interacted = true
+            local is_external = midi_src and midi_src >= 0.5
+
+            if ctx:radio_button("Internal##midi_src_" .. guid, not is_external) then
+                expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 0)
+                -- Remove any existing MIDI send when switching to internal
+                local mod_guid = expanded_modulator:get_guid()
+                if state.modulator_source_track and state.modulator_source_track[mod_guid] and current_track then
+                    local src_guid = state.modulator_source_track[mod_guid]
+                    local src_track = find_track_by_guid(src_guid)
+                    if src_track then
+                        remove_send_to_track(src_track, current_track)
+                    end
+                    state.modulator_source_track[mod_guid] = nil
                 end
-                ctx:same_line()
-                if ctx:radio_button("MIDI Bus##midi_src_" .. guid, midi_src >= 0.5) then
-                    expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 1)
-                    interacted = true
+                interacted = true
+            end
+            ctx:same_line()
+            if ctx:radio_button("External##midi_src_" .. guid, is_external) then
+                expanded_modulator:set_param(PARAM.PARAM_MIDI_SOURCE, 1)
+                interacted = true
+            end
+
+            -- Show track dropdown when external is selected
+            if is_external and current_track then
+                ctx:spacing()
+                ctx:text("Source Track")
+                local available_tracks = get_available_tracks(current_track)
+
+                -- Get currently selected source track
+                state.modulator_source_track = state.modulator_source_track or {}
+                local mod_guid = expanded_modulator:get_guid()
+                local selected_guid = state.modulator_source_track[mod_guid]
+
+                -- Find selected track name for preview
+                local preview_name = "Select track..."
+                for _, t in ipairs(available_tracks) do
+                    if t.guid == selected_guid then
+                        preview_name = t.name
+                        break
+                    end
+                end
+
+                ctx:set_next_item_width(180)
+                if ctx:begin_combo("##midi_track_" .. guid, preview_name) then
+                    for _, t in ipairs(available_tracks) do
+                        local is_selected = (t.guid == selected_guid)
+                        if ctx:selectable(t.name .. "##" .. t.guid, is_selected) then
+                            -- Remove old send if there was one
+                            if selected_guid then
+                                local old_track = find_track_by_guid(selected_guid)
+                                if old_track then
+                                    remove_send_to_track(old_track, current_track)
+                                end
+                            end
+                            -- Create new MIDI send
+                            find_or_create_midi_send(t.track, current_track)
+                            state.modulator_source_track[mod_guid] = t.guid
+                            interacted = true
+                        end
+                    end
+                    ctx:end_combo()
                 end
             end
 
+            ctx:spacing()
             local ok_note, midi_note = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_MIDI_NOTE) end)
             if ok_note then
                 ctx:set_next_item_width(150)
@@ -582,8 +818,112 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
                     interacted = true
                 end
             end
+
+            -- MIDI Gate Mode toggle
+            ctx:spacing()
+            ctx:text("Note Behavior")
+            local ok_gate, gate_mode = pcall(function() return expanded_modulator:get_param(PARAM.PARAM_MIDI_GATE_MODE) end)
+            if ok_gate then
+                local is_gate = gate_mode and gate_mode >= 0.5
+                if ctx:radio_button("Trigger##gate_" .. guid, not is_gate) then
+                    expanded_modulator:set_param(PARAM.PARAM_MIDI_GATE_MODE, 0)
+                    interacted = true
+                end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip("LFO runs continuously after note-on\n(Good for sidechain)")
+                end
+                ctx:same_line()
+                if ctx:radio_button("Gate##gate_" .. guid, is_gate) then
+                    expanded_modulator:set_param(PARAM.PARAM_MIDI_GATE_MODE, 1)
+                    interacted = true
+                end
+                if ctx:is_item_hovered() then
+                    ctx:set_tooltip("LFO stops when note is released\n(Good for envelope-style modulation)")
+                end
+            end
         elseif ok_trig and trig_idx == 3 then
             -- Audio trigger mode
+            ctx:text("Audio Source")
+
+            -- Use AUDIO_SOURCE param: 0 = Internal, 1 = External
+            local ok_src, audio_src = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_AUDIO_SOURCE) end)
+            local is_external = ok_src and audio_src and audio_src >= 0.5
+
+            if ctx:radio_button("Internal##audio_src_" .. guid, not is_external) then
+                expanded_modulator:set_param_normalized(PARAM.PARAM_AUDIO_SOURCE, 0)
+                -- Remove any existing audio send when switching to internal
+                local mod_guid = expanded_modulator:get_guid()
+                if state.modulator_source_track and state.modulator_source_track[mod_guid] and current_track then
+                    local src_guid = state.modulator_source_track[mod_guid]
+                    local src_track = find_track_by_guid(src_guid)
+                    if src_track then
+                        remove_send_to_track(src_track, current_track)
+                    end
+                    state.modulator_source_track[mod_guid] = nil
+                end
+                interacted = true
+            end
+            ctx:same_line()
+            if ctx:radio_button("External##audio_src_" .. guid, is_external) then
+                expanded_modulator:set_param_normalized(PARAM.PARAM_AUDIO_SOURCE, 1)
+                interacted = true
+            end
+
+            -- Show track dropdown when external is selected
+            if is_external and current_track then
+                ctx:spacing()
+                ctx:text("Source Track")
+                local available_tracks = get_available_tracks(current_track)
+
+                -- Get currently selected source track
+                state.modulator_source_track = state.modulator_source_track or {}
+                local mod_guid = expanded_modulator:get_guid()
+                local selected_guid = state.modulator_source_track[mod_guid]
+
+                -- Find selected track name for preview
+                local preview_name = "Select track..."
+                for _, t in ipairs(available_tracks) do
+                    if t.guid == selected_guid then
+                        preview_name = t.name
+                        break
+                    end
+                end
+
+                ctx:set_next_item_width(180)
+                if ctx:begin_combo("##audio_track_" .. guid, preview_name) then
+                    for _, t in ipairs(available_tracks) do
+                        local is_selected = (t.guid == selected_guid)
+                        if ctx:selectable(t.name .. "##" .. t.guid, is_selected) then
+                            -- Remove old send if there was one
+                            if selected_guid then
+                                local old_track = find_track_by_guid(selected_guid)
+                                if old_track then
+                                    remove_send_to_track(old_track, current_track)
+                                end
+                            end
+                            -- Create new audio sidechain send
+                            find_or_create_audio_sidechain_send(t.track, current_track)
+                            state.modulator_source_track[mod_guid] = t.guid
+                            interacted = true
+                        end
+                    end
+                    ctx:end_combo()
+                end
+            end
+
+            ctx:spacing()
+            -- Input gain (0-24 dB)
+            local ok_gain, input_gain = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_AUDIO_INPUT_GAIN) end)
+            if ok_gain then
+                local gain_db = input_gain * 24  -- 0-24 dB range
+                ctx:set_next_item_width(150)
+                local changed, new_gain_db = drawing.slider_double_fine(ctx, "Input Gain##gain_" .. guid, gain_db, 0, 24, "%.1f dB", 0.5, nil, 0)
+                if changed then
+                    expanded_modulator:set_param_normalized(PARAM.PARAM_AUDIO_INPUT_GAIN, new_gain_db / 24)
+                    interacted = true
+                end
+            end
+
             local ok_thresh, audio_thresh = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD) end)
             if ok_thresh then
                 ctx:set_next_item_width(150)
@@ -592,6 +932,20 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
                 if changed then
                     expanded_modulator:set_param_normalized(PARAM.PARAM_AUDIO_THRESHOLD, new_thresh)
                     interacted = true
+                end
+            end
+
+            -- Show input level meter (debug)
+            local ok_level, input_level = pcall(function() return expanded_modulator:get_param_normalized(PARAM.PARAM_INPUT_LEVEL_DEBUG) end)
+            if ok_level and input_level and ok_thresh then
+                ctx:text("Input Level:")
+                ctx:same_line()
+                local level_pct = math.floor(input_level * 100)
+                local level_color = input_level > audio_thresh and 0x44FF44FF or 0x888888FF
+                ctx:text_colored(level_color, string.format("%d%%", level_pct))
+                if input_level < 0.01 then
+                    ctx:same_line()
+                    ctx:text_colored(0xFF8844FF, "(No signal)")
                 end
             end
         end
@@ -625,21 +979,34 @@ local function draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, adva
                 end
             end
         end
-        
+
         if ok_trig and trig_idx == 0 then
             ctx:text_colored(0x888888FF, "Select a trigger mode")
             ctx:text_colored(0x888888FF, "to see more options")
         end
-        
+
         r.ImGui_EndPopup(ctx.ctx)
     end
-    
+
     return interacted
 end
 
 -- Helper: Draw existing parameter links
 local function draw_existing_links(ctx, guid, fx, existing_links, state, expanded_modulator, opts)
     local interacted = false
+
+    -- Re-find fx and modulator by GUID to ensure fresh pointers
+    local ok_fx_guid, fx_guid = pcall(function() return fx:get_guid() end)
+    if ok_fx_guid and fx_guid and state.track then
+        local fresh_fx = state.track:find_fx_by_guid(fx_guid)
+        if fresh_fx then fx = fresh_fx end
+    end
+
+    local ok_mod_guid, mod_guid = pcall(function() return expanded_modulator:get_guid() end)
+    if ok_mod_guid and mod_guid and state.track then
+        local fresh_mod = state.track:find_fx_by_guid(mod_guid)
+        if fresh_mod then expanded_modulator = fresh_mod end
+    end
 
     if #existing_links > 0 then
         state.link_bipolar = state.link_bipolar or {}
@@ -667,12 +1034,15 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                 local plink_prefix = string.format("param.%d.plink.", link.param_idx)
                 local actual_depth = link.scale
 
-                -- Check if link is disabled (scale ~= 0 or we have saved scale)
-                local is_disabled = state.link_disabled[link_key] or false
-                -- Also detect if scale is 0 but we don't have it tracked
-                if math.abs(actual_depth) < 0.001 and state.link_saved_scale[link_key] then
-                    is_disabled = true
+                -- Check if link is disabled (scale ~0 means disabled)
+                -- This detection works even after script restart since we check actual scale value
+                local is_disabled = math.abs(actual_depth) < 0.001
+                -- Sync state with actual scale (handles script restart)
+                if is_disabled then
                     state.link_disabled[link_key] = true
+                elseif state.link_disabled[link_key] then
+                    -- Scale is non-zero but state says disabled - clear stale state
+                    state.link_disabled[link_key] = false
                 end
 
                 ctx:table_next_row()
@@ -696,11 +1066,14 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
 
                 -- Column 2: Uni/Bi buttons
                 ctx:table_set_column_index(1)
+                if is_disabled then
+                    r.ImGui_BeginDisabled(ctx.ctx)
+                end
                 if not is_bipolar and not is_disabled then
                     ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                 end
                 if ctx:button("U##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
-                    if is_bipolar then
+                    if is_bipolar and not is_disabled then
                         state.link_bipolar[link_key] = false
                         fx:set_named_config_param(plink_prefix .. "offset", "0")
                         interacted = true
@@ -719,7 +1092,7 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                     ctx:push_style_color(imgui.Col.Button(), 0x5588AAFF)
                 end
                 if ctx:button("B##bi_" .. link.param_idx .. "_" .. guid, 20, 0) then
-                    if not is_bipolar then
+                    if not is_bipolar and not is_disabled then
                         state.link_bipolar[link_key] = true
                         fx:set_named_config_param(plink_prefix .. "offset", "-0.5")
                         interacted = true
@@ -731,6 +1104,9 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                 if ctx:is_item_hovered() then
                     ctx:set_tooltip("Bipolar")
                 end
+                if is_disabled then
+                    r.ImGui_EndDisabled(ctx.ctx)
+                end
 
                 -- Column 3: Depth slider (use 0-1 internal range, scale to -1 to 1)
                 ctx:table_set_column_index(2)
@@ -739,7 +1115,7 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                 local depth_avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
                 ctx:set_next_item_width(-1)
 
-                local depth_value = is_disabled and (state.link_saved_scale[link_key] or 0) or actual_depth
+                local depth_value = is_disabled and (state.link_saved_scale[link_key] or 0.5) or actual_depth
                 -- Convert -1 to 1 range to 0-1 for slider (better granularity)
                 local depth_norm = (depth_value + 1) / 2
 
@@ -757,7 +1133,8 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                 local depth_text_x = depth_slider_x + (depth_avail_w - depth_text_w) / 2
                 local depth_text_y = depth_slider_y + (depth_slider_h - r.ImGui_GetTextLineHeight(ctx.ctx)) / 2
                 local depth_draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-                r.ImGui_DrawList_AddText(depth_draw_list, depth_text_x, depth_text_y, 0xFFFFFFFF, depth_text)
+                local depth_text_color = is_disabled and 0x666666FF or 0xFFFFFFFF
+                r.ImGui_DrawList_AddText(depth_draw_list, depth_text_x, depth_text_y, depth_text_color, depth_text)
 
                 if changed and not is_disabled then
                     local new_depth = new_depth_norm * 2 - 1  -- Convert back to -1 to 1
@@ -792,6 +1169,8 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                         fx:set_named_config_param(plink_prefix .. "scale", "0")
                         state.link_disabled[link_key] = true
                     end
+                    -- Persist link scales to project
+                    state_module.save_link_scales()
                     interacted = true
                 end
                 if is_disabled then
@@ -820,11 +1199,22 @@ local function draw_existing_links(ctx, guid, fx, existing_links, state, expande
                             range_mode = config.get('bake_default_range_mode'),
                             disable_link = config.get('bake_disable_link_after')
                         }
+                        -- Save current scale before bake (in case we're disabling)
+                        local current_scale = link.scale
                         local ok, result, msg = pcall(function()
                             return modulator_bake.bake_to_automation(state.track, expanded_modulator, fx, link.param_idx, bake_options)
                         end)
                         if ok and result then
                             r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
+                            -- If disable_link was set, update state to track disabled link
+                            if bake_options.disable_link then
+                                local link_key = guid .. "_" .. link.param_idx
+                                state.link_saved_scale = state.link_saved_scale or {}
+                                state.link_disabled = state.link_disabled or {}
+                                state.link_saved_scale[link_key] = current_scale
+                                state.link_disabled[link_key] = true
+                                state_module.save_link_scales()
+                            end
                         elseif not ok then
                             r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
                         else
@@ -893,6 +1283,7 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                 local ok_guid, m_guid = pcall(function() return mod:get_guid() end)
                 if ok_guid and m_guid == mod_guid then
                     state.expanded_mod_slot[state_guid] = idx - 1  -- 0-based slot index
+                    state_module.save_expanded_mod_slots()
                     break
                 end
             end
@@ -925,6 +1316,8 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                     -- Select this mod and expand sidebar
                     state.expanded_mod_slot[state_guid] = slot_idx
                     state.mod_sidebar_collapsed[state_guid] = false
+                    state_module.save_expanded_mod_slots()
+                    state_module.save_mod_sidebar_collapsed()
                     interacted = true
                 end
             end
@@ -965,105 +1358,35 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
                 if ok and param_count and param_count > 0 then
                     ctx:separator()
                     ctx:spacing()
-                    
+
                     local editor_key = "curve_" .. guid .. "_" .. expanded_slot_idx
-                    
-                    -- Preset and UI icon row
+                    local advanced_popup_id = "Advanced##adv_popup_" .. guid
+
+                    -- Preset row (Preset | Save | Curve)
                     if draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor_key, cfg, state, opts) then
                         interacted = true
                     end
-                    
+
                     ctx:spacing()
 
                     -- Curve Editor section
                     if draw_curve_editor_section(ctx, expanded_modulator, editor_key, state, state.track) then
                         interacted = true
                     end
-                    
+
                     ctx:spacing()
-                    
-                    -- Rate controls: Free/Sync, Rate, Phase
-                    if draw_rate_controls(ctx, guid, expanded_modulator) then
-                        interacted = true
-                    end
-                    
-                    ctx:spacing()
-                    
-                    -- Trigger and Advanced controls
-                    local trig_interacted, ok_trig, trig_idx, advanced_popup_id = draw_trigger_and_advanced_button(ctx, guid, expanded_modulator, opts)
-                    if trig_interacted then
-                        interacted = true
-                    end
-                    
-                    -- Get existing parameter links
-                    local existing_links = get_existing_param_links(fx, expanded_modulator, PARAM)
-                    
-                    -- Link Parameter dropdown
-                    if draw_link_param_dropdown(ctx, guid, fx, expanded_modulator, existing_links, state, PARAM) then
-                        interacted = true
-                    end
-                    
-                    -- Advanced popup modal
-                    if draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, advanced_popup_id, ok_trig, PARAM) then
-                        interacted = true
-                    end
-                    
-                    -- Show existing parameter links
-                    ctx:spacing()
-                    if draw_existing_links(ctx, guid, fx, existing_links, state, expanded_modulator, opts) then
+
+                    -- Combined row: Rate + Trigger + Gear controls in table layout
+                    local row_interacted, ok_trig, trig_idx = draw_rate_and_trigger_row(ctx, guid, expanded_modulator, opts, advanced_popup_id)
+                    if row_interacted then
                         interacted = true
                     end
 
-                    -- Bake All button (opens modal or uses default range)
-                    if #existing_links > 0 then
-                        ctx:spacing()
-                        ctx:separator()
-                        ctx:spacing()
-
-                        local can_bake = state.track ~= nil
-                        if not can_bake then
-                            r.ImGui_BeginDisabled(ctx.ctx)
-                        end
-                        if ctx:button("Bake All##bake_all_" .. guid, -1, 0) then
-                            if can_bake then
-                                -- Check config: show picker or use default?
-                                if config.get('bake_show_range_picker') then
-                                    -- Open bake modal for all links
-                                    state.bake_modal = state.bake_modal or {}
-                                    state.bake_modal[guid] = {
-                                        open = true,
-                                        link = nil,  -- nil = all links
-                                        links = existing_links,
-                                        modulator = expanded_modulator,
-                                        fx = fx
-                                    }
-                                else
-                                    -- Use default range directly
-                                    local bake_options = {
-                                        range_mode = config.get('bake_default_range_mode'),
-                                        disable_link = config.get('bake_disable_link_after')
-                                    }
-                                    local ok, result, msg = pcall(function()
-                                        return modulator_bake.bake_all_links(state.track, expanded_modulator, fx, existing_links, bake_options)
-                                    end)
-                                    if ok and result then
-                                        r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
-                                    elseif not ok then
-                                        r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
-                                    else
-                                        r.ShowConsoleMsg("SideFX: " .. tostring(msg or "No parameters to bake") .. "\n")
-                                    end
-                                end
-                                interacted = true
-                            end
-                        end
-                        if not can_bake then
-                            r.ImGui_EndDisabled(ctx.ctx)
-                        end
-                        if ctx:is_item_hovered() then
-                            ctx:set_tooltip("Bake all linked parameters to automation")
-                        end
+                    -- Advanced popup modal (opened by gear button in header)
+                    if draw_advanced_popup(ctx, guid, expanded_modulator, trig_idx, advanced_popup_id, ok_trig, PARAM, opts) then
+                        interacted = true
                     end
+                    -- Note: Parameter links are now shown in the Mod Matrix (toolbar button)
                 end
             end
         end
@@ -1177,102 +1500,121 @@ function M.draw(ctx, fx, container, guid, state_guid, cfg, opts)
         end
     end
 
-    -- Draw bake modal popup
+    -- Draw bake modal popup (only for this device's modal)
     state.bake_modal = state.bake_modal or {}
-    for modal_guid, modal_state in pairs(state.bake_modal) do
-        if modal_state.open then
-            local popup_id = "Bake to Automation##bake_modal_" .. modal_guid
-            if not modal_state.opened_frame then
-                r.ImGui_OpenPopup(ctx.ctx, popup_id)
-                modal_state.opened_frame = true
-            end
+    local modal_state = state.bake_modal[guid]
+    if modal_state and modal_state.open then
+        local popup_id = "Bake to Automation##bake_modal_" .. guid
+        if not modal_state.opened_frame then
+            r.ImGui_OpenPopup(ctx.ctx, popup_id)
+            modal_state.opened_frame = true
+        end
 
-            local popup_flags = r.ImGui_WindowFlags_AlwaysAutoResize()
-            local visible = r.ImGui_BeginPopup(ctx.ctx, popup_id, popup_flags)
-            if visible then
-                local is_all_links = modal_state.link == nil
-                local title = is_all_links and "Bake All Parameters" or ("Bake: " .. (modal_state.link and modal_state.link.param_name or ""))
-                ctx:text(title)
-                ctx:separator()
-                ctx:spacing()
+        local popup_flags = r.ImGui_WindowFlags_AlwaysAutoResize()
+        local visible = r.ImGui_BeginPopup(ctx.ctx, popup_id, popup_flags)
+        if visible then
+            local is_all_links = modal_state.link == nil
+            local title = is_all_links and "Bake All Parameters" or ("Bake: " .. (modal_state.link and modal_state.link.param_name or ""))
+            ctx:text(title)
+            ctx:separator()
+            ctx:spacing()
 
-                ctx:text("Select range:")
-                ctx:spacing()
+            ctx:text("Select range:")
+            ctx:spacing()
 
-                -- Range mode buttons (one per line for clarity)
-                local default_range = config.get('bake_default_range_mode')
-                for mode_val = 1, 4 do
-                    local mode_label = modulator_bake.RANGE_MODE_LABELS[mode_val]
-                    if mode_label then
-                        local is_default = mode_val == default_range
-                        local btn_label = mode_label .. (is_default and " *" or "")
+            -- Range mode buttons (one per line for clarity)
+            local default_range = config.get('bake_default_range_mode')
+            for mode_val = 1, 4 do
+                local mode_label = modulator_bake.RANGE_MODE_LABELS[mode_val]
+                if mode_label then
+                    local is_default = mode_val == default_range
+                    local btn_label = mode_label .. (is_default and " *" or "")
 
-                        if ctx:button(btn_label .. "##range_" .. mode_val, -1, 0) then
-                            -- Perform the bake
-                            local bake_options = {
-                                range_mode = mode_val,
-                                disable_link = config.get('bake_disable_link_after')
-                            }
+                    if ctx:button(btn_label .. "##range_" .. mode_val, -1, 0) then
+                        -- Perform the bake
+                        local bake_options = {
+                            range_mode = mode_val,
+                            disable_link = config.get('bake_disable_link_after')
+                        }
 
-                            local ok, result, msg
-                            if is_all_links then
-                                ok, result, msg = pcall(function()
-                                    return modulator_bake.bake_all_links(
-                                        state.track,
-                                        modal_state.modulator,
-                                        modal_state.fx,
-                                        modal_state.links,
-                                        bake_options
-                                    )
-                                end)
-                            else
-                                ok, result, msg = pcall(function()
-                                    return modulator_bake.bake_to_automation(
-                                        state.track,
-                                        modal_state.modulator,
-                                        modal_state.fx,
-                                        modal_state.link.param_idx,
-                                        bake_options
-                                    )
-                                end)
-                            end
-
-                            if ok and result then
-                                r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
-                            elseif not ok then
-                                r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
-                            else
-                                r.ShowConsoleMsg("SideFX: " .. tostring(msg or "Bake failed") .. "\n")
-                            end
-
-                            modal_state.open = false
-                            modal_state.opened_frame = nil
-                            r.ImGui_CloseCurrentPopup(ctx.ctx)
-                            interacted = true
+                        local ok, result, msg
+                        if is_all_links then
+                            ok, result, msg = pcall(function()
+                                return modulator_bake.bake_all_links(
+                                    state.track,
+                                    modal_state.modulator,
+                                    modal_state.fx,
+                                    modal_state.links,
+                                    bake_options
+                                )
+                            end)
+                        else
+                            ok, result, msg = pcall(function()
+                                return modulator_bake.bake_to_automation(
+                                    state.track,
+                                    modal_state.modulator,
+                                    modal_state.fx,
+                                    modal_state.link.param_idx,
+                                    bake_options
+                                )
+                            end)
                         end
+
+                        if ok and result then
+                            r.ShowConsoleMsg("SideFX: " .. (msg or "Baked") .. "\n")
+                            -- If disable_link was set, update state
+                            if bake_options.disable_link then
+                                state.link_saved_scale = state.link_saved_scale or {}
+                                state.link_disabled = state.link_disabled or {}
+                                if is_all_links then
+                                    for _, lnk in ipairs(modal_state.links) do
+                                        local link_key = guid .. "_" .. lnk.param_idx
+                                        state.link_saved_scale[link_key] = lnk.scale
+                                        state.link_disabled[link_key] = true
+                                    end
+                                else
+                                    local link_key = guid .. "_" .. modal_state.link.param_idx
+                                    state.link_saved_scale[link_key] = modal_state.link.scale
+                                    state.link_disabled[link_key] = true
+                                end
+                                state_module.save_link_scales()
+                            end
+                        elseif not ok then
+                            r.ShowConsoleMsg("SideFX Bake Error: " .. tostring(result) .. "\n")
+                        else
+                            r.ShowConsoleMsg("SideFX: " .. tostring(msg or "Bake failed") .. "\n")
+                        end
+
+                        modal_state.open = false
+                        modal_state.opened_frame = nil
+                        r.ImGui_CloseCurrentPopup(ctx.ctx)
+                        interacted = true
                     end
                 end
+            end
 
-                ctx:spacing()
-                ctx:separator()
-                ctx:spacing()
+            ctx:spacing()
+            ctx:separator()
+            ctx:spacing()
 
-                if ctx:button("Cancel##cancel_bake", -1, 0) then
-                    modal_state.open = false
-                    modal_state.opened_frame = nil
-                    r.ImGui_CloseCurrentPopup(ctx.ctx)
-                end
-
-                r.ImGui_EndPopup(ctx.ctx)
-            else
-                -- Popup was closed externally
+            if ctx:button("Cancel##cancel_bake", -1, 0) then
                 modal_state.open = false
                 modal_state.opened_frame = nil
+                r.ImGui_CloseCurrentPopup(ctx.ctx)
             end
+
+            r.ImGui_EndPopup(ctx.ctx)
+        else
+            -- Popup was closed externally
+            modal_state.open = false
+            modal_state.opened_frame = nil
         end
     end
 
     return interacted
 end
+
+-- Export cleanup function for use when deleting devices
+M.cleanup_device_sends = cleanup_device_sends
 
 return M

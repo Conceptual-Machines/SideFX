@@ -97,7 +97,7 @@ local function draw_pan_control(ctx, utility, pan_val)
     ctx:spacing()
 
     local avail_w, _ = ctx:get_content_region_avail()
-    local pan_w = math.min(avail_w - 4, 80)
+    local pan_w = math.min(avail_w - 4, 40)
     local pan_offset = math.max(0, (avail_w - pan_w) / 2)
     ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + pan_offset)
     local pan_changed, new_pan = widgets.draw_pan_slider(ctx, "##utility_pan", pan_pct, pan_w)
@@ -118,22 +118,26 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local state_module = require('lib.core.state')
     local interacted = false
 
-    gain_val = gain_val or 0.5
-    local gain_norm = gain_val
-    local gain_db = (gain_val - 0.5) * 48
+    -- Range: -24 to +12 dB (36dB total), matches rack mixer
+    local DB_MIN, DB_MAX = -24, 12
+    local DB_RANGE = DB_MAX - DB_MIN  -- 36
+
+    -- gain_val is already the dB value (from get_param, not normalized)
+    local gain_db = gain_val or 0
+    local gain_norm = (gain_db - DB_MIN) / DB_RANGE  -- for visual position
 
     ctx:spacing()
 
     -- Fader with meter and scale
-    local fader_w = 32
-    local meter_w = 12
-    local scale_w = 20
+    local fader_w = 18
+    local meter_w = 10
+    local scale_w = 16
 
     local _, remaining_h = ctx:get_content_region_avail()
-    -- Leave room for phase controls below (80px for label + buttons + spacing) if enabled
+    -- Leave room for dB label (22px) + phase controls below (50px) if enabled
     local config = require('lib.core.config')
-    local phase_reserve = config.get('show_phase_controls') and 80 or 0
-    local fader_h = remaining_h - phase_reserve
+    local phase_reserve = config.get('show_phase_controls') and 50 or 0
+    local fader_h = remaining_h - 22 - phase_reserve  -- 22px for dB label at bottom (matches rack)
     fader_h = math.max(50, fader_h)
 
     local avail_w, _ = ctx:get_content_region_avail()
@@ -149,15 +153,16 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local fader_x = screen_x + scale_w + 2
     local meter_x = fader_x + fader_w + 2
 
-    -- dB scale
-    local db_marks = {24, 12, 0, -12, -24}
+    -- dB scale - tick marks at key points, labels at 12, 0, -12 (matches rack)
+    local db_marks = {12, 0, -12, -24}
     for _, db in ipairs(db_marks) do
-        local mark_norm = (db + 24) / 48
+        local mark_norm = (db - DB_MIN) / DB_RANGE
         local mark_y = screen_y + fader_h - (fader_h * mark_norm)
-        r.ImGui_DrawList_AddLine(draw_list, scale_x + scale_w - 6, mark_y, scale_x + scale_w, mark_y, 0x666666FF, 1)
-        if db == 0 or db == -12 or db == 12 or db == 24 then
+        r.ImGui_DrawList_AddLine(draw_list, scale_x + scale_w - 4, mark_y, scale_x + scale_w, mark_y, 0x666666FF, 1)
+        -- Label 12, 0, -12
+        if db == 12 or db == 0 or db == -12 then
             local label = db == 0 and "0" or tostring(db)
-            r.ImGui_DrawList_AddText(draw_list, scale_x, mark_y - 5, 0x888888FF, label)
+            r.ImGui_DrawList_AddText(draw_list, scale_x, mark_y - 5, 0x666666FF, label)
         end
     end
 
@@ -172,45 +177,83 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     -- Fader border
     r.ImGui_DrawList_AddRect(draw_list, fader_x, screen_y, fader_x + fader_w, screen_y + fader_h, 0x555555FF, 3)
     -- 0dB line
-    local zero_db_norm = 24 / 48
-    local zero_y = screen_y + fader_h - (fader_h * zero_db_norm)
+    local zero_norm = (0 - DB_MIN) / DB_RANGE  -- ~0.889
+    local zero_y = screen_y + fader_h - (fader_h * zero_norm)
     r.ImGui_DrawList_AddLine(draw_list, fader_x, zero_y, fader_x + fader_w, zero_y, 0xFFFFFF44, 1)
 
-    -- Stereo meters
+    -- Stereo meters (mono meter from utility output level)
     local meter_l_x = meter_x
     local meter_r_x = meter_x + meter_w / 2 + 1
     local half_meter_w = meter_w / 2 - 1
     r.ImGui_DrawList_AddRectFilled(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
     r.ImGui_DrawList_AddRectFilled(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x111111FF, 1)
 
-    -- Get track for meters
-    local sidefx_state = state_module.state
-    if sidefx_state.track and sidefx_state.track.pointer then
-        local peak_l = r.Track_GetPeakInfo(sidefx_state.track.pointer, 0)
-        local peak_r = r.Track_GetPeakInfo(sidefx_state.track.pointer, 1)
-        local function draw_meter_bar(x, w, peak)
-            if peak > 0 then
-                local peak_db = 20 * math.log(peak, 10)
-                peak_db = math.max(-60, math.min(24, peak_db))
-                local peak_norm = (peak_db + 60) / 84
-                local meter_fill_h = fader_h * peak_norm
-                if meter_fill_h > 1 then
-                    local meter_top = screen_y + fader_h - meter_fill_h
-                    local meter_color
-                    if peak_db > 0 then meter_color = 0xFF4444FF
-                    elseif peak_db > -6 then meter_color = 0xFFAA44FF
-                    elseif peak_db > -18 then meter_color = 0x44FF44FF
-                    else meter_color = 0x44AA44FF end
-                    r.ImGui_DrawList_AddRectFilled(draw_list, x, meter_top, x + w, screen_y + fader_h - 1, meter_color, 0)
-                end
+    -- Get output levels from utility JSFX via gmem (more reliable than param reading)
+    -- gmem[2] = output level L, gmem[3] = output level R (written by SideFX_Utility)
+    r.gmem_attach("SideFX")  -- attach to SideFX gmem namespace
+    local level_l = r.gmem_read(2) or 0
+    local level_r = r.gmem_read(3) or 0
+
+
+    local function draw_meter_bar(x, w, peak)
+        if peak > 0.001 then
+            local peak_db = 20 * math.log(peak, 10)
+            -- Clamp to fader range
+            peak_db = math.max(DB_MIN, math.min(DB_MAX, peak_db))
+            local peak_norm = (peak_db - DB_MIN) / DB_RANGE
+            local meter_fill_h = fader_h * peak_norm
+            if meter_fill_h > 1 then
+                local meter_top = screen_y + fader_h - meter_fill_h
+                local meter_color
+                if peak_db > 0 then meter_color = 0xFF4444FF
+                elseif peak_db > -6 then meter_color = 0xFFAA44FF
+                elseif peak_db > -12 then meter_color = 0x44FF44FF
+                else meter_color = 0x44AA44FF end
+                r.ImGui_DrawList_AddRectFilled(draw_list, x, meter_top, x + w, screen_y + fader_h - 1, meter_color, 0)
             end
         end
-        draw_meter_bar(meter_l_x + 1, half_meter_w - 1, peak_l)
-        draw_meter_bar(meter_r_x + 1, half_meter_w - 1, peak_r)
     end
+    draw_meter_bar(meter_l_x + 1, half_meter_w - 1, level_l)
+    draw_meter_bar(meter_r_x + 1, half_meter_w - 1, level_r)
 
     r.ImGui_DrawList_AddRect(draw_list, meter_l_x, screen_y, meter_l_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
     r.ImGui_DrawList_AddRect(draw_list, meter_r_x, screen_y, meter_r_x + half_meter_w, screen_y + fader_h, 0x444444FF, 1)
+
+    -- Invisible button for meter hover detection
+    r.ImGui_SetCursorScreenPos(ctx.ctx, meter_l_x, screen_y)
+    ctx:invisible_button("##meter_hover", meter_w, fader_h)
+    if r.ImGui_IsItemHovered(ctx.ctx) then
+        -- Calculate peak dB values
+        local peak_db_l = level_l > 0.001 and (20 * math.log(level_l, 10)) or -60
+        local peak_db_r = level_r > 0.001 and (20 * math.log(level_r, 10)) or -60
+        peak_db_l = math.max(DB_MIN, math.min(DB_MAX, peak_db_l))
+        peak_db_r = math.max(DB_MIN, math.min(DB_MAX, peak_db_r))
+
+        -- Smooth the display values (store in state)
+        local state = state_module.state
+        state.meter_display_l = state.meter_display_l or peak_db_l
+        state.meter_display_r = state.meter_display_r or peak_db_r
+        -- Fast attack, slow release for readable display
+        if peak_db_l > state.meter_display_l then
+            state.meter_display_l = peak_db_l
+        else
+            state.meter_display_l = state.meter_display_l * 0.92 + peak_db_l * 0.08
+        end
+        if peak_db_r > state.meter_display_r then
+            state.meter_display_r = peak_db_r
+        else
+            state.meter_display_r = state.meter_display_r * 0.92 + peak_db_r * 0.08
+        end
+
+        -- Format display strings (compact)
+        local l_val = state.meter_display_l
+        local r_val = state.meter_display_r
+        local l_str = l_val <= DB_MIN and "-∞" or string.format("%.0f", l_val)
+        local r_str = r_val <= DB_MIN and "-∞" or string.format("%.0f", r_val)
+
+        -- Show as tooltip (font size is controlled by ImGui style, not PushFont)
+        ctx:set_tooltip(string.format("L %s | R %s dB", l_str, r_str))
+    end
 
     -- Invisible slider for fader interaction
     -- Features: Shift+drag for fine control, Ctrl/Cmd+click to reset to 0dB, double-click for text input
@@ -220,13 +263,31 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     ctx:push_style_color(imgui.Col.FrameBgActive(), 0x00000000)
     ctx:push_style_color(imgui.Col.SliderGrab(), 0xAAAAAAFF)
     ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
-    local gain_changed, new_gain_db = drawing.v_slider_double_fine(ctx, "##gain_fader_v", fader_w, fader_h, gain_db, -24, 24, "", nil, nil, 0)
+    local gain_changed, new_gain_db = drawing.v_slider_double_fine(ctx, "##gain_fader_v", fader_w, fader_h, gain_db, DB_MIN, DB_MAX, "", nil, nil, 0)
     if gain_changed then
-        local new_norm = (new_gain_db + 24) / 48
-        pcall(function() utility:set_param_normalized(0, new_norm) end)
+        pcall(function() utility:set_param(0, new_gain_db) end)  -- set actual dB value
         interacted = true
     end
     ctx:pop_style_color(5)
+
+    -- Show gain value prominently on hover
+    local is_fader_hovered = r.ImGui_IsItemHovered(ctx.ctx)
+    if is_fader_hovered then
+        -- Draw floating value box next to fader
+        local hover_label = string.format("%.1f dB", gain_db)
+        local hover_text_w = r.ImGui_CalcTextSize(ctx.ctx, hover_label)
+        local hover_box_w = hover_text_w + 8
+        local hover_box_h = 18
+        local hover_x = fader_x - hover_box_w - 4
+        local mouse_x, mouse_y = r.ImGui_GetMousePos(ctx.ctx)
+        local hover_y = mouse_y - hover_box_h / 2
+        -- Clamp to fader bounds
+        hover_y = math.max(screen_y, math.min(screen_y + fader_h - hover_box_h, hover_y))
+
+        r.ImGui_DrawList_AddRectFilled(draw_list, hover_x, hover_y, hover_x + hover_box_w, hover_y + hover_box_h, 0x222222EE, 3)
+        r.ImGui_DrawList_AddRect(draw_list, hover_x, hover_y, hover_x + hover_box_w, hover_y + hover_box_h, 0x888888FF, 3)
+        r.ImGui_DrawList_AddText(draw_list, hover_x + 4, hover_y + 2, 0xFFFFFFFF, hover_label)
+    end
 
     -- dB label below fader
     local label_h = 16
@@ -250,8 +311,8 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
         ctx:set_keyboard_focus_here()
         local input_changed, input_val = ctx:input_double("##gain_input", gain_db, 0, 0, "%.1f")
         if input_changed then
-            local new_norm = (math.max(-24, math.min(24, input_val)) + 24) / 48
-            pcall(function() utility:set_param_normalized(0, new_norm) end)
+            local clamped_db = math.max(DB_MIN, math.min(DB_MAX, input_val))
+            pcall(function() utility:set_param(0, clamped_db) end)  -- set actual dB value
             interacted = true
         end
         if ctx:is_key_pressed(imgui.Key.Enter()) or ctx:is_key_pressed(imgui.Key.Escape()) then
@@ -265,58 +326,61 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     return interacted
 end
 
---- Draw Phase invert toggle buttons (L/R)
+--- Draw Phase invert toggle buttons (L/R) - compact Ø icons
 local function draw_phase_controls(ctx, utility, phase_l, phase_r, center_item_fn)
     local r = reaper
     local interacted = false
 
     ctx:spacing()
+    ctx:spacing()
 
-    local phase_text = "Phase"
-    local phase_text_w = r.ImGui_CalcTextSize(ctx.ctx, phase_text)
-    center_item_fn(phase_text_w)
-    ctx:push_style_color(r.ImGui_Col_Text(), 0xCC8888FF)
-    ctx:text(phase_text)
-    ctx:pop_style_color()
-
-    local phase_btn_w = 28
+    local phase_btn_size = 18
     local phase_gap = 4
-    local phase_total_w = phase_btn_w * 2 + phase_gap
+    local phase_total_w = phase_btn_size * 2 + phase_gap
     center_item_fn(phase_total_w)
 
-    -- Phase L button
+    -- Phase L button - always Ø, color indicates state
     local phase_l_on = phase_l > 0.5
     if phase_l_on then
-        ctx:push_style_color(r.ImGui_Col_Button(), 0xCC6666FF)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0xCC4444FF)  -- Red when inverted
+        ctx:push_style_color(r.ImGui_Col_Text(), 0xFFFFFFFF)
     else
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x555555FF)  -- Grey when normal
+        ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAAAAFF)
     end
-    if ctx:button(phase_l_on and "ØL" or "L", phase_btn_w, 20) then
+    if ctx:button("Ø##phase_l", phase_btn_size, phase_btn_size) then
         pcall(function() utility:set_param_normalized(2, phase_l_on and 0 or 1) end)
         interacted = true
     end
-    ctx:pop_style_color()
+    ctx:pop_style_color(2)
     if r.ImGui_IsItemHovered(ctx.ctx) then
         ctx:set_tooltip(phase_l_on and "Left Phase: Inverted" or "Left Phase: Normal")
     end
 
     ctx:same_line(0, phase_gap)
 
-    -- Phase R button
+    -- Phase R button - always Ø, color indicates state
     local phase_r_on = phase_r > 0.5
     if phase_r_on then
-        ctx:push_style_color(r.ImGui_Col_Button(), 0xCC6666FF)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0xCC4444FF)  -- Red when inverted
+        ctx:push_style_color(r.ImGui_Col_Text(), 0xFFFFFFFF)
     else
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x444444FF)
+        ctx:push_style_color(r.ImGui_Col_Button(), 0x555555FF)  -- Grey when normal
+        ctx:push_style_color(r.ImGui_Col_Text(), 0xAAAAAAFF)
     end
-    if ctx:button(phase_r_on and "ØR" or "R", phase_btn_w, 20) then
+    if ctx:button("Ø##phase_r", phase_btn_size, phase_btn_size) then
         pcall(function() utility:set_param_normalized(3, phase_r_on and 0 or 1) end)
         interacted = true
     end
-    ctx:pop_style_color()
+    ctx:pop_style_color(2)
     if r.ImGui_IsItemHovered(ctx.ctx) then
         ctx:set_tooltip(phase_r_on and "Right Phase: Inverted" or "Right Phase: Normal")
     end
+
+    -- Bottom padding
+    ctx:spacing()
+    ctx:spacing()
+    ctx:spacing()
 
     return interacted
 end
@@ -348,7 +412,7 @@ function M.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_col
         -- Gain/Pan/Phase controls from utility FX
         local utility = opts.utility
         if utility then
-            local ok_g, gain_val = pcall(function() return utility:get_param_normalized(0) end)
+            local ok_g, gain_val = pcall(function() return utility:get_param(0) end)  -- actual dB value
             local ok_p, pan_val = pcall(function() return utility:get_param_normalized(1) end)
 
             -- Pan slider first (above fader)
@@ -376,11 +440,11 @@ function M.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_col
                     end
                 end
             end
-        else
-            -- Missing utility warning
+        elseif not opts.is_bare then
+            -- Missing utility warning (skip for bare devices - they don't need utilities)
             ctx:spacing()
             ctx:spacing()
-            
+
             -- Warning icon and text
             local warning_text = "⚠️"
             local warning_text_w = r.ImGui_CalcTextSize(ctx.ctx, warning_text)
@@ -388,26 +452,26 @@ function M.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_col
             ctx:push_style_color(r.ImGui_Col_Text(), 0xFFAA00FF)  -- Orange/yellow
             ctx:text(warning_text)
             ctx:pop_style_color()
-            
+
             ctx:spacing()
-            
+
             local label = "Gain Utils"
             local label_w = r.ImGui_CalcTextSize(ctx.ctx, label)
             center_item(label_w)
             ctx:push_style_color(r.ImGui_Col_Text(), 0xFFAA00FF)
             ctx:text(label)
             ctx:pop_style_color()
-            
+
             local label2 = "Missing"
             local label2_w = r.ImGui_CalcTextSize(ctx.ctx, label2)
             center_item(label2_w)
             ctx:push_style_color(r.ImGui_Col_Text(), 0xFFAA00FF)
             ctx:text(label2)
             ctx:pop_style_color()
-            
+
             ctx:spacing()
             ctx:spacing()
-            
+
             -- Restore button
             local btn_w = 70
             center_item(btn_w)
@@ -425,6 +489,7 @@ function M.draw(ctx, fx, container, state_guid, sidebar_actual_w, is_sidebar_col
                 ctx:set_tooltip("Restore missing SideFX_Utility\nfor gain, pan, and phase controls")
             end
         end
+        -- For bare devices with no utility: empty space (no warning, no controls)
     end
 
     return interacted

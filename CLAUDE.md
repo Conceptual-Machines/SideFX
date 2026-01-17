@@ -37,11 +37,10 @@ luacheck . --config .luacheckrc
 
 ### Entry Point & Dependencies
 - **SideFX.lua**: Main entry point, sets up paths and loads dependencies
-- **Dependency Loading Order** (CRITICAL):
-  1. EmojImGui loaded FIRST with ReaImGui's builtin path
-  2. Clear `package.loaded['imgui']` cache
-  3. Load ReaWrap paths (shadows ReaImGui's imgui with ReaWrap's wrapper)
-  4. This prevents imgui namespace conflicts between ReaWrap and ReaImGui
+- **Dependency Loading Order**:
+  1. Load ReaWrap paths (provides OOP wrappers and imgui wrapper)
+  2. Clear `package.loaded['imgui']` cache if needed
+  3. This ensures ReaWrap's imgui wrapper is used consistently
 
 ### External Dependencies
 - **ReaWrap** (`/Users/Luca_Romagnoli/Code/personal/ReaScript/ReaWrap`): OOP wrapper over REAPER API
@@ -49,7 +48,7 @@ luacheck . --config .luacheckrc
   - Provides: `Project`, `Track`, `TrackFX`, `imgui.Window`, etc.
   - Use ReaWrap methods (e.g., `fx:get_name()`) instead of raw REAPER API calls
 - **ReaImGui**: ImGui bindings for REAPER UI
-- **EmojImGui**: Icon/emoji support for UI elements
+- **Icons**: PNG icons in `assets/icons/` loaded via `lib/ui/common/icons.lua`
 
 ### Container Hierarchy System
 SideFX uses REAPER's Container FX with naming conventions to create nested structures:

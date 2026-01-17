@@ -296,7 +296,7 @@ local function apply_metadata(metadata)
             local mod_fx = nil
             for fx_info in state.track:iter_all_fx_flat() do
                 local ok, fx_name = pcall(function() return fx_info.fx:get_name() end)
-                if ok and fx_name and (fx_name:find(modulator_mod.MODULATOR_JSFX) or fx_name:find("SideFX Modulator")) then
+                if ok and fx_name and fx_name:match(modulator_mod.MODULATOR_DISPLAY_PATTERN) then
                     mod_fx = fx_info.fx
                     break
                 end

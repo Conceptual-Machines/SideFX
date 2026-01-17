@@ -1,7 +1,7 @@
 desc:SideFX Modulator
 author:Nomad Monad
-version:2.0
-options:no_meter
+version:3.0
+options:no_meter gmem=SideFX
 
 // Rate
 slider1:0<0,1,1{Free,Sync}>-Tempo Mode
@@ -89,6 +89,22 @@ slider87:0<0,1,0.001>-Playhead Position
 slider88:0<0,1,0.01>-Offset
 slider89:0<0,1,1{Unipolar,Bipolar}>-Bipolar Mode
 
+// Audio source selection (for Audio trigger mode)
+// 0 = Internal (main input spl0/spl1), 1 = External (sidechain spl2/spl3)
+slider90:0<0,1,1{Internal,External}>-Audio Source
+
+// Audio input gain (boost weak signals before threshold)
+slider91:0<0,24,0.1>-Audio Input Gain (dB)
+
+// Debug: shows input level being received after gain (read-only)
+slider92:0<0,1,0.001>-Input Level (Debug)
+
+// Triggered state (read-only, for UI indicator)
+slider93:0<0,1,1>-Triggered
+
+// MIDI Gate Mode: 0=Trigger (runs continuously after note-on), 1=Gate (stops on note-off)
+slider94:0<0,1,1{Trigger,Gate}>-MIDI Gate Mode
+
 @init
 MAX_NODES = 16;
 
@@ -107,9 +123,16 @@ mem_sorted_y = 1120;
 lfo_phase = 0;
 env_value = 1;
 triggered = 0;
+trigger_pulse_counter = 0;  // Block counter for UI pulse
+last_triggered = 0;
 current_tempo = 120;
 rate = 1;
 last_play_state = 0;
+
+// Sample-accurate MIDI triggering
+midi_trigger_sample = -1;  // Sample offset within block where trigger occurs (-1 = none)
+current_block_sample = 0;  // Current sample position within block
+midi_notes_held = 0;  // Count of currently held MIDI notes (for proper note-off handling)
 
 // Drag state
 drag_node = -1;
@@ -411,22 +434,46 @@ trigger_mode == 1 ? (
   last_play_state = play_state & 1;
 );
 
+// Reset sample-accurate trigger for this block
+midi_trigger_sample = -1;
+current_block_sample = 0;
+
+// Decrement block-based pulse counter (~10 blocks = visible flash)
+trigger_pulse_counter > 0 ? trigger_pulse_counter -= 1;
+
+// Filter MIDI by bus based on source setting (slider21)
+// Internal (0) = Bus 1 (ext_midi_bus=0), External (1) = Bus 2 (ext_midi_bus=1)
+trigger_mode == 2 ? (
+  ext_midi_bus = slider21 < 0.5 ? 0 : 1;
+) : (
+  ext_midi_bus = -1;  // Receive all buses when not in MIDI mode
+);
+
+// Read MIDI gate mode
+midi_gate_mode = slider94;
+
+// DEBUG: Expose gate mode for UI verification (temporary)
+// slider92 = midi_gate_mode;  // Uncomment to see gate mode value
+
 while (midirecv(offset, msg1, msg2, msg3)) (
   trigger_mode == 2 ? (
     status = msg1 & 0xF0;
     note = msg2;
     velocity = msg3;
-    // Note on
+    // Note on - schedule LFO restart at exact sample offset
     status == 0x90 && velocity > 0 ? (
       (midi_note == 0 || note == midi_note) ? (
+        midi_trigger_sample = offset;  // Store sample offset for @sample
         triggered = 1;
-        lfo_phase = 0;
+        midi_notes_held += 1;
+        trigger_pulse_counter = 10;  // Flash for ~10 blocks
       );
     );
-    // Note off (0x80 or 0x90 with velocity 0)
-    (status == 0x80 || (status == 0x90 && velocity == 0)) ? (
+    // Note off - only handle in Gate mode (slider94 == 1)
+    midi_gate_mode && (status == 0x80 || (status == 0x90 && velocity == 0)) ? (
       (midi_note == 0 || note == midi_note) ? (
-        triggered = 0;
+        midi_notes_held = max(0, midi_notes_held - 1);
+        midi_notes_held == 0 ? triggered = 0;
       );
     );
   );
@@ -436,13 +483,33 @@ while (midirecv(offset, msg1, msg2, msg3)) (
 @sample
 trigger_mode = slider20;
 
+// Sample-accurate MIDI trigger - reset phase at exact sample
+trigger_mode == 2 && current_block_sample == midi_trigger_sample ? (
+  lfo_phase = 0;
+);
+current_block_sample += 1;
+
 trigger_mode == 0 ? ( env_value = 1; );
 trigger_mode == 1 ? ( triggered ? env_value = 1 : env_value = env_value * release_coeff; );
 trigger_mode == 2 ? ( triggered ? env_value = 1 : env_value = env_value * release_coeff; );
 trigger_mode == 3 ? (
-  input_level = max(abs(spl0), abs(spl1));
+  // Audio source: 0 = Internal (from utility via GMEM, pre-gain), 1 = External sidechain (spl2/spl3)
+  slider90 < 0.5 ? (
+    // Read pre-gain level from utility via GMEM (breaks feedback loop)
+    input_level = max(gmem[0], gmem[1]);
+  ) : (
+    input_level = max(abs(spl2), abs(spl3));
+  );
+  // Apply input gain (slider91 is in dB, 0-24dB range)
+  input_gain = 10 ^ (slider91 / 20);
+  input_level *= input_gain;
+  // Debug: expose input level after gain (smoothed for display)
+  slider92 = slider92 * 0.95 + min(input_level, 1) * 0.05;
+  last_triggered = triggered;
   input_level > slider23 ? (
     triggered = 1;
+    // Pulse on rising edge (threshold crossing)
+    last_triggered == 0 ? trigger_pulse_counter = 10;
     env_value = env_value * attack_coeff + (1 - attack_coeff);
   ) : (
     triggered = 0;
@@ -479,7 +546,12 @@ one_shot = slider28;
 );
 
 phase = lfo_phase + slider5;
-phase >= 1 ? phase -= 1;
+// In one-shot mode, clamp phase at 1 to hold last value; in loop mode, wrap
+one_shot && lfo_phase >= 1 ? (
+  phase = 0.9999;  // Clamp just below 1 to get last point value
+) : (
+  phase >= 1 ? phase -= 1;
+);
 
 raw_lfo = eval_spline(phase);
 
@@ -487,4 +559,8 @@ raw_lfo = eval_spline(phase);
 // The env_value still applies for attack/release envelope
 slider4 = raw_lfo * env_value;
 slider87 = phase;  // Expose current playhead position for UI (read-only, no automate)
+
+// Output pulse state for UI indicator (counter decremented in @block)
+slider93 = trigger_pulse_counter > 0 ? 1 : 0;
+
 slider_automate(slider4);

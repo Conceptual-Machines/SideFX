@@ -32,6 +32,7 @@ end
 --------------------------------------------------------------------------------
 
 M.MODULATOR_JSFX = "JS:SideFX/SideFX_Modulator"
+M.MODULATOR_DISPLAY_PATTERN = "SideFX[_ ]Modulator"  -- Pattern for matching display name
 M.MOD_OUTPUT_PARAM = 3  -- slider4 in JSFX (0-indexed)
 
 --------------------------------------------------------------------------------
@@ -47,7 +48,7 @@ function M.find_modulators_on_track()
     for fx_info in state.track:iter_all_fx_flat() do
         local fx = fx_info.fx
         local name = fx:get_name()
-        if name and (name:find(M.MODULATOR_JSFX) or name:find("SideFX Modulator")) then
+        if name and name:match(M.MODULATOR_DISPLAY_PATTERN) then
             table.insert(modulators, {
                 fx = fx,
                 fx_idx = fx.pointer,
@@ -146,25 +147,20 @@ function M.create_param_link(mod_fx, target_fx, target_param_idx)
 
     if not mod_fx_obj or not target_fx_obj then return false end
 
-    -- Debug: show which FX we're linking
-    local param_name = target_fx_obj:get_param_name(target_param_idx) or "unknown"
-    r.ShowConsoleMsg(string.format("Target FX: %s, param idx: %d (%s)\n",
-        target_fx_obj:get_name() or "unknown", target_param_idx, param_name))
-
     -- Check if target FX is in a container
     local target_parent = target_fx_obj:get_parent_container()
 
     if target_parent then
         -- Target is nested - move modulator into the same container
-        r.ShowConsoleMsg(string.format("Moving modulator into container with target FX\n"))
-
         -- Store GUIDs before moving (indices will change!)
         local mod_guid = mod_fx_obj:get_guid()
         local target_guid = target_fx_obj:get_guid()
 
-        local success = target_parent:add_fx_to_container(mod_fx_obj)
+        -- Add modulator at END of container so it receives audio from main FX
+        -- (Position 0 would put it BEFORE the audio source, breaking audio trigger)
+        local insert_pos = target_parent:get_container_child_count()
+        local success = target_parent:add_fx_to_container(mod_fx_obj, insert_pos)
         if not success then
-            r.ShowConsoleMsg("Failed to move modulator into container\n")
             return false
         end
 
@@ -176,18 +172,13 @@ function M.create_param_link(mod_fx, target_fx, target_param_idx)
         -- Re-find both FX by GUID to get their new indices
         mod_fx_obj = state.track:find_fx_by_guid(mod_guid)
         if not mod_fx_obj then
-            r.ShowConsoleMsg("Failed to find modulator after moving\n")
             return false
         end
 
         target_fx_obj = state.track:find_fx_by_guid(target_guid)
         if not target_fx_obj then
-            r.ShowConsoleMsg("Failed to find target FX after moving\n")
             return false
         end
-
-        r.ShowConsoleMsg(string.format("Modulator moved - new index: %d\n", mod_fx_obj.pointer))
-        r.ShowConsoleMsg(string.format("Target FX after move - new index: %d\n", target_fx_obj.pointer))
     end
 
     -- Get the (possibly new) indices after moving
@@ -207,42 +198,26 @@ function M.create_param_link(mod_fx, target_fx, target_param_idx)
         for i, child in ipairs(children) do
             if child:get_guid() == mod_guid then
                 plink_effect_idx = i - 1  -- Convert to 0-based index
-                r.ShowConsoleMsg(string.format("Using LOCAL index %d for modulator in container\n", plink_effect_idx))
                 break
             end
         end
     end
 
-    r.ShowConsoleMsg(string.format("Creating plink: mod_idx=%d (plink_effect=%d), target_idx=%d, param=%d\n",
-        mod_fx_idx, plink_effect_idx, target_fx_idx, target_param_idx))
+    -- Get current parameter value to use as baseline offset
+    local current_value = r.TrackFX_GetParamNormalized(state.track.pointer, target_fx_idx, target_param_idx)
 
     local plink_prefix = string.format("param.%d.plink.", target_param_idx)
 
-    -- Create the parameter link
+    -- Create the parameter link with proper scale/offset to preserve current value
     local ok1 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "active", "1")
     local ok2 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "effect", tostring(plink_effect_idx))
     local ok3 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "param", tostring(M.MOD_OUTPUT_PARAM))
+    -- Set offset to current value so parameter doesn't jump
+    local ok4 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "offset", tostring(current_value))
+    -- Set scale to 0 initially - user increases via Depth control
+    local ok5 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "scale", "0")
 
-    r.ShowConsoleMsg(string.format("Plink result: ok1=%s ok2=%s ok3=%s\n",
-        tostring(ok1), tostring(ok2), tostring(ok3)))
-
-    -- Verify what was actually created by reading back the plink
-    if ok1 and ok2 and ok3 then
-        local _, actual_effect = r.TrackFX_GetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "effect")
-        local _, actual_param = r.TrackFX_GetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "param")
-        r.ShowConsoleMsg(string.format("Plink verification: effect=%s, param=%s (expected effect=%d, param=%d)\n",
-            actual_effect or "nil", actual_param or "nil", plink_effect_idx, M.MOD_OUTPUT_PARAM))
-
-        -- Also verify the target FX and parameter after moving
-        local final_target_fx = state.track:get_track_fx(target_fx_idx)
-        if final_target_fx then
-            local final_param_name = final_target_fx:get_param_name(target_param_idx)
-            r.ShowConsoleMsg(string.format("Final target verification: FX=%s, param=%d (%s)\n",
-                final_target_fx:get_name(), target_param_idx, final_param_name))
-        end
-    end
-
-    return ok1 and ok2 and ok3
+    return ok1 and ok2 and ok3 and ok4 and ok5
 end
 
 --- Remove a parameter modulation link.
@@ -270,7 +245,7 @@ function M.get_modulator_links(mod_fx)
         local fx_name = fx:get_name()
         local fx_idx = fx.pointer
         -- Skip modulators and containers
-        if fx_name and not (fx_name:find(M.MODULATOR_JSFX) or fx_name:find("SideFX Modulator") or fx_name:find("Container")) then
+        if fx_name and not (fx_name:match(M.MODULATOR_DISPLAY_PATTERN) or fx_name:find("Container")) then
             local param_count = fx:get_num_params()
             for param_idx = 0, param_count - 1 do
                 local plink_prefix = string.format("param.%d.plink.", param_idx)
@@ -302,7 +277,7 @@ end
 function M.is_modulator_fx(fx)
     if not fx then return false end
     local name = fx:get_name()
-    return name and (name:find(M.MODULATOR_JSFX) or name:find("SideFX Modulator"))
+    return name and name:match(M.MODULATOR_DISPLAY_PATTERN)
 end
 
 --------------------------------------------------------------------------------

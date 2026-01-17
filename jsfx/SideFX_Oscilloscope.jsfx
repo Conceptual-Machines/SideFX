@@ -1,0 +1,110 @@
+desc:SideFX Oscilloscope
+//tags: analysis visualization oscilloscope
+//author: SideFX
+options:no_meter gmem=SideFX
+
+slider1:50<1,500,1>-Time Window (ms)
+slider2:0<-24,24,0.5>-Gain (dB)
+slider3:0<0,2,1{Auto,Rising,Falling}>-Trigger Mode
+slider4:0<-1,1,0.01>-Trigger Level
+slider5:0<0,2,1{Stereo,Left,Right}>-Channel
+slider6:0<0,1,1{Off,On}>-Freeze
+slider7:0<0,15,1>-Slot (set by host)
+
+in_pin:left input
+in_pin:right input
+
+@init
+// Oscilloscope buffer in GMEM (per-slot)
+// Each slot uses 2100 addresses:
+// [0-1023]    = left channel samples
+// [1024-2047] = right channel samples
+// [2048]      = num samples
+// [2049]      = time_ms
+// [2050]      = sample_rate
+scope_buffer_size = 1024;
+scope_slot_size = 2100;
+scope_write_pos = 0;
+scope_sample_count = 0;
+scope_downsample = 1;
+triggered = 0;
+prev_input = 0;
+
+// Initialize base address (slider7 has default value at init)
+scope_base = 2000 + slider7 * scope_slot_size;
+scope_downsample = max(1, floor((srate * slider1 / 1000) / scope_buffer_size));
+
+@slider
+time_window_ms = slider1;
+gain_db = slider2;
+trigger_mode = slider3;
+trigger_level = slider4;
+channel = slider5;
+freeze = slider6;
+slot = slider7;
+
+// Calculate gain multiplier from dB
+gain = 10 ^ (gain_db / 20);
+
+// Calculate base address for this slot
+scope_base = 2000 + slot * scope_slot_size;
+
+// Calculate downsample factor based on time window
+scope_downsample = max(1, floor((srate * time_window_ms / 1000) / scope_buffer_size));
+
+// Write metadata
+gmem[scope_base + 2048] = scope_buffer_size;
+gmem[scope_base + 2049] = time_window_ms;
+gmem[scope_base + 2050] = srate;
+
+@sample
+// Get input based on channel selection
+channel == 0 ? (
+  // Stereo - use both
+  input_l = spl0;
+  input_r = spl1;
+  input = (spl0 + spl1) * 0.5;  // For trigger detection
+) : channel == 1 ? (
+  input_l = spl0;
+  input_r = spl0;
+  input = spl0;
+) : (
+  input_l = spl1;
+  input_r = spl1;
+  input = spl1;
+);
+
+// Trigger detection
+trigger_mode == 0 ? (
+  // Auto mode - always running
+  triggered = 1;
+) : trigger_mode == 1 ? (
+  // Rising edge
+  (prev_input < trigger_level && input >= trigger_level) ? (
+    triggered = 1;
+    scope_write_pos = 0;
+  );
+) : (
+  // Falling edge
+  (prev_input > trigger_level && input <= trigger_level) ? (
+    triggered = 1;
+    scope_write_pos = 0;
+  );
+);
+
+prev_input = input;
+
+// Write downsampled to GMEM buffer (unless frozen)
+!freeze && triggered ? (
+  scope_sample_count += 1;
+  scope_sample_count >= scope_downsample ? (
+    // Apply gain and write both channels
+    gmem[scope_base + scope_write_pos] = input_l * gain;
+    gmem[scope_base + 1024 + scope_write_pos] = input_r * gain;
+    scope_write_pos = (scope_write_pos + 1) % scope_buffer_size;
+    gmem[scope_base + 2048] = scope_buffer_size;
+    scope_sample_count = 0;
+  );
+);
+
+// Pass through audio unchanged

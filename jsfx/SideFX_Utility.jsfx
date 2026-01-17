@@ -1,16 +1,17 @@
 desc:SideFX Utility
 author:Nomad Monad
-version:1.1
-options:no_meter
+version:1.3
+options:no_meter gmem=SideFX
 
 // Gain/Pan/Phase utility - controlled exclusively by SideFX UI
 // All sliders hidden (- prefix), no native JSFX interface
 
-slider1:0<-24,24,0.1>-Gain (dB)
+slider1:0<-24,12,0.1>-Gain (dB)
 slider2:0<-100,100,1>-Pan (%)
 slider3:0<0,1,1{Off,On}>-Phase Invert L
 slider4:0<0,1,1{Off,On}>-Phase Invert R
-slider5:1<0,1,0.01>-Output Level (for metering)
+slider5:0<0,2,0.01>-Output Level L (for metering)
+slider6:0<0,2,0.01>-Output Level R (for metering)
 
 @init
 // Smoothing coefficients
@@ -33,6 +34,11 @@ phase_l = slider3 ? -1 : 1;
 phase_r = slider4 ? -1 : 1;
 
 @sample
+// Write INPUT level to GMEM BEFORE any processing (for modulator audio trigger)
+// Using smoothed peak detection for stable reading
+gmem[0] = gmem[0] * 0.95 + abs(spl0) * 0.05;
+gmem[1] = gmem[1] * 0.95 + abs(spl1) * 0.05;
+
 // Smooth gain changes to avoid clicks
 gain_smooth = gain_smooth * smooth_coeff + gain_lin * (1 - smooth_coeff);
 pan_l_smooth = pan_l_smooth * smooth_coeff + pan_l * (1 - smooth_coeff);
@@ -42,25 +48,29 @@ pan_r_smooth = pan_r_smooth * smooth_coeff + pan_r * (1 - smooth_coeff);
 spl0 *= gain_smooth;
 spl1 *= gain_smooth;
 
-// Apply pan (constant power)
-tmp_l = spl0;
-tmp_r = spl1;
-spl0 = (tmp_l + tmp_r) * pan_l_smooth * 0.707;
-spl1 = (tmp_l + tmp_r) * pan_r_smooth * 0.707;
-
-// Maintain stereo width when not panned
-slider2 == 0 ? (
-  spl0 = tmp_l * gain_smooth;
-  spl1 = tmp_r * gain_smooth;
+// Apply pan (constant power) - only when pan is not centered
+slider2 != 0 ? (
+  tmp_l = spl0;
+  tmp_r = spl1;
+  spl0 = (tmp_l + tmp_r) * pan_l_smooth * 0.707;
+  spl1 = (tmp_l + tmp_r) * pan_r_smooth * 0.707;
 );
+// When pan is centered, keep stereo signal as-is (gain already applied above)
 
 // Phase invert
 spl0 *= phase_l;
 spl1 *= phase_r;
 
-// Output level for metering (RMS-ish, smoothed)
-level = max(abs(spl0), abs(spl1));
-slider5 = slider5 * 0.95 + level * 0.05;
+// Output levels for metering (peak hold with decay)
+// Fast attack (instant peak), slow decay for readable meters
+abs_l = abs(spl0);
+abs_r = abs(spl1);
+slider5 = abs_l > slider5 ? abs_l : slider5 * 0.995;  // instant attack, ~150ms decay
+slider6 = abs_r > slider6 ? abs_r : slider6 * 0.995;
+
+// Also write to gmem for reliable cross-script reading
+gmem[2] = slider5;  // output level L
+gmem[3] = slider6;  // output level R
 
 // No @gfx - controlled exclusively by SideFX UI
 

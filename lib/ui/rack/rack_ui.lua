@@ -8,6 +8,7 @@ local imgui = require('imgui')
 local r = reaper
 local widgets = require('lib.ui.common.widgets')
 local drawing = require('lib.ui.common.drawing')
+local icons = require('lib.ui.common.icons')
 local fx_naming = require('lib.fx.fx_naming')
 
 local M = {}
@@ -117,7 +118,9 @@ end
 local function draw_rack_toggle_button(ctx, rack_guid, expand_icon, rack_name, is_expanded, button_id, callbacks)
     -- Show only icon when collapsed, full name when expanded
     local button_text = is_expanded and (expand_icon .. " " .. rack_name:sub(1, 20)) or expand_icon
-    if ctx:button(button_text .. "##" .. button_id, -1, 20) then
+    -- Collapsed: fixed width for just the icon, Expanded: stretch to fill
+    local button_w = is_expanded and -1 or 24
+    if ctx:button(button_text .. "##" .. button_id, button_w, 20) then
         if callbacks and callbacks.on_toggle_expand then
             callbacks.on_toggle_expand(rack_guid, is_expanded)
         end
@@ -266,49 +269,6 @@ local function draw_chain_context_menu(ctx, chain_btn_id, chain_guid, chain, is_
 end
 
 --------------------------------------------------------------------------------
--- Custom Widgets
---------------------------------------------------------------------------------
-
---- Draw an ON/OFF circle indicator with colored background
--- @param ctx ImGui context
--- @param label string Label for the button
--- @param is_on boolean Whether the state is ON
--- @param width number Button width
--- @param height number Button height
--- @param bg_color_on number RGBA color for ON background
--- @param bg_color_off number RGBA color for OFF background
--- @return boolean True if clicked
-local function draw_on_off_circle(ctx, label, is_on, width, height, bg_color_on, bg_color_off)
-    -- Get cursor position for drawing
-    local cursor_x, cursor_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-    local center_x = cursor_x + width / 2
-    local center_y = cursor_y + height / 2
-    local radius = 6  -- Small circle radius
-
-    -- Invisible button for interaction
-    r.ImGui_InvisibleButton(ctx.ctx, label, width, height)
-    local clicked = r.ImGui_IsItemClicked(ctx.ctx, 0)
-    local is_hovered = r.ImGui_IsItemHovered(ctx.ctx)
-
-    -- Draw background and circle
-    local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-
-    -- Draw background rectangle
-    local bg_color = is_on and bg_color_on or bg_color_off
-    r.ImGui_DrawList_AddRectFilled(draw_list, cursor_x, cursor_y, cursor_x + width, cursor_y + height, bg_color, 0)
-
-    if is_on then
-        -- Filled circle for ON state
-        r.ImGui_DrawList_AddCircleFilled(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12)
-    else
-        -- Empty circle (outline only) for OFF state
-        r.ImGui_DrawList_AddCircle(draw_list, center_x, center_y, radius, 0xFFFFFFFF, 12, 2)
-    end
-
-    return clicked
-end
-
---------------------------------------------------------------------------------
 -- Rack Header
 --------------------------------------------------------------------------------
 
@@ -321,7 +281,6 @@ end
 --   - on_toggle_expand: (rack_guid, is_expanded) -> nil
 --   - on_rename: (rack_guid, display_name) -> nil
 --   - on_delete: (rack) -> nil
---   - icon_font: ImGui font for emojis (optional)
 function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
     is_nested = (is_nested == true)
 
@@ -342,95 +301,186 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
     -- Check if rack is being renamed
     local is_renaming_rack = (state.renaming_fx == rack_guid)
 
-    -- Use table for layout with burger menu, name, on/off, and delete
-    local table_flags = imgui.TableFlags.SizingStretchProp()
-    if ctx:begin_table("rack_header_" .. rack_guid, 4, table_flags) then
-        -- Column 0: Burger menu (fixed width)
-        ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
-        if is_expanded then
-            -- Expanded: name gets most space
-            ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 7)
-            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
-            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
-        else
-            -- Collapsed: equal distribution
-            ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthStretch(), 1)
-            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthStretch(), 1)
-            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthStretch(), 1)
-        end
+    -- Get enabled state for ON button
+    local ok_enabled, rack_enabled = pcall(function() return rack:get_enabled() end)
+    rack_enabled = ok_enabled and rack_enabled or false
 
-        ctx:table_next_row()
+    if is_expanded then
+        -- Expanded: single row with all controls
+        local table_flags = imgui.TableFlags.SizingStretchProp()
+        if ctx:begin_table("rack_header_" .. rack_guid, 4, table_flags) then
+            ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
+            ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch())
+            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 22)
+            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 22)
 
-        -- Column 0: Burger menu drag handle
-        ctx:table_set_column_index(0)
-        ctx:push_style_color(imgui.Col.Button(), 0x00000000)
-        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x44444488)
-        ctx:push_style_color(imgui.Col.ButtonActive(), 0x55555588)
-        if ctx:button("≡##drag_rack_" .. rack_guid, 20, 20) then
-            -- Drag handle doesn't do anything on click
-        end
-        ctx:pop_style_color(3)
-        if ctx:is_item_hovered() then
-            ctx:set_tooltip("Drag to reorder")
-        end
+            ctx:table_next_row()
 
-        -- Drag/drop handling on burger menu
-        if ctx:begin_drag_drop_source() then
-            ctx:set_drag_drop_payload("FX_GUID", rack_guid)
-            ctx:text("Moving: " .. rack_name)
-            ctx:end_drag_drop_source()
-        end
+            -- Column 0: Burger menu drag handle
+            ctx:table_set_column_index(0)
+            ctx:push_style_color(imgui.Col.Button(), 0x00000000)
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x44444488)
+            ctx:push_style_color(imgui.Col.ButtonActive(), 0x55555588)
+            if ctx:button("≡##drag_rack_" .. rack_guid, 20, 20) then
+                -- Drag handle doesn't do anything on click
+            end
+            ctx:pop_style_color(3)
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("Drag to reorder")
+            end
 
-        if ctx:begin_drag_drop_target() then
-            local accepted, dragged_guid = ctx:accept_drag_drop_payload("FX_GUID")
-            if accepted and dragged_guid and dragged_guid ~= rack_guid then
-                if callbacks.on_drop then
-                    callbacks.on_drop(dragged_guid, rack_guid)
+            -- Drag/drop handling on burger menu
+            if ctx:begin_drag_drop_source() then
+                ctx:set_drag_drop_payload("FX_GUID", rack_guid)
+                ctx:text("Moving: " .. rack_name)
+                ctx:end_drag_drop_source()
+            end
+
+            if ctx:begin_drag_drop_target() then
+                local accepted, dragged_guid = ctx:accept_drag_drop_payload("FX_GUID")
+                if accepted and dragged_guid and dragged_guid ~= rack_guid then
+                    if callbacks.on_drop then
+                        callbacks.on_drop(dragged_guid, rack_guid)
+                    end
+                end
+                local plugin_accepted = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                if plugin_accepted and callbacks.on_add_to_rack then
+                    callbacks.on_add_to_rack(plugin_accepted)
+                end
+                local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+                if rack_accepted and callbacks.on_add_nested_rack then
+                    callbacks.on_add_nested_rack()
+                end
+                ctx:end_drag_drop_target()
+            end
+
+            -- Column 1: Rack name
+            ctx:table_set_column_index(1)
+            if is_renaming_rack then
+                draw_rack_rename_input(ctx, rack_guid, state, state_module)
+            else
+                draw_rack_toggle_button(ctx, rack_guid, expand_icon, rack_name, is_expanded, button_id, callbacks)
+                draw_rack_context_menu(ctx, button_id, rack_guid, rack, state, callbacks)
+            end
+
+            -- Column 2: ON button
+            ctx:table_set_column_index(2)
+            local on_tint = rack_enabled and 0x88FF88FF or 0x888888FF
+            if icons.button_bordered(ctx, "rack_on_off_" .. rack_guid, icons.Names.on, 20, on_tint) then
+                pcall(function() rack:set_enabled(not rack_enabled) end)
+            end
+
+            -- Column 3: X button
+            ctx:table_set_column_index(3)
+            if icons.button_bordered(ctx, "rack_del_" .. rack_guid, icons.Names.cancel, 20, 0xFF6666FF) then
+                callbacks.on_delete(rack)
+            end
+
+            ctx:end_table()
+        end
+    else
+        -- Collapsed: 2x2 button grid (matching device collapsed_header.lua style)
+        local btn_size = 20
+        local avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
+        local table_w = (btn_size + 4) * 2
+        local offset_x = math.max(0, (avail_w - table_w) / 2)
+        r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + offset_x)
+
+        if ctx:begin_table("collapsed_rack_btns_" .. rack_guid, 2, r.ImGui_TableFlags_SizingFixedFit()) then
+            ctx:table_setup_column("col1", imgui.TableColumnFlags.WidthFixed(), btn_size + 4)
+            ctx:table_setup_column("col2", imgui.TableColumnFlags.WidthFixed(), btn_size + 4)
+
+            -- Row 1: Drag | Expand
+            ctx:table_next_row()
+
+            -- Drag handle (bordered button)
+            ctx:table_set_column_index(0)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x2A2A3AFF)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x3A3A4AFF)
+            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x4A4A5AFF)
+            ctx:push_style_color(r.ImGui_Col_Border(), 0x555555FF)
+            ctx:push_style_var(r.ImGui_StyleVar_FrameBorderSize(), 1)
+            ctx:button("≡##drag_rack_" .. rack_guid, btn_size, btn_size)
+            ctx:pop_style_var()
+            ctx:pop_style_color(4)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Drag to reorder")
+            end
+
+            -- Drag/drop handling
+            if ctx:begin_drag_drop_source() then
+                ctx:set_drag_drop_payload("FX_GUID", rack_guid)
+                ctx:text("Moving: " .. rack_name)
+                ctx:end_drag_drop_source()
+            end
+            if ctx:begin_drag_drop_target() then
+                local accepted, dragged_guid = ctx:accept_drag_drop_payload("FX_GUID")
+                if accepted and dragged_guid and dragged_guid ~= rack_guid then
+                    if callbacks.on_drop then
+                        callbacks.on_drop(dragged_guid, rack_guid)
+                    end
+                end
+                local plugin_accepted = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                if plugin_accepted and callbacks.on_add_to_rack then
+                    callbacks.on_add_to_rack(plugin_accepted)
+                end
+                local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+                if rack_accepted and callbacks.on_add_nested_rack then
+                    callbacks.on_add_nested_rack()
+                end
+                ctx:end_drag_drop_target()
+            end
+
+            -- Expand button (bordered)
+            ctx:table_set_column_index(1)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x2A2A3AFF)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x3A3A4AFF)
+            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x4A4A5AFF)
+            ctx:push_style_color(r.ImGui_Col_Border(), 0x555555FF)
+            ctx:push_style_var(r.ImGui_StyleVar_FrameBorderSize(), 1)
+            if ctx:button(expand_icon .. "##" .. button_id, btn_size, btn_size) then
+                if callbacks and callbacks.on_toggle_expand then
+                    callbacks.on_toggle_expand(rack_guid, is_expanded)
                 end
             end
-
-            -- Preserve existing drop behavior for plugins and nested racks
-            local plugin_accepted = ctx:accept_drag_drop_payload("PLUGIN_ADD")
-            if plugin_accepted and callbacks.on_add_to_rack then
-                callbacks.on_add_to_rack(plugin_accepted)
+            ctx:pop_style_var()
+            ctx:pop_style_color(4)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Expand rack")
             end
-
-            local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
-            if rack_accepted and callbacks.on_add_nested_rack then
-                callbacks.on_add_nested_rack()
-            end
-
-            ctx:end_drag_drop_target()
-        end
-
-        -- Column 1: Rack name
-        ctx:table_set_column_index(1)
-        if is_renaming_rack then
-            draw_rack_rename_input(ctx, rack_guid, state, state_module)
-        else
-            draw_rack_toggle_button(ctx, rack_guid, expand_icon, rack_name, is_expanded, button_id, callbacks)
             draw_rack_context_menu(ctx, button_id, rack_guid, rack, state, callbacks)
+
+            -- Row 2: ON | Delete
+            ctx:table_next_row()
+
+            -- ON button
+            ctx:table_set_column_index(0)
+            local on_tint = rack_enabled and 0x88FF88FF or 0x888888FF
+            if icons.button_bordered(ctx, "rack_on_off_" .. rack_guid, icons.Names.on, 18, on_tint) then
+                pcall(function() rack:set_enabled(not rack_enabled) end)
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip(rack_enabled and "Bypass rack" or "Enable rack")
+            end
+
+            -- Delete button
+            ctx:table_set_column_index(1)
+            if icons.button_bordered(ctx, "rack_del_" .. rack_guid, icons.Names.cancel, 18, 0xFF6666FF) then
+                callbacks.on_delete(rack)
+            end
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip("Delete rack")
+            end
+
+            ctx:end_table()
         end
 
-        -- Column 2: ON button
-        ctx:table_set_column_index(2)
-        local ok_enabled, rack_enabled = pcall(function() return rack:get_enabled() end)
-        rack_enabled = ok_enabled and rack_enabled or false
-        -- Draw custom circle indicator with colored background
-        local avail_w, _ = ctx:get_content_region_avail()
-        if draw_on_off_circle(ctx, "##rack_on_off_" .. rack_guid, rack_enabled, avail_w, 20, 0x44AA44FF, 0xAA4444FF) then
-            pcall(function() rack:set_enabled(not rack_enabled) end)
-        end
-
-        -- Column 3: X button
-        ctx:table_set_column_index(3)
-        ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
-        if ctx:button("×##rack_del", -1, 20) then
-            callbacks.on_delete(rack)
-        end
-        ctx:pop_style_color()
-
-        ctx:end_table()
+        -- Separator line below all buttons (full width)
+        local sep_x, sep_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+        local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+        local content_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
+        r.ImGui_DrawList_AddLine(draw_list, sep_x, sep_y + 1, sep_x + content_w, sep_y + 1, 0x555555FF, 1)
+        r.ImGui_Dummy(ctx.ctx, content_w, 4)
     end
 end
 
@@ -524,38 +574,25 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
         -- Handle chain reorder/move
         local accepted_chain, dragged_guid = ctx:accept_drag_drop_payload("CHAIN_REORDER")
         if accepted_chain and dragged_guid then
-            reaper.ShowConsoleMsg("[rack_ui] Chain drop accepted. Dragged GUID: " .. dragged_guid .. "\n")
-
             -- Check if it's same rack or cross-rack move
             local dragged_chain = state.track:find_fx_by_guid(dragged_guid)
             if dragged_chain then
-                reaper.ShowConsoleMsg("[rack_ui] Found dragged chain\n")
                 local source_rack = dragged_chain:get_parent_container()
 
                 if source_rack then
                     local source_guid = source_rack:get_guid()
                     local target_guid = rack:get_guid()
-                    reaper.ShowConsoleMsg("[rack_ui] Source rack: " .. source_guid .. "\n")
-                    reaper.ShowConsoleMsg("[rack_ui] Target rack: " .. target_guid .. "\n")
 
                     if source_guid == target_guid then
                         -- Same rack: reorder
-                        reaper.ShowConsoleMsg("[rack_ui] Same rack - calling on_reorder_chain\n")
                         callbacks.on_reorder_chain(rack, dragged_guid, chain_guid)
                     else
                         -- Different rack: move between racks
-                        reaper.ShowConsoleMsg("[rack_ui] Different rack - calling on_move_chain_between_racks\n")
                         if callbacks.on_move_chain_between_racks then
                             callbacks.on_move_chain_between_racks(source_rack, rack, dragged_guid, chain_guid)
-                        else
-                            reaper.ShowConsoleMsg("[rack_ui] ERROR: on_move_chain_between_racks callback not found!\n")
                         end
                     end
-                else
-                    reaper.ShowConsoleMsg("[rack_ui] ERROR: No source rack found\n")
                 end
-            else
-                reaper.ShowConsoleMsg("[rack_ui] ERROR: Could not find dragged chain by GUID\n")
             end
         end
         ctx:end_drag_drop_target()
@@ -572,44 +609,90 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
         end
     end
 
-    -- Column 2: Enable button (circle icon) - same size as X button
+    -- Column 1: Mute button (M)
     ctx:table_set_column_index(1)
-    local bg_color_on = 0x44AA44FF  -- Green for ON
-    local bg_color_off = 0xAA4444FF  -- Red for OFF
-    if draw_on_off_circle(ctx, "##chain_on_off_" .. chain_guid, chain_enabled, 24, 20, bg_color_on, bg_color_off) then
-        pcall(function() chain:set_enabled(not chain_enabled) end)
+    if mixer then
+        local mute_param = 34 + (chain_idx - 1)  -- Params 34-49 are chain mutes
+        local ok_mute, mute_norm = pcall(function() return mixer:get_param_normalized(mute_param) end)
+        local is_muted = ok_mute and mute_norm > 0.5 or false
+        if is_muted then
+            ctx:push_style_color(imgui.Col.Button(), 0xCC4444FF)  -- Red when muted
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0xDD5555FF)
+        else
+            ctx:push_style_color(imgui.Col.Button(), 0x555555FF)  -- Grey when not muted
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x666666FF)
+        end
+        if ctx:button("M##mute_" .. chain_idx, 20, 20) then
+            pcall(function() mixer:set_param_normalized(mute_param, is_muted and 0 or 1) end)
+        end
+        ctx:pop_style_color(2)
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip(is_muted and "Unmute chain" or "Mute chain")
+        end
+    else
+        ctx:text_disabled("-")
     end
 
-    -- Column 3: Delete button (same size as ON button)
+    -- Column 2: Solo button (S)
     ctx:table_set_column_index(2)
-    ctx:push_style_color(imgui.Col.Button(), 0x664444FF)
-    if ctx:button("×", 24, 20) then
+    if mixer then
+        local solo_param = 50 + (chain_idx - 1)  -- Params 50-65 are chain solos
+        local ok_solo, solo_norm = pcall(function() return mixer:get_param_normalized(solo_param) end)
+        local is_soloed = ok_solo and solo_norm > 0.5 or false
+        if is_soloed then
+            ctx:push_style_color(imgui.Col.Button(), 0xCCAA44FF)  -- Yellow/gold when soloed
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0xDDBB55FF)
+        else
+            ctx:push_style_color(imgui.Col.Button(), 0x555555FF)  -- Grey when not soloed
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x666666FF)
+        end
+        if ctx:button("S##solo_" .. chain_idx, 20, 20) then
+            pcall(function() mixer:set_param_normalized(solo_param, is_soloed and 0 or 1) end)
+        end
+        ctx:pop_style_color(2)
+        if ctx:is_item_hovered() then
+            ctx:set_tooltip(is_soloed and "Unsolo chain" or "Solo chain")
+        end
+    else
+        ctx:text_disabled("-")
+    end
+
+    -- Column 3: Enable button (on icon)
+    ctx:table_set_column_index(3)
+    local on_tint = chain_enabled and 0x88FF88FF or 0x888888FF
+    if icons.button_bordered(ctx, "chain_on_off_" .. chain_guid, icons.Names.on, 20, on_tint) then
+        pcall(function() chain:set_enabled(not chain_enabled) end)
+    end
+    if ctx:is_item_hovered() then
+        ctx:set_tooltip(chain_enabled and "Bypass chain" or "Enable chain")
+    end
+
+    -- Column 4: Delete button (cancel icon)
+    ctx:table_set_column_index(4)
+    if icons.button_bordered(ctx, "chain_del_" .. chain_guid, icons.Names.cancel, 20, 0xFF6666FF) then
         chain:delete()
         local rack_guid = rack:get_guid()
         callbacks.on_delete_chain(chain, is_selected, is_nested_rack, rack_guid)
         callbacks.on_refresh()
     end
-    ctx:pop_style_color()
+    if ctx:is_item_hovered() then
+        ctx:set_tooltip("Delete chain")
+    end
 
-    -- Column 4: Volume slider
-    ctx:table_set_column_index(3)
+    -- Column 5: Volume slider - read actual dB value (normalized mapping is non-linear for JSFX)
+    ctx:table_set_column_index(5)
     if mixer then
         local vol_param = 2 + (chain_idx - 1)  -- Params 2-17 are channel volumes
-        local ok_vol, vol_norm = pcall(function() return mixer:get_param_normalized(vol_param) end)
-        if ok_vol and vol_norm then
-            -- Fixed: Range is -60 to +12 dB (72 dB total), not -24 to +12 (36 dB)
-            local vol_db = -60 + vol_norm * 72
+        local ok_vol, vol_db = pcall(function() return mixer:get_param(vol_param) end)
+        if ok_vol and vol_db then
             local vol_format = (math.abs(vol_db) < 0.1) and "0" or (vol_db > 0 and string.format("+%.0f", vol_db) or string.format("%.0f", vol_db))
             ctx:set_next_item_width(-1)
             local vol_changed, new_vol_db = drawing.slider_double_fine(ctx, "##vol_" .. chain_idx, vol_db, -60, 12, vol_format)
             if vol_changed then
-                -- Fixed: Convert back using correct range
-                local new_norm = (new_vol_db + 60) / 72
-                pcall(function() mixer:set_param_normalized(vol_param, new_norm) end)
+                pcall(function() mixer:set_param(vol_param, new_vol_db) end)
             end
             if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-                -- Fixed: 0 dB normalized = (0 + 60) / 72 = 60/72 = 0.8333
-                pcall(function() mixer:set_param_normalized(vol_param, (0 + 60) / 72) end)
+                pcall(function() mixer:set_param(vol_param, 0) end)  -- Reset to 0dB
             end
         else
             ctx:text_disabled("--")
@@ -618,16 +701,15 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
         ctx:text_disabled("--")
     end
 
-    -- Column 5: Pan slider
-    ctx:table_set_column_index(4)
+    -- Column 6: Pan slider - read actual value (normalized mapping is non-linear for JSFX)
+    ctx:table_set_column_index(6)
     if mixer then
         local pan_param = 18 + (chain_idx - 1)  -- Params 18-33 are channel pans
-        local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(pan_param) end)
-        if ok_pan and pan_norm then
-            local pan_val = -100 + pan_norm * 200
+        local ok_pan, pan_val = pcall(function() return mixer:get_param(pan_param) end)
+        if ok_pan and pan_val then
             local pan_changed, new_pan = widgets.draw_pan_slider(ctx, "##pan_" .. chain_idx, pan_val, 50)
             if pan_changed then
-                pcall(function() mixer:set_param_normalized(pan_param, (new_pan + 100) / 200) end)
+                pcall(function() mixer:set_param(pan_param, new_pan) end)
             end
         else
             ctx:text_disabled("C")
@@ -651,10 +733,12 @@ function M.draw_collapsed_fader_control(ctx, mixer, rack_guid, state)
     local meter_w = 12
     local scale_w = 20
 
-    local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
-    if not ok_gain or not gain_norm then return end
+    -- Read actual dB value directly (normalized mapping is non-linear for JSFX)
+    local ok_gain, gain_db = pcall(function() return mixer:get_param(0) end)
+    if not ok_gain or not gain_db then return end
 
-    local gain_db = -24 + gain_norm * 36
+    -- Calculate normalized position for fader visualization (0-1 range for -24 to +12)
+    local gain_norm = (gain_db + 24) / 36
     local gain_format = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db))
 
     local _, remaining_h = ctx:get_content_region_avail()
@@ -697,10 +781,10 @@ function M.draw_collapsed_fader_control(ctx, mixer, rack_guid, state)
     ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
     local gain_changed, new_gain_db = drawing.v_slider_double_fine(ctx, "##master_gain_v", fader_w, fader_h, gain_db, -24, 12, "")
     if gain_changed then
-        pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
+        pcall(function() mixer:set_param(0, new_gain_db) end)
     end
     if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-        pcall(function() mixer:set_param_normalized(0, (0 + 24) / 36) end)
+        pcall(function() mixer:set_param(0, 0) end)  -- Reset to 0dB
     end
     ctx:pop_style_color(5)
 
@@ -721,7 +805,7 @@ function M.draw_collapsed_fader_control(ctx, mixer, rack_guid, state)
         local input_changed, input_val = ctx:input_double("##gain_input", gain_db, 0, 0, "%.1f")
         if input_changed then
             local new_db = math.max(-24, math.min(12, input_val))
-            pcall(function() mixer:set_param_normalized(0, (new_db + 24) / 36) end)
+            pcall(function() mixer:set_param(0, new_db) end)
         end
         if ctx:is_key_pressed(imgui.Key.Enter()) or ctx:is_key_pressed(imgui.Key.Escape()) then
             ctx:close_current_popup()
@@ -744,29 +828,29 @@ function M.draw_master_controls_table(ctx, mixer)
         ctx:text_colored(0xAAAAAAFF, "Master")
 
         ctx:table_set_column_index(1)
-        local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
-        if ok_gain and gain_norm then
-            local gain_db = -24 + gain_norm * 36
+        -- Read actual dB value directly (normalized mapping is non-linear for JSFX)
+        local ok_gain, gain_db = pcall(function() return mixer:get_param(0) end)
+        if ok_gain and gain_db then
             local gain_format = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.1f", gain_db) or string.format("%.1f", gain_db))
             ctx:set_next_item_width(-1)
             local gain_changed, new_gain_db = drawing.slider_double_fine(ctx, "##master_gain", gain_db, -24, 12, gain_format)
             if gain_changed then
-                pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
+                pcall(function() mixer:set_param(0, new_gain_db) end)
             end
             if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-                pcall(function() mixer:set_param_normalized(0, (0 + 24) / 36) end)
+                pcall(function() mixer:set_param(0, 0) end)  -- Reset to 0dB
             end
         else
             ctx:text_disabled("--")
         end
 
         ctx:table_set_column_index(2)
-        local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(1) end)
-        if ok_pan and pan_norm then
-            local pan_val = -100 + pan_norm * 200
+        -- Read actual pan value directly (normalized mapping is non-linear for JSFX)
+        local ok_pan, pan_val = pcall(function() return mixer:get_param(1) end)
+        if ok_pan and pan_val then
             local pan_changed, new_pan = widgets.draw_pan_slider(ctx, "##master_pan", pan_val, 60)
             if pan_changed then
-                pcall(function() mixer:set_param_normalized(1, (new_pan + 100) / 200) end)
+                pcall(function() mixer:set_param(1, new_pan) end)
             end
         else
             ctx:text_disabled("C")

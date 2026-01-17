@@ -2,6 +2,8 @@
 Device Header Module - Draws device panel header with name, controls, and buttons
 ]]
 
+local icons = require('lib.ui.common.icons')
+
 local M = {}
 
 -- Track rename state per FX (by GUID)
@@ -9,7 +11,7 @@ local rename_active = {}
 local rename_buffer = {}
 
 --- Draw device name/path with mix/delta/UI buttons (left side of header)
-function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag_guid, enabled, opts, colors, state_guid)
+function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag_guid, enabled, opts, colors, state_guid, device_collapsed)
     local r = reaper
     local imgui = require('imgui')
     local drawing = require('lib.ui.common.drawing')
@@ -18,26 +20,40 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
 
     -- Check config for which controls to show
     local config = require('lib.core.config')
-    local show_mix_control = config.get('show_mix_control')
-    local show_delta_control = config.get('show_delta_control')
+    local show_mix_delta = config.get('show_mix_delta')
 
-    -- Check for mix (container parameter)
+    -- Check for mix (container parameter or FX's wet for bare devices)
     local has_mix = false
     local mix_val, mix_idx
-    if container and show_mix_control then
-        local ok_mix
-        ok_mix, mix_idx = pcall(function() return container:get_param_from_ident(":wet") end)
-        if ok_mix and mix_idx and mix_idx >= 0 then
-            local ok_mv
-            ok_mv, mix_val = pcall(function() return container:get_param_normalized(mix_idx) end)
-            has_mix = ok_mv and mix_val
+    local mix_target = nil  -- Which object to control: container or fx
+    if show_mix_delta then
+        if container then
+            -- Regular device: use container's wet
+            local ok_mix
+            ok_mix, mix_idx = pcall(function() return container:get_param_from_ident(":wet") end)
+            if ok_mix and mix_idx and mix_idx >= 0 then
+                local ok_mv
+                ok_mv, mix_val = pcall(function() return container:get_param_normalized(mix_idx) end)
+                has_mix = ok_mv and mix_val
+                mix_target = container
+            end
+        else
+            -- Bare device: use FX's wet if available
+            local ok_mix
+            ok_mix, mix_idx = pcall(function() return fx:get_param_from_ident(":wet") end)
+            if ok_mix and mix_idx and mix_idx >= 0 then
+                local ok_mv
+                ok_mv, mix_val = pcall(function() return fx:get_param_normalized(mix_idx) end)
+                has_mix = ok_mv and mix_val
+                mix_target = fx
+            end
         end
     end
 
-    -- Check for delta (container parameter)
+    -- Check for delta (container parameter only - not available for bare devices)
     local has_delta = false
     local delta_val, delta_idx
-    if container and show_delta_control then
+    if container and show_mix_delta then
         local ok_delta
         ok_delta, delta_idx = pcall(function() return container:get_param_from_ident(":delta") end)
         if ok_delta and delta_idx and delta_idx >= 0 then
@@ -60,7 +76,7 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
     -- Use table for proper layout
     local table_flags = imgui.TableFlags.SizingStretchProp()
     if ctx:begin_table("header_left_" .. guid, num_cols, table_flags) then
-        ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
+        ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 48)
         ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch(), 70)
         if has_mix then
             ctx:table_setup_column("mix", imgui.TableColumnFlags.WidthFixed(), 28)
@@ -72,7 +88,7 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
 
         ctx:table_next_row()
 
-        -- Column 1: Drag handle
+        -- Column 1: Drag handle + Collapse button
         ctx:table_set_column_index(0)
         ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
         ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
@@ -80,18 +96,12 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         if ctx:button("≡##drag_" .. guid, 20, 20) then
             -- Drag handle doesn't do anything on click
         end
-        ctx:pop_style_color(3)
-        if r.ImGui_IsItemHovered(ctx.ctx) then
-            ctx:set_tooltip("Drag to reorder")
-        end
-
-        -- Drag/drop handling
+        -- Drag source must be right after the drag handle button
         if ctx:begin_drag_drop_source() then
             ctx:set_drag_drop_payload("FX_GUID", drag_guid)
             ctx:text("Moving: " .. fx_naming.truncate(name, 20))
             ctx:end_drag_drop_source()
         end
-
         if ctx:begin_drag_drop_target() then
             local accepted, payload = ctx:accept_drag_drop_payload("FX_GUID")
             if accepted and payload and payload ~= drag_guid then
@@ -103,7 +113,10 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
             local accepted_plugin, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
             if accepted_plugin and plugin_name then
                 if opts.on_plugin_drop then
-                    opts.on_plugin_drop(plugin_name, fx.pointer)
+                    -- Check for Shift key = add as bare device (no utility)
+                    local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+                    local drop_opts = shift_held and { bare = true } or nil
+                    opts.on_plugin_drop(plugin_name, fx.pointer, drop_opts)
                 end
                 interacted = true
             end
@@ -115,6 +128,21 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
                 interacted = true
             end
             ctx:end_drag_drop_target()
+        end
+        if r.ImGui_IsItemHovered(ctx.ctx) then
+            ctx:set_tooltip("Drag to reorder")
+        end
+        ctx:same_line(0, 2)  -- Minimal gap
+        if ctx:button("▼##collapse_" .. guid, 20, 20) then
+            local state_module = require('lib.core.state')
+            local state = state_module.state
+            state.device_controls_collapsed = state.device_controls_collapsed or {}
+            state.device_controls_collapsed[state_guid] = true
+            state_module.save_device_collapsed_states()
+        end
+        ctx:pop_style_color(3)
+        if r.ImGui_IsItemHovered(ctx.ctx) then
+            ctx:set_tooltip("Collapse device")
         end
 
         -- Column 2: Device name (editable)
@@ -130,6 +158,13 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         end
 
         local is_renaming = rename_active[guid] or false
+
+        -- Use bold header font for device name (with safety check)
+        local font_pushed = false
+        if opts.header_font then
+            local ok = pcall(r.ImGui_PushFont, ctx.ctx, opts.header_font, 14)
+            font_pushed = ok
+        end
 
         if is_renaming then
             ctx:set_next_item_width(-1)
@@ -161,22 +196,26 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
             end
         end
 
+        if font_pushed then
+            r.ImGui_PopFont(ctx.ctx)
+        end
+
         local col_idx = 2
 
         -- Column: Mix (if present)
-        if has_mix then
+        if has_mix and mix_target then
             ctx:table_set_column_index(col_idx)
             col_idx = col_idx + 1
 
             local knob_size = 24
             local mix_changed, new_mix = drawing.draw_knob(ctx, "##mix_knob_" .. state_guid, mix_val, knob_size)
             if mix_changed then
-                pcall(function() container:set_param_normalized(mix_idx, new_mix) end)
+                pcall(function() mix_target:set_param_normalized(mix_idx, new_mix) end)
                 interacted = true
             end
             if r.ImGui_IsItemHovered(ctx.ctx) then
                 local mix_pct = math.floor(mix_val * 100)
-                ctx:set_tooltip(string.format("Mix: %d%% (parallel blend)", mix_pct))
+                ctx:set_tooltip(string.format("Mix: %d%% (wet/dry blend)", mix_pct))
             end
         end
 
@@ -205,10 +244,9 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
             end
         end
 
-        -- Column: UI button
+        -- Column: UI button (wrench icon)
         ctx:table_set_column_index(col_idx)
-        local icon_font = opts.icon_font
-        if drawing.draw_ui_icon(ctx, "##ui_header_" .. state_guid, 24, 20, icon_font) then
+        if icons.button_bordered(ctx, "ui_header_" .. state_guid, icons.Names.wrench, 20) then
             pcall(function() fx:show(3) end)
             interacted = true
         end
@@ -269,6 +307,11 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         end
 
         if ctx:menu_item("Delete") then
+            -- Clean up any external source sends before deleting
+            local modulator_sidebar = require('lib.ui.device.modulator_sidebar')
+            if container and fx.track then
+                modulator_sidebar.cleanup_device_sends(container, fx.track)
+            end
             if opts.on_delete then
                 opts.on_delete(fx)
             else
@@ -284,26 +327,28 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
     return interacted
 end
 
---- Draw device control buttons (right side of header) - ON, Delete, and Device collapse
+--- Draw device control buttons (right side of header) - ON and Delete
 function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_device_collapsed, device_collapsed, opts, colors)
     local r = reaper
     local drawing = require('lib.ui.common.drawing')
     local imgui = require('imgui')
     local interacted = false
 
-    -- 3 columns: on | x | collapse
-    if ctx:begin_table("header_right_" .. state_guid, 3, 0) then
-        ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 24)
-        ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 20)
-        ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthFixed(), 20)
+    local btn_size = 20  -- Total button size (icon + padding + border)
+
+    -- Use table with SizingFixedFit to center the buttons
+    if ctx:begin_table("header_right_" .. state_guid, 2, r.ImGui_TableFlags_SizingFixedFit()) then
+        ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), btn_size)
+        ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), btn_size)
 
         ctx:table_next_row()
 
         -- Column: ON/OFF toggle
         ctx:table_set_column_index(0)
-        if drawing.draw_on_off_circle(ctx, "##on_off_header_" .. state_guid, enabled, 24, 20, colors.bypass_on, colors.bypass_off) then
+        local on_tint = enabled and 0x88FF88FF or 0x888888FF
+        if icons.button_bordered(ctx, "on_off_" .. state_guid, icons.Names.on, 20, on_tint) then
             if container then
-            container:set_enabled(not enabled)
+                container:set_enabled(not enabled)
             else
                 -- Fallback: use FX directly if no container
                 fx:set_enabled(not enabled)
@@ -316,9 +361,12 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
 
         -- Column: Delete button
         ctx:table_set_column_index(1)
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
-        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x884444FF)
-        if ctx:button("×##delete_" .. state_guid, 20, 20) then
+        if icons.button_bordered(ctx, "delete_" .. state_guid, icons.Names.cancel, 20, 0xFF6666FF) then
+            -- Clean up any external source sends before deleting
+            local modulator_sidebar = require('lib.ui.device.modulator_sidebar')
+            if container and fx.track then
+                modulator_sidebar.cleanup_device_sends(container, fx.track)
+            end
             if opts.on_delete then
                 opts.on_delete(fx)
             else
@@ -326,24 +374,8 @@ function M.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_devic
             end
             interacted = true
         end
-        ctx:pop_style_color(2)
         if r.ImGui_IsItemHovered(ctx.ctx) then
             ctx:set_tooltip("Delete device")
-        end
-
-        -- Column: Collapse/Expand Device
-        ctx:table_set_column_index(2)
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
-        ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
-        local collapse_icon = "▼"  -- Down arrow for expanded (click to collapse)
-        if ctx:button(collapse_icon .. "##collapse_device_" .. state_guid, 20, 20) then
-            device_collapsed[state_guid] = true
-            interacted = true
-        end
-        ctx:pop_style_color(3)
-        if r.ImGui_IsItemHovered(ctx.ctx) then
-            ctx:set_tooltip("Collapse device controls")
         end
 
         ctx:end_table()

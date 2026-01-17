@@ -91,6 +91,25 @@ local function create_rack_container(rack_idx, position)
     -- Set up for parallel routing (64 channels for up to 32 stereo chains)
     rack:set_container_channels(64)
 
+    -- Configure rack's INPUT pin mappings to only receive stereo on channels 0/1
+    -- Using raw REAPER API to ensure it works
+    local track_ptr = state.track.pointer
+    local rack_ptr = rack.pointer
+
+    -- Clear and set input pins using raw API
+    for pin = 0, 7 do
+        r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 0, pin, 0, 0)
+    end
+    r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 0, 0, 1, 0)  -- input pin 0 <- channel 0
+    r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 0, 1, 2, 0)  -- input pin 1 <- channel 1
+
+    -- Clear and set output pins using raw API
+    for pin = 0, 7 do
+        r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 1, pin, 0, 0)
+    end
+    r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 1, 0, 1, 0)  -- output pin 0 -> channel 0
+    r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 1, 1, 2, 0)  -- output pin 1 -> channel 1
+
     -- Add the mixer JSFX at track level, then move into rack
     local mixer_fx = state.track:add_fx_by_name(M.MIXER_JSFX, false, -1)
     if mixer_fx and mixer_fx.pointer >= 0 then
@@ -109,17 +128,26 @@ local function create_rack_container(rack_idx, position)
         if mixer_inside then
             mixer_inside:set_named_config_param("renamed_name", naming.build_mixer_name(rack_idx))
 
-            -- Initialize master and chain params
-            local master_0db_norm = (0 + 24) / 36  -- 0.667
-            local pan_center_norm = 0.5
-            local vol_0db_norm = (0 + 60) / 72  -- 0.833
+            -- Set explicit output pin mappings to prevent REAPER from auto-routing
+            -- Mixer outputs stereo (pins 0/1) to rack channels 0/1 only
+            mixer_inside:set_pin_mappings(1, 0, 1, 0)  -- output pin 0 -> channel 0
+            mixer_inside:set_pin_mappings(1, 1, 2, 0)  -- output pin 1 -> channel 1
 
-            pcall(function() mixer_inside:set_param_normalized(0, master_0db_norm) end)
-            pcall(function() mixer_inside:set_param_normalized(1, pan_center_norm) end)
+            -- Initialize mixer params using actual values (normalized mapping is unreliable for JSFX)
+            -- Param indices: 0=Master dB, 1=Master Pan, 2-17=Chain 1-16 Vol, 18-33=Chain 1-16 Pan
+            local track_ptr = state.track.pointer
+            local mixer_ptr = mixer_inside.pointer
 
-            for i = 1, 16 do
-                pcall(function() mixer_inside:set_param_normalized(1 + i, vol_0db_norm) end)
-                pcall(function() mixer_inside:set_param_normalized(17 + i, pan_center_norm) end)
+            -- Set Master to 0dB and Pan to center
+            r.TrackFX_SetParam(track_ptr, mixer_ptr, 0, 0)  -- Master = 0 dB
+            r.TrackFX_SetParam(track_ptr, mixer_ptr, 1, 0)  -- Master Pan = center
+
+            -- Initialize all 16 chain volumes to 0dB and pans to center
+            for chain = 1, 16 do
+                local vol_param = 1 + chain      -- Params 2-17 are chain volumes
+                local pan_param = 17 + chain     -- Params 18-33 are chain pans
+                r.TrackFX_SetParam(track_ptr, mixer_ptr, vol_param, 0)  -- 0 dB
+                r.TrackFX_SetParam(track_ptr, mixer_ptr, pan_param, 0)  -- center
             end
         else
             -- Mixer was added but move failed - clean up and fail
@@ -280,7 +308,20 @@ function M.add_rack(parent_rack, position)
         if chain_inside then
             chain_inside:set_container_channels(64)
 
-            -- Set output channel routing
+            -- Clear all default INPUT pin mappings (pins 0-7)
+            -- Then set only pins 0/1 to receive from channels 0/1
+            for pin = 0, 7 do
+                chain_inside:set_pin_mappings(0, pin, 0, 0)  -- 0 = input
+            end
+            chain_inside:set_pin_mappings(0, 0, 1, 0)  -- input pin 0 <- channel 0
+            chain_inside:set_pin_mappings(0, 1, 2, 0)  -- input pin 1 <- channel 1
+
+            -- Clear all default OUTPUT pin mappings (pins 0-7)
+            for pin = 0, 7 do
+                chain_inside:set_pin_mappings(1, pin, 0, 0)  -- 1 = output
+            end
+
+            -- Set custom output channel routing to sideband channels
             local out_channel = chain_idx * 2
             local left_bits = math.floor(2 ^ out_channel)
             local right_bits = math.floor(2 ^ (out_channel + 1))
@@ -289,17 +330,7 @@ function M.add_rack(parent_rack, position)
             chain_inside:set_pin_mappings(1, 1, right_bits, 0)
         end
 
-        -- Set parent rack mixer volume for this chain to 0dB
-        local parent_mixer = fx_utils.get_rack_mixer(parent_rack)
-        if parent_mixer then
-            local vol_param = M.get_mixer_chain_volume_param(chain_idx)
-            local normalized_0db = 60 / 72  -- 0.833...
-
-            parent_mixer:set_param_normalized(vol_param, normalized_0db)
-
-            local pan_param = M.get_mixer_chain_pan_param(chain_idx)
-            parent_mixer:set_param_normalized(pan_param, 0.5)
-        end
+        -- Note: Don't initialize mixer chain params - JSFX defaults (0dB) are correct
 
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Rack", -1)
@@ -464,7 +495,20 @@ function M.add_empty_chain_to_rack(rack)
     if chain_inside then
         chain_inside:set_container_channels(64)
 
-        -- Set output channel routing
+        -- Clear all default INPUT pin mappings (pins 0-7)
+        -- Then set only pins 0/1 to receive from channels 0/1
+        for pin = 0, 7 do
+            chain_inside:set_pin_mappings(0, pin, 0, 0)  -- 0 = input
+        end
+        chain_inside:set_pin_mappings(0, 0, 1, 0)  -- input pin 0 <- channel 0
+        chain_inside:set_pin_mappings(0, 1, 2, 0)  -- input pin 1 <- channel 1
+
+        -- Clear all default OUTPUT pin mappings (pins 0-7)
+        for pin = 0, 7 do
+            chain_inside:set_pin_mappings(1, pin, 0, 0)  -- 1 = output
+        end
+
+        -- Set custom output channel routing to sideband channels
         local out_channel = chain_idx * 2
         local left_bits = math.floor(2 ^ out_channel)
         local right_bits = math.floor(2 ^ (out_channel + 1))
@@ -473,17 +517,7 @@ function M.add_empty_chain_to_rack(rack)
         chain_inside:set_pin_mappings(1, 1, right_bits, 0)
     end
 
-    -- Set mixer volume for this chain to 0dB
-    local mixer = fx_utils.get_rack_mixer(rack)
-    if mixer then
-        local vol_param = M.get_mixer_chain_volume_param(chain_idx)
-        local normalized_0db = 60 / 72  -- 0.833...
-        mixer:set_param_normalized(vol_param, normalized_0db)
-
-        -- Also set pan to center (normalized 0.5)
-        local pan_param = M.get_mixer_chain_pan_param(chain_idx)
-        mixer:set_param_normalized(pan_param, 0.5)
-    end
+    -- Note: Don't initialize mixer chain params - JSFX defaults (0dB) are correct
 
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Add Empty Chain", -1)
@@ -516,8 +550,10 @@ end
 --- Add a chain (C-container) to an existing rack.
 -- @param rack TrackFX Rack container
 -- @param plugin table Plugin info {full_name, name}
+-- @param opts table|nil Options: {bare = true} to skip adding utility
 -- @return TrackFX|nil Chain container or nil on failure
-function M.add_chain_to_rack(rack, plugin)
+function M.add_chain_to_rack(rack, plugin, opts)
+    opts = opts or {}
     if not state.track then
         r.ShowConsoleMsg("SideFX ERROR: add_chain_to_rack - no track in state\n")
         return nil
@@ -590,9 +626,56 @@ function M.add_chain_to_rack(rack, plugin)
         return nil
     end
 
-    -- Build names
-    local short_name = naming.get_short_plugin_name(plugin.full_name)
+    -- Build chain name (needed for both bare and normal mode)
     local chain_name = naming.build_chain_name(rack_idx, chain_idx)
+
+    -- Bare mode: create chain with raw plugin (no D-container)
+    if opts.bare then
+        -- Create chain container
+        local chain = state.track:add_fx_by_name("Container", false, -1)
+        if not chain or chain.pointer < 0 then
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Chain to Rack (bare, failed)", -1)
+            return nil
+        end
+        local chain_guid = chain:get_guid()
+        chain:set_named_config_param("renamed_name", chain_name)
+
+        -- Add raw plugin to chain with canonical BD naming
+        local raw_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
+        if raw_fx and raw_fx.pointer >= 0 then
+            -- Rename with canonical bare device name (first bare device in new chain)
+            local short_name = naming.get_short_plugin_name(plugin.full_name)
+            local bare_name = naming.build_chain_bare_device_name(rack_idx, chain_idx, 1, short_name)
+            raw_fx:set_named_config_param("renamed_name", bare_name)
+            chain:add_fx_to_container(raw_fx, 0)
+        end
+
+        -- Move chain into rack
+        r.PreventUIRefresh(-1)
+        r.PreventUIRefresh(1)
+        rack = state.track:find_fx_by_guid(rack_guid)
+        if rack then
+            if rack.pointer and rack.pointer >= 0x2000000 and rack.refresh_pointer then
+                rack:refresh_pointer()
+            end
+            chain = state.track:find_fx_by_guid(chain_guid)
+            if chain then
+                local insert_pos = fx_utils.count_chains_in_rack(rack) + 1  -- After mixer
+                rack:add_fx_to_container(chain, insert_pos)
+            end
+        end
+
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Chain to Rack (bare)", -1)
+        if chain_guid then
+            return state.track:find_fx_by_guid(chain_guid)
+        end
+        return nil
+    end
+
+    -- Build names for normal mode
+    local short_name = naming.get_short_plugin_name(plugin.full_name)
     local device_name = naming.build_chain_device_name(rack_idx, chain_idx, 1, short_name)
     local fx_name = naming.build_chain_device_fx_name(rack_idx, chain_idx, 1, short_name)
     local util_name = naming.build_chain_device_util_name(rack_idx, chain_idx, 1)
@@ -629,6 +712,8 @@ function M.add_chain_to_rack(rack, plugin)
         local util_inside = fx_utils.get_device_utility(device)
         if util_inside then
             util_inside:set_named_config_param("renamed_name", util_name)
+            -- Initialize gain to 0dB
+            util_inside:set_param(0, 0)
         end
     end
 
@@ -696,25 +781,45 @@ function M.add_chain_to_rack(rack, plugin)
         if chain_inside then
             chain_inside:set_container_channels(64)
 
-            -- Set output channel routing
+            -- Clear all default INPUT pin mappings (pins 0-7)
+            -- Then set only pins 0/1 to receive from channels 0/1
+            for pin = 0, 7 do
+                chain_inside:set_pin_mappings(0, pin, 0, 0)  -- 0 = input
+            end
+            chain_inside:set_pin_mappings(0, 0, 1, 0)  -- input pin 0 <- channel 0
+            chain_inside:set_pin_mappings(0, 1, 2, 0)  -- input pin 1 <- channel 1
+
+            -- Clear all default OUTPUT pin mappings (pins 0-7)
+            for pin = 0, 7 do
+                chain_inside:set_pin_mappings(1, pin, 0, 0)  -- 1 = output
+            end
+
+            -- Set custom output channel routing to sideband channels
             local out_channel = chain_idx * 2
             local left_bits = math.floor(2 ^ out_channel)
             local right_bits = math.floor(2 ^ (out_channel + 1))
 
             chain_inside:set_pin_mappings(1, 0, left_bits, 0)
             chain_inside:set_pin_mappings(1, 1, right_bits, 0)
-        end
 
-        -- Set mixer volume for this chain to 0dB
-        local mixer = fx_utils.get_rack_mixer(rack)
-        if mixer then
-            local vol_param = M.get_mixer_chain_volume_param(chain_idx)
-            local normalized_0db = 60 / 72  -- 0.833...
-            mixer:set_param_normalized(vol_param, normalized_0db)
-
-            -- Also set pan to center (normalized 0.5)
-            local pan_param = M.get_mixer_chain_pan_param(chain_idx)
-            mixer:set_param_normalized(pan_param, 0.5)
+            -- Initialize this chain's mixer params (REAPER doesn't apply JSFX defaults correctly)
+            -- Find mixer in rack and set chain volume to 0dB
+            local mixer = nil
+            for child in rack:iter_container_children() do
+                local ok, name = pcall(function() return child:get_name() end)
+                if ok and name and (name:find("Mixer") or name:match("^_R%d+_M$")) then
+                    mixer = child
+                    break
+                end
+            end
+            if mixer then
+                local track_ptr = state.track.pointer
+                local mixer_ptr = mixer.pointer
+                local vol_param = 1 + chain_idx      -- Params 2-17 are chain 1-16 volumes
+                local pan_param = 17 + chain_idx     -- Params 18-33 are chain 1-16 pans
+                r.TrackFX_SetParam(track_ptr, mixer_ptr, vol_param, 0)  -- 0 dB
+                r.TrackFX_SetParam(track_ptr, mixer_ptr, pan_param, 0)  -- center
+            end
         end
     end
 
@@ -747,9 +852,11 @@ end
 --- Add a device to an existing chain.
 -- @param chain TrackFX Chain container
 -- @param plugin table Plugin info {full_name, name}
+-- @param opts table|nil Options: {bare = true} to skip adding utility
 -- @return TrackFX|nil Device container or nil on failure
-function M.add_device_to_chain(chain, plugin)
+function M.add_device_to_chain(chain, plugin, opts)
     if not state.track or not chain or not plugin then return nil end
+    opts = opts or {}
     if not fx_utils.is_chain_container(chain) then return nil end
 
     r.Undo_BeginBlock()
@@ -784,6 +891,49 @@ function M.add_device_to_chain(chain, plugin)
         r.ShowConsoleMsg("SideFX: Found FX is not a chain container: " .. tostring(chain_name) .. "\n")
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Add Device to Chain (failed)", -1)
+        return nil
+    end
+
+    -- Bare mode: add raw plugin directly to chain (no D-container)
+    if opts.bare then
+        -- Parse hierarchy for naming
+        chain_name = chain:get_name()
+        local hierarchy = naming.parse_hierarchy(chain_name)
+        local rack_idx = hierarchy.rack_idx or 1
+        local chain_idx = hierarchy.chain_idx or 1
+
+        -- Count existing bare devices in this chain to get next index
+        local bare_count = 0
+        for child in chain:iter_container_children() do
+            local ok, child_name = pcall(function() return child:get_name() end)
+            if ok and child_name and naming.is_bare_device_name(child_name) then
+                local idx = naming.parse_bare_device_index(child_name)
+                if idx then
+                    bare_count = math.max(bare_count, idx)
+                end
+            end
+        end
+        local bare_idx = bare_count + 1
+
+        local raw_fx = state.track:add_fx_by_name(plugin.full_name, false, -1)
+        if raw_fx and raw_fx.pointer >= 0 then
+            -- Rename with canonical name
+            local short_name = naming.get_short_plugin_name(plugin.full_name)
+            local bare_name = naming.build_chain_bare_device_name(rack_idx, chain_idx, bare_idx, short_name)
+            raw_fx:set_named_config_param("renamed_name", bare_name)
+
+            local insert_pos = chain:get_container_child_count()
+            chain:add_fx_to_container(raw_fx, insert_pos)
+            r.PreventUIRefresh(-1)
+            r.Undo_EndBlock("SideFX: Add Plugin to Chain (bare)", -1)
+            -- Re-find the FX after move
+            local raw_guid = raw_fx:get_guid()
+            if raw_guid then
+                return state.track:find_fx_by_guid(raw_guid)
+            end
+        end
+        r.PreventUIRefresh(-1)
+        r.Undo_EndBlock("SideFX: Add Plugin to Chain (bare, failed)", -1)
         return nil
     end
 
@@ -836,6 +986,8 @@ function M.add_device_to_chain(chain, plugin)
         local util_inside = fx_utils.get_device_utility(device)
         if util_inside then
             util_inside:set_named_config_param("renamed_name", util_name)
+            -- Initialize gain to 0dB
+            util_inside:set_param(0, 0)
         end
     end
 
@@ -1078,26 +1230,18 @@ end
 -- @param target_chain_guid string|nil Target chain GUID to insert before (nil = end)
 -- @return boolean Success
 function M.move_chain_between_racks(source_rack, target_rack, chain_guid, target_chain_guid)
-    r.ShowConsoleMsg("[rack.lua] move_chain_between_racks called\n")
-    r.ShowConsoleMsg("[rack.lua] chain_guid: " .. tostring(chain_guid) .. "\n")
-    r.ShowConsoleMsg("[rack.lua] target_chain_guid: " .. tostring(target_chain_guid) .. "\n")
-
     if not state.track or not source_rack or not target_rack or not chain_guid then
-        r.ShowConsoleMsg("[rack.lua] ERROR: Missing parameters\n")
         return false
     end
     if not fx_utils.is_rack_container(source_rack) or not fx_utils.is_rack_container(target_rack) then
-        r.ShowConsoleMsg("[rack.lua] ERROR: Not rack containers\n")
         return false
     end
 
     -- Can't move to same rack (use reorder instead)
     if source_rack:get_guid() == target_rack:get_guid() then
-        r.ShowConsoleMsg("[rack.lua] Same rack detected, calling reorder instead\n")
         return M.reorder_chain_in_rack(source_rack, chain_guid, target_chain_guid)
     end
 
-    r.ShowConsoleMsg("[rack.lua] Starting cross-rack move...\n")
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
 
@@ -1108,22 +1252,18 @@ function M.move_chain_between_racks(source_rack, target_rack, chain_guid, target
     -- Find chain in source rack
     local chain = state.track:find_fx_by_guid(chain_guid)
     if not chain then
-        r.ShowConsoleMsg("[rack.lua] ERROR: Could not find chain by GUID\n")
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Move Chain (failed)", -1)
         return false
     end
-    r.ShowConsoleMsg("[rack.lua] Found chain\n")
 
     -- Verify chain is in source rack
     local parent = chain:get_parent_container()
     if not parent or parent:get_guid() ~= source_rack_guid then
-        r.ShowConsoleMsg("[rack.lua] ERROR: Chain parent doesn't match source rack\n")
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Move Chain (failed)", -1)
         return false
     end
-    r.ShowConsoleMsg("[rack.lua] Verified chain is in source rack\n")
 
     -- Find target position in target rack
     local target_pos = 0
@@ -1146,39 +1286,31 @@ function M.move_chain_between_racks(source_rack, target_rack, chain_guid, target
     if not target_chain_guid then
         target_pos = mixer_pos or target_pos
     end
-    r.ShowConsoleMsg("[rack.lua] Target position: " .. target_pos .. "\n")
 
     -- Extract chain from source rack
-    r.ShowConsoleMsg("[rack.lua] Extracting chain from source rack...\n")
     chain:move_out_of_container()
 
     -- Re-find everything by GUID after move
-    r.ShowConsoleMsg("[rack.lua] Re-finding FX by GUID...\n")
     chain = state.track:find_fx_by_guid(chain_guid)
     source_rack = state.track:find_fx_by_guid(source_rack_guid)
     target_rack = state.track:find_fx_by_guid(target_rack_guid)
 
     if not chain or not source_rack or not target_rack then
-        r.ShowConsoleMsg("[rack.lua] ERROR: Could not re-find FX after extraction\n")
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Move Chain (failed)", -1)
         return false
     end
-    r.ShowConsoleMsg("[rack.lua] Successfully re-found all FX\n")
 
     -- Insert into target rack
-    r.ShowConsoleMsg("[rack.lua] Inserting into target rack at position " .. target_pos .. "\n")
     target_rack:add_fx_to_container(chain, target_pos)
 
     -- Renumber chains in both racks
-    r.ShowConsoleMsg("[rack.lua] Renumbering chains in both racks...\n")
     M.renumber_chains_in_rack(source_rack)
     M.renumber_chains_in_rack(target_rack)
 
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Move Chain Between Racks", -1)
 
-    r.ShowConsoleMsg("[rack.lua] Cross-rack move completed successfully\n")
     return true
 end
 

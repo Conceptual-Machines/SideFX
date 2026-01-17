@@ -1,5 +1,5 @@
 --- Constants
--- Shared constants for SideFX (icons, etc.)
+-- Shared constants for SideFX
 -- @module constants
 -- @author Nomad Monad
 -- @license MIT
@@ -7,38 +7,25 @@
 local M = {}
 
 --------------------------------------------------------------------------------
--- Icons (using OpenMoji font)
+-- Icons (legacy - use lib.ui.common.icons module instead)
 --------------------------------------------------------------------------------
 
+-- These are kept for backwards compatibility but are no longer used.
+-- Use the icons module (lib.ui.common.icons) for PNG-based icons.
 M.Icons = {
-    folder_open = "1F4C2",      -- 📂
-    folder_closed = "1F4C1",    -- 📁
-    package = "1F4E6",          -- 📦
-    plug = "1F50C",             -- 🔌
-    musical_keyboard = "1F3B9", -- 🎹
-    control_knobs = "1F39B",    -- 🎛️ (4 knobs for FX)
-    wrench = "1F527",           -- 🔧
-    speaker_high = "1F50A",     -- 🔊
-    speaker_muted = "1F507",    -- 🔇
-    arrows_counterclockwise = "1F504", -- 🔄
-    circle_filled = "2B24",     -- ⬤ (filled circle)
-    circle_empty = "25EF",      -- ◯ (large circle, more visible)
-    window = "1F5D5",           -- 🗕 (window/UI)
-    computer = "1F4BB",         -- 💻 (computer/screen)
-    desktop = "1F5A5",          -- 🖥 (desktop computer)
-    floppy_disk = "1F4BE",      -- 💾 (save/presets)
-    gear = "2699",              -- ⚙️ (settings/config)
-    lock_closed = "1F512",      -- 🔒 (locked/snap on)
-    lock_open = "1F513",        -- 🔓 (unlocked/snap off)
+    folder_open = "folder-open",
+    folder_closed = "folder-closed",
+    plug = "plug",
+    musical_keyboard = "keyboard",
+    control_knobs = "knobs",
+    wrench = "wrench",
+    speaker_high = "speaker-on",
+    speaker_muted = "speaker-muted",
+    arrows_counterclockwise = "refresh",
+    floppy_disk = "save",
+    gear = "gear",
+    lock_closed = "lock-closed",
+    lock_open = "lock-open",
 }
-
---- Get icon text from EmojImGui
--- @param emojimgui EmojImGui module
--- @param icon_id string Icon ID from Icons table
--- @return string UTF-8 character for the icon
-function M.icon_text(emojimgui, icon_id)
-    local info = emojimgui.Asset.CharInfo("OpenMoji", icon_id)
-    return info and info.utf8 or "?"
-end
 
 return M

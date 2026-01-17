@@ -46,6 +46,21 @@ M.PARAM_PLAYHEAD_POSITION = 64    -- slider87: Current phase position (0-1)
 M.PARAM_OFFSET = 65               -- slider88: Offset (0-1)
 M.PARAM_BIPOLAR = 66              -- slider89: Bipolar mode (0=Unipolar, 1=Bipolar)
 
+-- Audio source selection (slider90)
+M.PARAM_AUDIO_SOURCE = 67         -- slider90: Audio Source (0=Internal, 1=External)
+
+-- Audio input gain (slider91)
+M.PARAM_AUDIO_INPUT_GAIN = 68     -- slider91: Audio Input Gain (0-24 dB)
+
+-- Debug: Input level (slider92)
+M.PARAM_INPUT_LEVEL_DEBUG = 69    -- slider92: Input Level (read-only debug)
+
+-- Triggered state (slider93, read-only for UI)
+M.PARAM_TRIGGERED = 70            -- slider93: Triggered state (0 or 1)
+
+-- MIDI Gate Mode (slider94)
+M.PARAM_MIDI_GATE_MODE = 71       -- slider94: MIDI Gate Mode (0=Trigger, 1=Gate)
+
 -- Helper: Max segments (16 points = 15 segments)
 M.MAX_SEGMENTS = 15
 

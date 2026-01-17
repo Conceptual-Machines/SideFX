@@ -6,8 +6,9 @@
 
 local imgui = require('imgui')
 local helpers = require('helpers')
-local constants = require('lib.core.constants')
+local icons = require('lib.ui.common.icons')
 local param_selector = require('lib.ui.device.param_selector')
+local click_or_drag = require('lib.ui.common.click_or_drag')
 
 local M = {}
 
@@ -57,52 +58,69 @@ function M.draw(ctx, state, icon_font, icon_size, on_plugin_add, filter_plugins)
     end
 
     if ctx:begin_child("PluginList", 0, 0, imgui.ChildFlags.Border()) then
+        local r = reaper
         local i = 0
         for plugin in helpers.iter(state.browser.filtered) do
             i = i + 1
+            local item_id = "plugin_" .. i
             ctx:push_id(i)
 
-            -- Icon with emoji font
-            if icon_font then ctx:push_font(icon_font, icon_size) end
-            -- Get emojimgui from global (set up in main script)
-            local emojimgui = package.loaded['emojimgui'] or require('emojimgui')
-            local icon = plugin.is_instrument
-                and constants.icon_text(emojimgui, constants.Icons.musical_keyboard)
-                or constants.icon_text(emojimgui, constants.Icons.control_knobs)
-            ctx:text(icon)
-            if icon_font then ctx:pop_font() end
+            -- Icon
+            local icon_name = plugin.is_instrument and icons.Names.keyboard or icons.Names.knobs
+            icons.image(ctx, icon_name, 16)
 
-            -- Text with default font
+            -- Text as selectable (but don't trigger on click - we handle it ourselves)
             ctx:same_line()
-            if ctx:selectable(plugin.name, false) then
-                on_plugin_add(plugin)
+            click_or_drag.begin_item(ctx, item_id)
+            ctx:selectable(plugin.name, false)
+            local action = click_or_drag.end_item(ctx, item_id)
+
+            -- Handle click (release without drag) = add plugin
+            if action == "click" then
+                -- Check for Shift key = add as bare device (no utility)
+                local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+                local opts = shift_held and { bare = true } or nil
+                on_plugin_add(plugin, nil, opts)
+            end
+
+            -- Handle drag = start drag-drop
+            if action == "drag_start" or action == "dragging" then
+                if ctx:begin_drag_drop_source(r.ImGui_DragDropFlags_SourceAllowNullID()) then
+                    ctx:set_drag_drop_payload("PLUGIN_ADD", plugin.full_name)
+                    -- Show hint if Shift held during drag
+                    local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+                    local label = shift_held and "Add (bare): " or "Add: "
+                    ctx:text(label .. plugin.name)
+                    ctx:end_drag_drop_source()
+                end
             end
 
             -- Right-click context menu (use plugin full_name for unique ID)
             local menu_id = "PluginContextMenu_" .. (plugin.full_name:gsub("[^%w]", "_"))
             if ctx:begin_popup_context_item(menu_id) then
+                if ctx:menu_item("Add as Bare Device") then
+                    on_plugin_add(plugin, nil, { bare = true })
+                end
+                if ctx:menu_item("Add Post-FX") then
+                    -- nil position = add at end (post-fx)
+                    on_plugin_add(plugin, nil)
+                end
+                ctx:separator()
                 if ctx:menu_item("Select Parameters...") then
                     param_selector.open(plugin.name, plugin.full_name)
                 end
                 ctx:end_popup()
             end
 
-            -- Drag source for plugin (drag to add to chain)
-            if ctx:begin_drag_drop_source() then
-                ctx:set_drag_drop_payload("PLUGIN_ADD", plugin.full_name)
-                ctx:text("Add: " .. plugin.name)
-                ctx:end_drag_drop_source()
-            end
-
-            if ctx:is_item_hovered() then
-                ctx:set_tooltip(plugin.full_name .. "\n(drag to chain or click to add)\n(right-click to select parameters)")
+            if r.ImGui_IsItemHovered(ctx.ctx) then
+                ctx:set_tooltip(plugin.full_name .. "\n(drag to chain or click to add, Shift=bare)\n(right-click for options)")
             end
 
             ctx:pop_id()
         end
         ctx:end_child()
     end
-    
+
     -- Draw parameter selector dialog if open
     if param_selector.is_open() then
         param_selector.draw(ctx, state)

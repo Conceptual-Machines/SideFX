@@ -226,15 +226,22 @@ function M.get_midi_notes(track, start_time, end_time)
             local take = r.GetActiveTake(item)
             if take and r.TakeIsMIDI(take) then
                 local source = r.GetMediaItemTake_Source(take)
-                local source_len = r.GetMediaSourceLength(source)
+                local loop_enabled = r.GetMediaItemInfo_Value(item, "B_LOOPSRC") == 1
+
+                -- Get actual source/loop length using PCM_Source_GetSectionInfo
+                -- This returns the correct loop length for MIDI items
+                local _, _, section_len = r.PCM_Source_GetSectionInfo(source)
+                local source_len = section_len > 0 and section_len or r.GetMediaSourceLength(source)
+
+                -- num_loops: if source is shorter than item and loop enabled, calculate loops
+                local num_loops = (loop_enabled and source_len > 0 and source_len < item_len)
+                    and math.ceil(item_len / source_len) or 1
+
+                -- Get all MIDI notes in this take
+                local _, note_count = r.MIDI_CountEvts(take)
 
                 -- Skip items completely outside our time range
                 if item_end >= start_time and item_pos <= end_time then
-                    -- Get all MIDI notes in this take
-                    local _, note_count = r.MIDI_CountEvts(take)
-
-                    -- Calculate how many loops fit in the item
-                    local num_loops = math.ceil(item_len / source_len)
 
                     for loop = 0, num_loops - 1 do
                         local loop_offset = loop * source_len
@@ -413,6 +420,24 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
     local resolution = options.resolution or M.DEFAULT_OPTIONS.resolution
     local range_mode = options.range_mode or M.DEFAULT_OPTIONS.range_mode
 
+    -- Re-find FX by GUID to ensure fresh pointers (indices can change after adding/removing FX)
+    local ok_mod_guid, mod_guid = pcall(function() return modulator:get_guid() end)
+    local ok_target_guid, target_guid = pcall(function() return target_fx:get_guid() end)
+
+    if not ok_mod_guid or not mod_guid then
+        return false, "Modulator reference is invalid"
+    end
+    if not ok_target_guid or not target_guid then
+        return false, "Target FX reference is invalid"
+    end
+
+    modulator = track:find_fx_by_guid(mod_guid)
+    target_fx = track:find_fx_by_guid(target_guid)
+
+    if not modulator or not target_fx then
+        return false, "Could not find modulator or target FX (may have been deleted)"
+    end
+
     -- Get link information
     local link_info = M.get_link_info(target_fx, param_idx)
     if not link_info then
@@ -451,7 +476,11 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
         return false, "Could not create automation envelope"
     end
 
-    -- Begin undo block
+    -- Save any pending changes as separate undo point before bake
+    -- This prevents undo from rolling back modulator waveform/rate changes made before bake
+    r.Undo_OnStateChange("Modulator changes")
+
+    -- Begin undo block for bake operation
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
 
@@ -470,9 +499,6 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
             r.Undo_EndBlock("Bake LFO to Automation", -1)
             return false, "No MIDI notes found in time range"
         end
-
-        r.ShowConsoleMsg(string.format("Bake: Found %d MIDI notes for trigger (cycle_duration=%.3fs)\n",
-            #midi_notes, cycle_duration))
 
         for _, note in ipairs(midi_notes) do
             local note_duration = note.duration
@@ -533,7 +559,7 @@ function M.bake_to_automation(track, modulator, target_fx, param_idx, options)
     -- Sort points after batch insert
     r.Envelope_SortPoints(envelope)
 
-    -- Optionally disable parameter link (set scale to 0)
+    -- Optionally disable parameter link (set scale to 0, keeps link visible but inactive)
     if options.disable_link then
         local plink_prefix = string.format("param.%d.plink.", param_idx)
         target_fx:set_named_config_param(plink_prefix .. "scale", "0")
@@ -568,6 +594,24 @@ function M.bake_all_links(track, modulator, target_fx, links, options)
 
     if not links or #links == 0 then
         return false, "No links provided"
+    end
+
+    -- Re-find FX by GUID to ensure fresh pointers
+    local ok_mod_guid, mod_guid = pcall(function() return modulator:get_guid() end)
+    local ok_target_guid, target_guid = pcall(function() return target_fx:get_guid() end)
+
+    if not ok_mod_guid or not mod_guid then
+        return false, "Modulator reference is invalid"
+    end
+    if not ok_target_guid or not target_guid then
+        return false, "Target FX reference is invalid"
+    end
+
+    modulator = track:find_fx_by_guid(mod_guid)
+    target_fx = track:find_fx_by_guid(target_guid)
+
+    if not modulator or not target_fx then
+        return false, "Could not find modulator or target FX (may have been deleted)"
     end
 
     local baked_count = 0

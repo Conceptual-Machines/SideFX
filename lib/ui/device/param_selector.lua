@@ -17,6 +17,7 @@ local dialog_state = {
     all_params = {},  -- {idx, name, formatted, detected_unit}
     selected = {},  -- {[param_idx] = true}
     unit_overrides = {},  -- {[param_idx] = unit_id or "auto"}
+    range_overrides = {},  -- {[param_idx] = {min = n, max = n}}
     search_text = "",
     popup_opened = false,  -- Track if popup has been opened
 }
@@ -136,7 +137,7 @@ function M.draw(ctx, state)
         ctx:spacing()
 
         -- Parameter list in a scrollable child
-        if ctx:begin_child("ParamList", 600, 400, imgui.ChildFlags.Border()) then
+        if ctx:begin_child("ParamList", 750, 400, imgui.ChildFlags.Border()) then
             local filtered_params = {}
             local search_lower = dialog_state.search_text:lower()
             
@@ -245,6 +246,51 @@ function M.draw(ctx, state)
                     r.ImGui_EndCombo(ctx.ctx)
                 end
 
+                -- Min/Max input fields (only show when unit is not auto or plugin)
+                local show_range = current_unit ~= "auto" and current_unit ~= "plugin"
+                if show_range then
+                    -- Initialize range if not set
+                    if not dialog_state.range_overrides[param.idx] then
+                        -- Get default range for the unit
+                        local default_min, default_max = unit_detector.get_unit_default_range(current_unit)
+                        dialog_state.range_overrides[param.idx] = { min = default_min, max = default_max }
+                    end
+
+                    local range = dialog_state.range_overrides[param.idx]
+
+                    ctx:same_line()
+                    ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
+                    ctx:text("Min:")
+                    ctx:pop_style_color()
+                    ctx:same_line()
+                    ctx:set_next_item_width(50)
+                    local min_changed, new_min = r.ImGui_InputDouble(ctx.ctx, "##min_" .. param.idx, range.min, 0, 0, "%.1f")
+                    if min_changed then
+                        range.min = new_min
+                    end
+
+                    ctx:same_line()
+                    ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
+                    ctx:text("Max:")
+                    ctx:pop_style_color()
+                    ctx:same_line()
+                    ctx:set_next_item_width(50)
+                    local max_changed, new_max = r.ImGui_InputDouble(ctx.ctx, "##max_" .. param.idx, range.max, 0, 0, "%.1f")
+                    if max_changed then
+                        range.max = new_max
+                    end
+
+                    -- Show total range for semitones/cents
+                    if current_unit == "st" or current_unit == "ct" then
+                        local total = range.max - range.min
+                        local unit_label = current_unit == "st" and "st" or "ct"
+                        ctx:same_line()
+                        ctx:push_style_color(imgui.Col.Text(), 0x88CCFFFF)
+                        ctx:text(string.format("= %.0f %s", total, unit_label))
+                        ctx:pop_style_color()
+                    end
+                end
+
                 -- Show detected unit and plugin's formatted value
                 ctx:same_line()
                 ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
@@ -270,6 +316,7 @@ function M.draw(ctx, state)
             dialog_state.all_params = {}
             dialog_state.selected = {}
             dialog_state.unit_overrides = {}
+            dialog_state.range_overrides = {}
             dialog_state.search_text = ""
             dialog_state.popup_opened = false
         end
@@ -309,9 +356,22 @@ function M.draw(ctx, state)
                 -- Persist to ExtState
                 state_mod.save_param_selections()
 
-                -- Save unit overrides (only non-auto values)
+                -- Save unit overrides (only non-auto values) with custom ranges
                 for param_idx, unit_id in pairs(dialog_state.unit_overrides) do
-                    if unit_id and unit_id ~= "auto" then
+                    if unit_id and unit_id ~= "auto" and unit_id ~= "plugin" then
+                        -- Get custom range if set, otherwise use defaults
+                        local range = dialog_state.range_overrides[param_idx]
+                        local range_min, range_max
+                        if range then
+                            range_min = range.min
+                            range_max = range.max
+                        else
+                            -- Use default range for this unit
+                            range_min, range_max = unit_detector.get_unit_default_range(unit_id)
+                        end
+                        state_mod.set_param_unit_override(dialog_state.plugin_full_name, param_idx, unit_id, range_min, range_max)
+                    elseif unit_id == "plugin" then
+                        -- Plugin format: no range needed
                         state_mod.set_param_unit_override(dialog_state.plugin_full_name, param_idx, unit_id)
                     else
                         -- Clear override if set to auto
@@ -327,13 +387,14 @@ function M.draw(ctx, state)
             dialog_state.all_params = {}
             dialog_state.selected = {}
             dialog_state.unit_overrides = {}
+            dialog_state.range_overrides = {}
             dialog_state.search_text = ""
             dialog_state.popup_opened = false
         end
-        
+
         r.ImGui_EndPopup(ctx.ctx)
     end
-    
+
     -- Close dialog if window was closed
     if not p_open then
         dialog_state.open = false
@@ -342,6 +403,7 @@ function M.draw(ctx, state)
         dialog_state.all_params = {}
         dialog_state.selected = {}
         dialog_state.unit_overrides = {}
+        dialog_state.range_overrides = {}
         dialog_state.search_text = ""
         dialog_state.popup_opened = false
     end
@@ -373,6 +435,7 @@ function M.open(plugin_name, plugin_full_name)
     
     dialog_state.selected = {}
     dialog_state.unit_overrides = {}
+    dialog_state.range_overrides = {}
 
     if state.param_selections and state.param_selections[plugin_full_name] then
         -- Use saved selections
@@ -389,10 +452,19 @@ function M.open(plugin_name, plugin_full_name)
         end
     end
 
-    -- Load existing unit overrides
+    -- Load existing unit overrides (handles both old string format and new table format)
     if state.param_unit_overrides and state.param_unit_overrides[plugin_full_name] then
-        for param_idx, unit_id in pairs(state.param_unit_overrides[plugin_full_name]) do
-            dialog_state.unit_overrides[param_idx] = unit_id
+        for param_idx, override in pairs(state.param_unit_overrides[plugin_full_name]) do
+            if type(override) == "string" then
+                -- Old format: just unit ID
+                dialog_state.unit_overrides[param_idx] = override
+            elseif type(override) == "table" then
+                -- New format: {unit = "id", min = n, max = n}
+                dialog_state.unit_overrides[param_idx] = override.unit
+                if override.min and override.max then
+                    dialog_state.range_overrides[param_idx] = { min = override.min, max = override.max }
+                end
+            end
         end
     end
 end

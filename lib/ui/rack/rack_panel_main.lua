@@ -6,6 +6,7 @@
 
 local imgui = require('imgui')
 local r = reaper
+local icons = require('lib.ui.common.icons')
 
 local M = {}
 
@@ -25,14 +26,16 @@ local drawing = nil
 -- @param state table State table
 -- @param drawing module Drawing module
 local function draw_collapsed_fader_control(ctx, mixer, rack_guid, state, drawing)
-    local fader_w = 32
-    local meter_w = 12
-    local scale_w = 20
+    local fader_w = 20
+    local meter_w = 10
+    local scale_w = 16
 
-    local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
-    if not ok_gain or not gain_norm then return end
+    -- Read actual dB value directly (normalized mapping is non-linear for JSFX)
+    local ok_gain, gain_db = pcall(function() return mixer:get_param(0) end)
+    if not ok_gain or not gain_db then return end
 
-    local gain_db = -24 + gain_norm * 36
+    -- Calculate normalized position for fader visualization (0-1 range for -24 to +12)
+    local gain_norm = (gain_db + 24) / 36
     local gain_format = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.0f", gain_db) or string.format("%.0f", gain_db))
 
     local _, remaining_h = ctx:get_content_region_avail()
@@ -41,7 +44,7 @@ local function draw_collapsed_fader_control(ctx, mixer, rack_guid, state, drawin
 
     local avail_w, _ = ctx:get_content_region_avail()
     local total_w = scale_w + fader_w + meter_w + 4
-    local offset_x = math.max(0, (avail_w - total_w) / 2 - 8)
+    local offset_x = math.max(0, (avail_w - total_w) / 2)
     ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + offset_x)
 
     local screen_x, screen_y = ctx:get_cursor_screen_pos()
@@ -52,7 +55,7 @@ local function draw_collapsed_fader_control(ctx, mixer, rack_guid, state, drawin
     local meter_x = fader_x + fader_w + 2
 
     -- Draw scale, fader, and meters
-    drawing.draw_db_scale_marks(ctx, draw_list, scale_x, screen_y, fader_h, scale_w)
+    drawing.draw_db_scale_marks(ctx, draw_list, scale_x, screen_y, fader_h, scale_w, false)
     drawing.draw_fader_visualization(ctx, draw_list, fader_x, screen_y, fader_w, fader_h, gain_norm)
     drawing.draw_stereo_meters_visualization(ctx, draw_list, meter_x, screen_y, meter_w, fader_h)
 
@@ -66,30 +69,50 @@ local function draw_collapsed_fader_control(ctx, mixer, rack_guid, state, drawin
         drawing.draw_peak_meters(ctx, draw_list, meter_l_x, meter_r_x, screen_y, fader_h, half_meter_w, peak_l, peak_r)
     end
 
-    -- Interactive slider
+    -- Interactive slider with fine control (Alt+drag)
     ctx:set_cursor_screen_pos(fader_x, screen_y)
     ctx:push_style_color(imgui.Col.FrameBg(), 0x00000000)
     ctx:push_style_color(imgui.Col.FrameBgHovered(), 0x00000000)
     ctx:push_style_color(imgui.Col.FrameBgActive(), 0x00000000)
     ctx:push_style_color(imgui.Col.SliderGrab(), 0xAAAAAAFF)
     ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
-    local gain_changed, new_gain_db = ctx:v_slider_double("##master_gain_v", fader_w, fader_h, gain_db, -24, 12, "")
+    local gain_changed, new_gain_db = drawing.v_slider_double_fine(ctx, "##master_gain_v", fader_w, fader_h, gain_db, -24, 12, "", nil, nil, 0)
     if gain_changed then
-        pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
-    end
-    if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-        pcall(function() mixer:set_param_normalized(0, (0 + 24) / 36) end)
+        pcall(function() mixer:set_param(0, new_gain_db) end)
     end
     ctx:pop_style_color(5)
 
-    -- dB label
-    local label_y = screen_y + fader_h + 2
-    local db_text_w, _ = ctx:calc_text_size(gain_format)
-    local label_x = fader_x + (fader_w - db_text_w) / 2
-    ctx:set_cursor_screen_pos(label_x, label_y)
-    ctx:text(gain_format)
+    -- Floating dB value on hover
+    local is_fader_hovered = r.ImGui_IsItemHovered(ctx.ctx)
+    if is_fader_hovered then
+        local hover_label = string.format("%.1f dB", gain_db)
+        local hover_text_w = r.ImGui_CalcTextSize(ctx.ctx, hover_label)
+        local hover_box_w = hover_text_w + 8
+        local hover_box_h = 18
+        local hover_x = fader_x - hover_box_w - 4
+        local _, mouse_y = r.ImGui_GetMousePos(ctx.ctx)
+        local hover_y = mouse_y - hover_box_h / 2
+        -- Clamp to fader bounds
+        hover_y = math.max(screen_y, math.min(screen_y + fader_h - hover_box_h, hover_y))
 
-    -- Edit popup
+        r.ImGui_DrawList_AddRectFilled(draw_list, hover_x, hover_y, hover_x + hover_box_w, hover_y + hover_box_h, 0x222222EE, 3)
+        r.ImGui_DrawList_AddRect(draw_list, hover_x, hover_y, hover_x + hover_box_w, hover_y + hover_box_h, 0x888888FF, 3)
+        r.ImGui_DrawList_AddText(draw_list, hover_x + 4, hover_y + 2, 0xFFFFFFFF, hover_label)
+    end
+
+    -- dB label below fader
+    local label_h = 16
+    local label_y = screen_y + fader_h + 2
+    local label_x = fader_x
+    r.ImGui_DrawList_AddRectFilled(draw_list, label_x, label_y, label_x + fader_w, label_y + label_h, 0x222222FF, 2)
+    local db_text_w = r.ImGui_CalcTextSize(ctx.ctx, gain_format)
+    r.ImGui_DrawList_AddText(draw_list, label_x + (fader_w - db_text_w) / 2, label_y + 1, 0xCCCCCCFF, gain_format)
+
+    -- Invisible button for dB label interaction
+    r.ImGui_SetCursorScreenPos(ctx.ctx, label_x, label_y)
+    ctx:invisible_button("##rack_gain_db_label", fader_w, label_h)
+
+    -- Edit popup on double-click
     if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
         ctx:open_popup("##gain_edit_popup_" .. rack_guid)
     end
@@ -99,7 +122,7 @@ local function draw_collapsed_fader_control(ctx, mixer, rack_guid, state, drawin
         local input_changed, input_val = ctx:input_double("##gain_input", gain_db, 0, 0, "%.1f")
         if input_changed then
             local new_db = math.max(-24, math.min(12, input_val))
-            pcall(function() mixer:set_param_normalized(0, (new_db + 24) / 36) end)
+            pcall(function() mixer:set_param(0, new_db) end)
         end
         if ctx:is_key_pressed(imgui.Key.Enter()) or ctx:is_key_pressed(imgui.Key.Escape()) then
             ctx:close_current_popup()
@@ -123,29 +146,29 @@ local function draw_master_controls_table(ctx, mixer, draw_pan_slider)
         ctx:text_colored(0xAAAAAAFF, "Master")
 
         ctx:table_set_column_index(1)
-        local ok_gain, gain_norm = pcall(function() return mixer:get_param_normalized(0) end)
-        if ok_gain and gain_norm then
-            local gain_db = -24 + gain_norm * 36
+        -- Read actual dB value directly (normalized mapping is non-linear for JSFX)
+        local ok_gain, gain_db = pcall(function() return mixer:get_param(0) end)
+        if ok_gain and gain_db then
             local gain_format = (math.abs(gain_db) < 0.1) and "0" or (gain_db > 0 and string.format("+%.1f", gain_db) or string.format("%.1f", gain_db))
             ctx:set_next_item_width(-1)
             local gain_changed, new_gain_db = ctx:slider_double("##master_gain", gain_db, -24, 12, gain_format)
             if gain_changed then
-                pcall(function() mixer:set_param_normalized(0, (new_gain_db + 24) / 36) end)
+                pcall(function() mixer:set_param(0, new_gain_db) end)
             end
             if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-                pcall(function() mixer:set_param_normalized(0, (0 + 24) / 36) end)
+                pcall(function() mixer:set_param(0, 0) end)  -- Reset to 0dB
             end
         else
             ctx:text_disabled("--")
         end
 
         ctx:table_set_column_index(2)
-        local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(1) end)
-        if ok_pan and pan_norm then
-            local pan_val = -100 + pan_norm * 200
+        -- Read actual pan value directly (normalized mapping is non-linear for JSFX)
+        local ok_pan, pan_val = pcall(function() return mixer:get_param(1) end)
+        if ok_pan and pan_val then
             local pan_changed, new_pan = draw_pan_slider(ctx, "##master_pan", pan_val, 60)
             if pan_changed then
-                pcall(function() mixer:set_param_normalized(1, (new_pan + 100) / 200) end)
+                pcall(function() mixer:set_param(1, new_pan) end)
             end
         else
             ctx:text_disabled("C")
@@ -181,12 +204,14 @@ local function draw_chains_table(ctx, chains, rack, mixer, is_nested, state, get
         ctx:text_disabled("No chains yet")
         ctx:text_disabled("Drag plugins here to create chains")
     else
-        if ctx:begin_table("chains_table", 5, imgui.TableFlags.SizingStretchProp()) then
+        if ctx:begin_table("chains_table", 7, imgui.TableFlags.SizingStretchProp()) then
             ctx:table_setup_column("name", imgui.TableColumnFlags.WidthFixed(), 80)
-            ctx:table_setup_column("enable", imgui.TableColumnFlags.WidthFixed(), 24)
-            ctx:table_setup_column("delete", imgui.TableColumnFlags.WidthFixed(), 24)
-            ctx:table_setup_column("volume", imgui.TableColumnFlags.WidthStretch(), 1)
-            ctx:table_setup_column("pan", imgui.TableColumnFlags.WidthFixed(), 60)
+            ctx:table_setup_column("mute", imgui.TableColumnFlags.WidthFixed(), 22)
+            ctx:table_setup_column("solo", imgui.TableColumnFlags.WidthFixed(), 22)
+            ctx:table_setup_column("enable", imgui.TableColumnFlags.WidthFixed(), 22)
+            ctx:table_setup_column("delete", imgui.TableColumnFlags.WidthFixed(), 22)
+            ctx:table_setup_column("volume", imgui.TableColumnFlags.WidthStretch(), 2)
+            ctx:table_setup_column("pan", imgui.TableColumnFlags.WidthFixed(), 50)
 
             for j, chain in ipairs(chains) do
                 ctx:table_next_row()
@@ -274,8 +299,11 @@ local function draw_rack_drop_zone(ctx, rack, has_payload, state, add_chain_to_r
         -- Accept plugin drops
         local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
         if accepted and plugin_name then
+            -- Check for Shift key = add as bare device (no utility)
+            local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
+            local opts = shift_held and { bare = true } or nil
             local plugin = { full_name = plugin_name, name = plugin_name }
-            add_chain_to_rack(rack, plugin)
+            add_chain_to_rack(rack, plugin, opts)
         end
 
         -- Accept rack drops
@@ -287,18 +315,14 @@ local function draw_rack_drop_zone(ctx, rack, has_payload, state, add_chain_to_r
         -- Accept chain drops (cross-rack move)
         local chain_accepted, dragged_guid = ctx:accept_drag_drop_payload("CHAIN_REORDER")
         if chain_accepted and dragged_guid then
-            reaper.ShowConsoleMsg("[drop_zone] Chain drop accepted. Dragged GUID: " .. dragged_guid .. "\n")
             local dragged_chain = state.track:find_fx_by_guid(dragged_guid)
             if dragged_chain then
                 local source_rack = dragged_chain:get_parent_container()
                 if source_rack and source_rack:get_guid() ~= rack:get_guid() then
                     -- Different rack: move to end of target rack
-                    reaper.ShowConsoleMsg("[drop_zone] Moving chain to end of target rack\n")
                     if move_chain_between_racks then
                         move_chain_between_racks(source_rack, rack, dragged_guid, nil)
                     end
-                else
-                    reaper.ShowConsoleMsg("[drop_zone] Same rack or no parent - ignoring\n")
                 end
             end
         end
@@ -387,7 +411,7 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
         end
     end
 
-    local rack_w = is_expanded and 350 or 150
+    local rack_w = is_expanded and 350 or 70
     local rack_h = avail_height - 10
 
     -- Check if this rack is selected (first item in expanded_path)
@@ -397,6 +421,10 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
     -- Highlight border if selected
     if is_selected then
         ctx:push_style_color(reaper.ImGui_Col_Border(), 0x5588BBAA)  -- Subtle blue highlight
+    end
+    -- Reduce padding for collapsed rack
+    if not is_expanded then
+        ctx:push_style_var(imgui.StyleVar.WindowPadding(), 2, 2)
     end
     -- Use unique child ID that includes nested flag to ensure no state conflicts
     local child_id = is_nested and ("rack_nested_" .. rack_guid) or ("rack_" .. rack_guid)
@@ -441,23 +469,36 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
         local mixer = get_rack_mixer(rack)
 
         if not is_expanded then
-            -- Collapsed view - separate tables without dummy() calls
+            -- Collapsed view - use table for centered layout
             if mixer then
-                -- Chain count
-                ctx:text_disabled(string.format("%d chains", #chains))
+                local avail_w, _ = ctx:get_content_region_avail()
 
-                -- Pan slider
-                local ok_pan, pan_norm = pcall(function() return mixer:get_param_normalized(1) end)
-                if ok_pan and pan_norm then
-                    local pan_val = -100 + pan_norm * 200
-                    local avail_w, _ = ctx:get_content_region_avail()
-                    local pan_w = math.min(avail_w - 4, 80)
-                    local pan_offset = math.max(0, (avail_w - pan_w) / 2)
-                    ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + pan_offset)
-                    local pan_changed, new_pan = draw_pan_slider(ctx, "##master_pan_c", pan_val, pan_w)
-                    if pan_changed then
-                        pcall(function() mixer:set_param_normalized(1, (new_pan + 100) / 200) end)
+                -- Single column table to center content
+                if ctx:begin_table("rack_collapsed_content_" .. rack_guid, 1, imgui.TableFlags.SizingStretchSame()) then
+                    ctx:table_setup_column("content", imgui.TableColumnFlags.WidthStretch())
+
+                    -- Row 1: Chain count
+                    ctx:table_next_row()
+                    ctx:table_set_column_index(0)
+                    local chain_text = string.format("%d chains", #chains)
+                    local text_w = r.ImGui_CalcTextSize(ctx.ctx, chain_text)
+                    ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + (avail_w - text_w) / 2)
+                    ctx:text_disabled(chain_text)
+
+                    -- Row 2: Pan slider
+                    ctx:table_next_row()
+                    ctx:table_set_column_index(0)
+                    local ok_pan, pan_val = pcall(function() return mixer:get_param(1) end)
+                    if ok_pan and pan_val then
+                        local pan_w = math.min(avail_w - 8, 40)
+                        ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + (avail_w - pan_w) / 2)
+                        local pan_changed, new_pan = draw_pan_slider(ctx, "##master_pan_c", pan_val, pan_w)
+                        if pan_changed then
+                            pcall(function() mixer:set_param(1, new_pan) end)
+                        end
                     end
+
+                    ctx:end_table()
                 end
 
                 ctx:spacing()
@@ -482,13 +523,14 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
             -- Chains area header and table
             ctx:text_colored(0xAAAAAAFF, "Chains:")
             ctx:same_line()
-            ctx:push_style_color(imgui.Col.Button(), 0x446688FF)
-            if ctx:small_button("+ Chain") then
+            if icons.button_bordered(ctx, "add_chain_btn", icons.Names.chain, 18, 0x88AAFFFF) then
                 if add_empty_chain_to_rack then
                     add_empty_chain_to_rack(rack)
                 end
             end
-            ctx:pop_style_color()
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("Add new chain")
+            end
 
             -- Draw chains table or empty state
             draw_chains_table(ctx, chains, rack, mixer, is_nested, state, get_fx_display_name, state_module, refresh_fx_list, add_device_to_chain, reorder_chain_in_rack, move_chain_between_racks, add_chain_to_rack, add_nested_rack_to_rack)
@@ -501,6 +543,10 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
         end
 
         ctx:end_child()
+    end
+    -- Pop padding style var if it was pushed
+    if not is_expanded then
+        ctx:pop_style_var()
     end
     -- Pop border color if it was pushed
     if is_selected then

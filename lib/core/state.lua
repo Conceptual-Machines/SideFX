@@ -75,7 +75,12 @@ M.state = {
     modulator_expanded = {},  -- {[mod_fx_idx] = true} -- which modulators show params
     modulator_advanced = {},  -- {[mod_fx_idx] = true} -- advanced section expanded
     modulator_section_collapsed = {},  -- {[device_guid] = true} -- device modulator section collapsed
-    
+
+    -- Device panel collapsed states (keyed by device container GUID)
+    device_panel_collapsed = {},      -- {[guid] = true} -- whole panel collapsed to header strip
+    device_sidebar_collapsed = {},    -- {[guid] = true} -- utility sidebar collapsed
+    device_controls_collapsed = {},   -- {[guid] = true} -- device params collapsed, but modulators visible
+
     -- Parameter visibility selections (keyed by plugin full_name)
     param_selections = {},  -- {[plugin_full_name] = {param_idx1, param_idx2, ...}}
 
@@ -87,6 +92,10 @@ M.state = {
     -- Used to look up the original name when FX has been renamed
     fx_original_names = {},  -- {[fx_guid] = "VST3i: Serum 2 (Xfer Records)"}
     
+    -- Analyzer popout state
+    scope_popout = false,     -- Oscilloscope in separate window
+    spectrum_popout = false,  -- Spectrum in separate window
+
     -- User configuration
     config = {
         max_visible_params = 64,  -- Maximum parameters to display (default 64, max 128)
@@ -619,6 +628,235 @@ function M.load_display_names()
     end
 end
 
+--- Save disabled link scales to project.
+-- Persists link_saved_scale so disabled links show correct value after script restart.
+function M.save_link_scales()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    -- Serialize link_saved_scale as key=value pairs
+    local scale_pairs = {}
+    local count = 0
+    if state.link_saved_scale then
+        for link_key, scale in pairs(state.link_saved_scale) do
+            if scale then
+                table.insert(scale_pairs, link_key .. "=" .. tostring(scale))
+                count = count + 1
+            end
+        end
+    end
+
+    local key = "LinkScales_" .. track_guid
+    if count > 0 then
+        local serialized = table.concat(scale_pairs, "|")
+        r.SetProjExtState(0, "SideFX", key, serialized)
+    else
+        r.SetProjExtState(0, "SideFX", key, "")
+    end
+end
+
+--- Load disabled link scales from project.
+function M.load_link_scales()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    local key = "LinkScales_" .. track_guid
+    local ok_get, serialized = r.GetProjExtState(0, "SideFX", key)
+
+    if ok_get == 0 or not serialized or serialized == "" then
+        state.link_saved_scale = state.link_saved_scale or {}
+        return
+    end
+
+    -- Parse serialized data
+    state.link_saved_scale = state.link_saved_scale or {}
+    for pair in serialized:gmatch("([^|]+)") do
+        local link_key, scale_str = pair:match("^(.+)=([%d%.%-]+)$")
+        if link_key and scale_str then
+            local scale = tonumber(scale_str)
+            if scale then
+                state.link_saved_scale[link_key] = scale
+            end
+        end
+    end
+end
+
+--- Save expanded modulator slots to project.
+-- Persists which LFO slot is expanded for each device.
+function M.save_expanded_mod_slots()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    -- Serialize expanded_mod_slot as state_guid=slot_idx pairs
+    local slot_pairs = {}
+    local count = 0
+    if state.expanded_mod_slot then
+        for state_guid, slot_idx in pairs(state.expanded_mod_slot) do
+            if slot_idx ~= nil then
+                table.insert(slot_pairs, state_guid .. "=" .. tostring(slot_idx))
+                count = count + 1
+            end
+        end
+    end
+
+    local key = "ExpandedModSlots_" .. track_guid
+    if count > 0 then
+        local serialized = table.concat(slot_pairs, "|")
+        r.SetProjExtState(0, "SideFX", key, serialized)
+    else
+        r.SetProjExtState(0, "SideFX", key, "")
+    end
+end
+
+--- Load expanded modulator slots from project.
+function M.load_expanded_mod_slots()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    local key = "ExpandedModSlots_" .. track_guid
+    local ok_get, serialized = r.GetProjExtState(0, "SideFX", key)
+
+    if ok_get == 0 or not serialized or serialized == "" then
+        state.expanded_mod_slot = state.expanded_mod_slot or {}
+        return
+    end
+
+    -- Parse serialized data
+    state.expanded_mod_slot = state.expanded_mod_slot or {}
+    for pair in serialized:gmatch("([^|]+)") do
+        local state_guid, slot_str = pair:match("^(.+)=([%d]+)$")
+        if state_guid and slot_str then
+            local slot_idx = tonumber(slot_str)
+            if slot_idx then
+                state.expanded_mod_slot[state_guid] = slot_idx
+            end
+        end
+    end
+end
+
+--- Save modulator sidebar collapsed state to project.
+function M.save_mod_sidebar_collapsed()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    -- Serialize mod_sidebar_collapsed as comma-separated GUIDs (only collapsed ones)
+    local collapsed_guids = {}
+    local count = 0
+    if state.mod_sidebar_collapsed then
+        for state_guid, is_collapsed in pairs(state.mod_sidebar_collapsed) do
+            if is_collapsed then
+                table.insert(collapsed_guids, state_guid)
+                count = count + 1
+            end
+        end
+    end
+
+    local key = "ModSidebarCollapsed_" .. track_guid
+    if count > 0 then
+        local serialized = table.concat(collapsed_guids, ",")
+        r.SetProjExtState(0, "SideFX", key, serialized)
+    else
+        r.SetProjExtState(0, "SideFX", key, "")
+    end
+end
+
+--- Load modulator sidebar collapsed state from project.
+function M.load_mod_sidebar_collapsed()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    local key = "ModSidebarCollapsed_" .. track_guid
+    local ok_get, serialized = r.GetProjExtState(0, "SideFX", key)
+
+    if ok_get == 0 or not serialized or serialized == "" then
+        state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
+        return
+    end
+
+    -- Parse serialized data
+    state.mod_sidebar_collapsed = state.mod_sidebar_collapsed or {}
+    for guid in serialized:gmatch("([^,]+)") do
+        state.mod_sidebar_collapsed[guid] = true
+    end
+end
+
+--- Save device panel collapsed states to project.
+-- Saves device_panel_collapsed, device_sidebar_collapsed, device_controls_collapsed
+function M.save_device_collapsed_states()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    -- Helper to serialize a boolean-keyed table
+    local function serialize_bool_table(tbl)
+        local guids = {}
+        if tbl then
+            for guid, val in pairs(tbl) do
+                if val then
+                    table.insert(guids, guid)
+                end
+            end
+        end
+        return table.concat(guids, ",")
+    end
+
+    -- Save panel collapsed (whole panel to thin strip)
+    local panel_serialized = serialize_bool_table(state.device_panel_collapsed)
+    r.SetProjExtState(0, "SideFX", "DevicePanelCollapsed_" .. track_guid, panel_serialized)
+
+    -- Save sidebar collapsed (utility sidebar)
+    local sidebar_serialized = serialize_bool_table(state.device_sidebar_collapsed)
+    r.SetProjExtState(0, "SideFX", "DeviceSidebarCollapsed_" .. track_guid, sidebar_serialized)
+
+    -- Save controls collapsed (device params only)
+    local controls_serialized = serialize_bool_table(state.device_controls_collapsed)
+    r.SetProjExtState(0, "SideFX", "DeviceControlsCollapsed_" .. track_guid, controls_serialized)
+end
+
+--- Load device panel collapsed states from project.
+function M.load_device_collapsed_states()
+    if not state.track then return end
+
+    local ok, track_guid = pcall(function() return state.track:get_guid() end)
+    if not ok or not track_guid then return end
+
+    -- Helper to deserialize into a boolean-keyed table
+    local function deserialize_bool_table(serialized)
+        local tbl = {}
+        if serialized and serialized ~= "" then
+            for guid in serialized:gmatch("([^,]+)") do
+                tbl[guid] = true
+            end
+        end
+        return tbl
+    end
+
+    -- Load panel collapsed
+    local ok_panel, panel_serialized = r.GetProjExtState(0, "SideFX", "DevicePanelCollapsed_" .. track_guid)
+    state.device_panel_collapsed = deserialize_bool_table(ok_panel > 0 and panel_serialized or "")
+
+    -- Load sidebar collapsed
+    local ok_sidebar, sidebar_serialized = r.GetProjExtState(0, "SideFX", "DeviceSidebarCollapsed_" .. track_guid)
+    state.device_sidebar_collapsed = deserialize_bool_table(ok_sidebar > 0 and sidebar_serialized or "")
+
+    -- Load controls collapsed
+    local ok_controls, controls_serialized = r.GetProjExtState(0, "SideFX", "DeviceControlsCollapsed_" .. track_guid)
+    state.device_controls_collapsed = deserialize_bool_table(ok_controls > 0 and controls_serialized or "")
+end
+
 --------------------------------------------------------------------------------
 -- Configuration Management
 --------------------------------------------------------------------------------
@@ -719,19 +957,34 @@ function M.load_param_unit_overrides()
     end
 end
 
+--- Normalize override data (handles both old string format and new table format)
+-- @param override string|table The stored override
+-- @return string|nil unit_id, number|nil min, number|nil max
+local function normalize_override(override)
+    if not override then return nil, nil, nil end
+    if type(override) == "string" then
+        -- Old format: just the unit ID
+        return override, nil, nil
+    elseif type(override) == "table" then
+        -- New format: { unit = "id", min = n, max = n }
+        return override.unit, override.min, override.max
+    end
+    return nil, nil, nil
+end
+
 --- Get unit override for a specific parameter
 -- Tries multiple name variations (exact match, clean name, prefix variations)
 -- @param plugin_name string The plugin name
 -- @param param_idx number The parameter index
--- @return string|nil Unit ID or nil for auto-detect
+-- @return string|nil unit_id, number|nil min, number|nil max
 function M.get_param_unit_override(plugin_name, param_idx)
-    if not plugin_name or not param_idx then return nil end
-    if not state.param_unit_overrides then return nil end
+    if not plugin_name or not param_idx then return nil, nil, nil end
+    if not state.param_unit_overrides then return nil, nil, nil end
 
     -- Try exact match first
     if state.param_unit_overrides[plugin_name] then
         local override = state.param_unit_overrides[plugin_name][param_idx]
-        if override then return override end
+        if override then return normalize_override(override) end
     end
 
     -- Try with stripped prefixes
@@ -740,25 +993,27 @@ function M.get_param_unit_override(plugin_name, param_idx)
 
     if clean_name ~= plugin_name and state.param_unit_overrides[clean_name] then
         local override = state.param_unit_overrides[clean_name][param_idx]
-        if override then return override end
+        if override then return normalize_override(override) end
     end
 
     -- Try matching stored keys against clean name
     for key, overrides in pairs(state.param_unit_overrides) do
         local key_clean = naming.strip_sidefx_prefixes(key)
         if key_clean == clean_name and overrides[param_idx] then
-            return overrides[param_idx]
+            return normalize_override(overrides[param_idx])
         end
     end
 
-    return nil
+    return nil, nil, nil
 end
 
 --- Set unit override for a specific parameter
 -- @param plugin_name string The plugin full name
 -- @param param_idx number The parameter index
 -- @param unit_id string|nil Unit ID or nil/auto for auto-detect
-function M.set_param_unit_override(plugin_name, param_idx, unit_id)
+-- @param range_min number|nil Custom minimum value (optional)
+-- @param range_max number|nil Custom maximum value (optional)
+function M.set_param_unit_override(plugin_name, param_idx, unit_id, range_min, range_max)
     if not plugin_name or not param_idx then return end
 
     -- Normalize "auto" to nil (no override)
@@ -772,8 +1027,20 @@ function M.set_param_unit_override(plugin_name, param_idx, unit_id)
         state.param_unit_overrides[plugin_name] = {}
     end
 
+    -- Build override value
+    local override_value = nil
+    if unit_id then
+        if range_min or range_max then
+            -- Use new table format with custom range
+            override_value = { unit = unit_id, min = range_min, max = range_max }
+        else
+            -- Use simple string format (backwards compatible)
+            override_value = unit_id
+        end
+    end
+
     -- Set or clear the override
-    state.param_unit_overrides[plugin_name][param_idx] = unit_id
+    state.param_unit_overrides[plugin_name][param_idx] = override_value
 
     -- Clean up empty plugin tables
     if next(state.param_unit_overrides[plugin_name]) == nil then

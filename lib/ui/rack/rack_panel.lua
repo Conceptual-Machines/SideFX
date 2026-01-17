@@ -5,6 +5,7 @@
 -- @license MIT
 
 local r = reaper
+local icons = require('lib.ui.common.icons')
 
 local M = {}
 
@@ -125,9 +126,7 @@ end
 -- @return boolean True if clicked
 local function draw_add_chain_button(ctx, rack_width, colors, container, opts)
     ctx:same_line(rack_width - 100)
-    ctx:push_style_color(r.ImGui_Col_Button(), colors.add_chain)
-    local clicked = ctx:small_button("+ Chain")
-    ctx:pop_style_color()
+    local clicked = icons.button_bordered(ctx, "add_chain_btn", icons.Names.chain, 18, 0x88AAFFFF)
 
     if clicked and opts.on_add_chain then
         opts.on_add_chain(container)
@@ -144,13 +143,14 @@ end
 -- @return boolean True if clicked
 local function draw_close_button(ctx, rack_width, container, opts)
     ctx:same_line(rack_width - 30)
-    ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
-    ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x663333FF)
-    local clicked = ctx:small_button("×##close_rack")
-    ctx:pop_style_color(2)
+    local clicked = icons.button_bordered(ctx, "close_rack", icons.Names.cancel, 18, 0xFF6666FF)
 
     if clicked and opts.on_delete then
         opts.on_delete(container)
+    end
+
+    if ctx:is_item_hovered() then
+        ctx:set_tooltip("Delete rack")
     end
 
     return clicked

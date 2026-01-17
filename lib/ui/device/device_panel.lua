@@ -10,6 +10,7 @@ local widgets = require('lib.ui.common.widgets')
 local fx_utils = require('lib.fx.fx_utils')
 local modulator_sidebar = require('lib.ui.device.modulator_sidebar')
 local drawing = require('lib.ui.common.drawing')
+local icons = require('lib.ui.common.icons')
 local fx_naming = require('lib.fx.fx_naming')
 local param_utils = require('lib.utils.param_utils')
 local state_module = require('lib.core.state')
@@ -72,17 +73,17 @@ M.colors = {
 -- Track expanded state per FX (by GUID)
 local expanded_state = {}
 
--- Track sidebar collapsed state per FX (by GUID)
-local sidebar_collapsed = {}
+-- NOTE: Panel collapsed states are now managed by the state module for persistence:
+-- state.device_panel_collapsed - whole panel collapsed to header strip
+-- state.device_sidebar_collapsed - utility sidebar collapsed
+-- state.device_controls_collapsed - device params collapsed, but modulators visible
+-- state.mod_sidebar_collapsed - modulator sidebar collapsed
+-- state.expanded_mod_slot - which modulator slot is expanded
 
--- Track panel collapsed state per FX (by GUID) - collapses the whole panel to just header
-local panel_collapsed = {}
-
--- Track device controls collapsed state per FX (by GUID) - collapses only device params, not modulators/gain
-local device_collapsed = {}
-
--- NOTE: Modulator sidebar state is now managed by the state module
--- (accessed via state.mod_sidebar_collapsed and state.expanded_mod_slot)
+-- Local aliases for convenience (updated each frame from state)
+local sidebar_collapsed
+local panel_collapsed
+local device_collapsed
 
 -- Rename state: which FX is being renamed and the edit buffer
 local rename_active = {}    -- guid -> true if rename mode active
@@ -129,7 +130,7 @@ local function restore_utility(container)
         return false
     end
     
-    -- Step 3: Rename utility to match device naming
+    -- Step 3: Rename utility to match device naming and initialize parameters
     local ok_name, container_name = pcall(function() return container:get_name() end)
     if ok_name and container_name then
         local device_idx = container_name:match("^D(%d+):")
@@ -139,6 +140,8 @@ local function restore_utility(container)
             local util_inside = fx_utils.get_device_utility(container)
             if util_inside then
                 pcall(function() util_inside:set_named_config_param("renamed_name", util_name) end)
+                -- Initialize gain to 0dB
+                pcall(function() util_inside:set_param(0, 0) end)
             end
         end
     end
@@ -189,6 +192,7 @@ local function draw_header(ctx, fx, is_panel_collapsed, panel_collapsed, state_g
             ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x55555588)
             if ctx:button("▶##collapse_" .. state_guid, 20, 20) then
                 panel_collapsed[state_guid] = false
+                state_module.save_device_collapsed_states()
                 interacted = true
             end
             ctx:pop_style_color(3)
@@ -241,17 +245,15 @@ local function draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opt
 
         -- ON/OFF toggle
         r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-        local avail_w, avail_h = ctx:get_content_region_avail()
-        if avail_w > 0 and drawing.draw_on_off_circle(ctx, "##on_off_" .. state_guid, enabled, avail_w, 24, colors.bypass_on, colors.bypass_off) then
+        local on_tint = enabled and 0x88FF88FF or 0x888888FF
+        if icons.button_bordered(ctx, "on_off_" .. state_guid, icons.Names.on, 18, on_tint) then
             fx:set_enabled(not enabled)
             interacted = true
         end
 
         -- Close button
         r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
-        ctx:push_style_color(r.ImGui_Col_Button(), 0x663333FF)
-        ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x444444FF)
-        if ctx:button("×", -1, 24) then
+        if icons.button_bordered(ctx, "delete_" .. state_guid, icons.Names.cancel, 18, 0xFF6666FF) then
             if opts.on_delete then
                 opts.on_delete(fx)
             else
@@ -259,7 +261,6 @@ local function draw_collapsed_body(ctx, fx, state_guid, guid, name, enabled, opt
             end
             interacted = true
         end
-        ctx:pop_style_color(2)
 
         r.ImGui_EndTable(ctx.ctx)
     end
@@ -391,7 +392,8 @@ end
 
 --- Draw expanded panel content (2-column table: modulators | device_wrapper)
 -- Device wrapper contains nested 2-column table: device_content | gain_pan
-local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, name, device_id, drag_guid, enabled, opts, colors, panel_collapsed, is_selected)
+-- For bare devices (is_bare=true), skips modulator column entirely
+local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, name, device_id, drag_guid, enabled, opts, colors, panel_collapsed, is_selected, is_bare)
     local r = reaper
     local interacted = false
 
@@ -399,18 +401,26 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
     local is_device_collapsed = device_collapsed[state_guid] or false
 
     -- Fixed width for gain/pan column (right side of nested table)
-    local gain_pan_w = 100
+    local gain_pan_w = 62
 
-    -- Outer table: dynamically 2 or 3 columns based on collapse state
-    -- When expanded: 3 columns (modulators | device content | gain/pan)
-    -- When collapsed: 2 columns (modulators | device content)
-    local num_cols = is_device_collapsed and 2 or 3
+    -- Outer table: dynamically 2 or 3 columns based on collapse state and bare mode
+    -- Normal expanded: 3 columns (modulators | device content | gain/pan)
+    -- Normal collapsed: 2 columns (modulators | device content)
+    -- Bare device: 2 columns (device content | gain/pan) - no modulators
+    local num_cols
+    if is_bare then
+        num_cols = is_device_collapsed and 1 or 2  -- Bare: no modulators
+    else
+        num_cols = is_device_collapsed and 2 or 3  -- Normal: with modulators
+    end
 
     -- Use pcall to ensure ID stack cleanup even on errors
     local ok_render, render_err = pcall(function()
         ctx:with_table("panel_outer_" .. guid, num_cols, r.ImGui_TableFlags_BordersInnerV(), function()
-            -- Column 1: Modulators (left) - fixed width
-            r.ImGui_TableSetupColumn(ctx.ctx, "modulators", r.ImGui_TableColumnFlags_WidthFixed(), mod_sidebar_w)
+            -- Column 1: Modulators (left) - fixed width (skip for bare devices)
+            if not is_bare then
+                r.ImGui_TableSetupColumn(ctx.ctx, "modulators", r.ImGui_TableColumnFlags_WidthFixed(), mod_sidebar_w)
+            end
 
         -- Column 2: Device Content (center) - stretches when expanded, fixed narrow when collapsed
         if is_device_collapsed then
@@ -435,17 +445,28 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
             r.ImGui_TableSetBgColor(ctx.ctx, r.ImGui_TableBgTarget_RowBg0(), 0x3A3A4AFF)
         end
 
-        -- Header Column 1: Modulator collapse button + "Modulators" label
-        r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
-        if modulator_header.draw(ctx, state_guid) then
-            interacted = true
+        -- Header Column 1: Modulator collapse button + "Mod" label + matrix button (skip for bare devices)
+        local col_idx = 0
+        if not is_bare then
+            r.ImGui_TableSetColumnIndex(ctx.ctx, col_idx)
+            col_idx = col_idx + 1
+            -- Create on_mod_matrix callback that passes container and name
+            local on_mod_matrix_cb = nil
+            if opts.on_mod_matrix then
+                on_mod_matrix_cb = function()
+                    opts.on_mod_matrix(container, name)
+                end
+            end
+            if modulator_header.draw(ctx, state_guid, { on_mod_matrix = on_mod_matrix_cb }) then
+                interacted = true
+            end
         end
 
-        -- Header Column 2: Device name/path/mix/delta/ui when expanded, buttons when collapsed
-        r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+        -- Header Column 2 (or 1 for bare): Device name/path/mix/delta/ui when expanded, buttons when collapsed
+        r.ImGui_TableSetColumnIndex(ctx.ctx, col_idx)
         if not is_device_collapsed then
             -- Expanded: show full device header
-            if header.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag_guid, enabled, opts, colors, state_guid) then
+            if header.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag_guid, enabled, opts, colors, state_guid, device_collapsed) then
                 interacted = true
             end
         else
@@ -455,15 +476,16 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
             end
         end
 
-        -- Header Column 3: Control buttons (only when expanded)
+        -- Header Column 3 (or 2 for bare): Control buttons (only when expanded)
         if not is_device_collapsed then
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
-            
+            col_idx = col_idx + 1
+            r.ImGui_TableSetColumnIndex(ctx.ctx, col_idx)
+
             -- Prepare options for header buttons
             local header_opts = {
                 on_delete = opts.on_delete,
             }
-            
+
             if header.draw_device_buttons(ctx, fx, container, state_guid, enabled, is_device_collapsed, device_collapsed, header_opts, colors) then
                 interacted = true
             end
@@ -476,31 +498,40 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
 
         -- Separator row between header and content
         r.ImGui_TableNextRow(ctx.ctx)
-        r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
+        col_idx = 0
+        if not is_bare then
+            r.ImGui_TableSetColumnIndex(ctx.ctx, col_idx)
+            ctx:separator()
+            col_idx = col_idx + 1
+        end
+        r.ImGui_TableSetColumnIndex(ctx.ctx, col_idx)
         ctx:separator()
-        r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
-        ctx:separator()
+        col_idx = col_idx + 1
         if not is_device_collapsed then
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+            r.ImGui_TableSetColumnIndex(ctx.ctx, col_idx)
             ctx:separator()
         end
 
         -- === ROW 2: CONTENT ===
         r.ImGui_TableNextRow(ctx.ctx)
+        col_idx = 0
 
-        -- Content Column 1: Modulators
-        r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
-        if draw_modulator_column(ctx, fx, container, guid, state_guid, cfg, opts) then
-            interacted = true
+        -- Content Column 1: Modulators (skip for bare devices)
+        if not is_bare then
+            r.ImGui_TableSetColumnIndex(ctx.ctx, col_idx)
+            col_idx = col_idx + 1
+            if draw_modulator_column(ctx, fx, container, guid, state_guid, cfg, opts) then
+                interacted = true
+            end
+
+            -- CRITICAL: If FX list was invalidated (e.g., modulator added), bail out immediately
+            -- to avoid accessing stale FX references in the rest of this callback
+            if state.fx_list_invalid then
+                return  -- Early return from with_table callback
+            end
         end
 
-        -- CRITICAL: If FX list was invalidated (e.g., modulator added), bail out immediately
-        -- to avoid accessing stale FX references in the rest of this callback
-        if state.fx_list_invalid then
-            return  -- Early return from with_table callback
-        end
-
-        -- Content Column 2: Device params or collapsed view
+        -- Content Column 2 (or 1 for bare): Device params or collapsed view
         -- Build mod_links: map of param_idx -> link_info for all modulated params
         local mod_links = {}
         local link_count = 0
@@ -535,18 +566,66 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
                 end
             end
         end
+
+        -- Get modulators for right-click linking in params
+        -- Also find the container-local index of the selected modulator for filtering
+        local modulators = {}
+        local selected_mod_container_idx = nil  -- Container-local index of the selected modulator
+        local selected_slot = state.expanded_mod_slot and state.expanded_mod_slot[state_guid]
+        if container then
+            local container_idx = 0
+            local ok_iter, iter = pcall(function() return container:iter_container_children() end)
+            if ok_iter and iter then
+                local mod_slot = 0
+                for child in iter do
+                    local ok_name, child_name = pcall(function() return child:get_name() end)
+                    if ok_name and child_name and child_name:match("SideFX[_ ]Modulator") then
+                        table.insert(modulators, child)
+                        -- Check if this is the selected modulator
+                        if selected_slot ~= nil and mod_slot == selected_slot then
+                            selected_mod_container_idx = container_idx
+                        end
+                        mod_slot = mod_slot + 1
+                    end
+                    container_idx = container_idx + 1
+                end
+            end
+        end
+
+        -- Keep unfiltered links for baseline values (so slider doesn't jump when switching LFOs)
+        local all_mod_links = mod_links
+
+        -- Filter mod_links to only show UI indicators for selected modulator (if one is selected)
+        if selected_mod_container_idx ~= nil then
+            local filtered_links = {}
+            for param_idx, link_info in pairs(mod_links) do
+                if link_info.effect == selected_mod_container_idx then
+                    filtered_links[param_idx] = link_info
+                end
+            end
+            mod_links = filtered_links
+        end
+
+        -- Set opts AFTER filtering
+        -- mod_links = filtered (for modulation UI indicators)
+        -- all_mod_links = unfiltered (for baseline values)
         opts.mod_links = mod_links
+        opts.all_mod_links = all_mod_links
         opts.state = state  -- Pass state so params can update link_baselines
         opts.fx_guid = guid  -- Pass guid for building link keys
         -- opts.plugin_name is set in M.draw before this function is called
+        opts.modulators = modulators
+        opts.track = state.track  -- Pass track for bake operations
+        opts.state_guid = state_guid  -- Pass state_guid to look up selected LFO slot
 
-        if device_column.draw(ctx, is_device_collapsed, params_column, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts, name, fx_naming, draw_sidebar_column, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, colors) then
+        if device_column.draw(ctx, is_device_collapsed, params_column, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts, name, fx_naming, draw_sidebar_column, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, colors, col_idx) then
             interacted = true
         end
+        col_idx = col_idx + 1
 
-        -- Content Column 3: Gain/Pan controls (only when expanded - column doesn't exist when collapsed)
+        -- Content Column 3 (or 2 for bare): Gain/Pan controls (only when expanded - column doesn't exist when collapsed)
         if not is_device_collapsed then
-            r.ImGui_TableSetColumnIndex(ctx.ctx, 2)
+            r.ImGui_TableSetColumnIndex(ctx.ctx, col_idx)
             if draw_sidebar_column(ctx, fx, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, opts, colors) then
                 interacted = true
             end
@@ -584,11 +663,15 @@ local function draw_panel_border(draw_list, cursor_x, cursor_y, panel_width, pan
 end
 
 --- Calculate panel dimensions based on collapsed state
-local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, is_device_collapsed)
+-- @param is_bare boolean If true, skip modulator sidebar width (bare device)
+local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, is_device_collapsed, show_mix_delta, is_bare)
     local panel_height, panel_width, content_width, num_columns, params_per_column
 
     -- Fixed width for gain/pan column (right side of nested table)
-    local gain_pan_w = 100
+    local gain_pan_w = 62
+
+    -- Extra width for mix/delta columns in header when shown
+    local mix_delta_extra_w = show_mix_delta and 60 or 0  -- mix (28) + delta (32)
 
     if is_panel_collapsed then
         -- Collapsed: full height but narrow width
@@ -613,7 +696,8 @@ local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg,
         -- Calculate device content width (for params) based on collapse state
         local device_content_width
         if is_device_collapsed then
-            device_content_width = 100  -- Fixed width when device collapsed (buttons + name + fader)
+            -- Fixed 2x2 layout (UI|◀ then ON|×)
+            device_content_width = 60
         else
             device_content_width = cfg.column_width * num_columns  -- Full width for params
         end
@@ -624,13 +708,17 @@ local function calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg,
             -- Collapsed: no separate gain/pan column, it's in the device column
             device_wrapper_width = device_content_width
         else
-            -- Expanded: device content + gain/pan column
-            device_wrapper_width = device_content_width + gain_pan_w
+            -- Expanded: device content + gain/pan column + extra for mix/delta
+            device_wrapper_width = device_content_width + gain_pan_w + mix_delta_extra_w
         end
 
-        -- Calculate total panel width: modulator column + device wrapper + padding
+        -- Calculate total panel width: device wrapper + padding (+ modulator column if not bare)
         content_width = cfg.column_width * num_columns
-        panel_width = mod_sidebar_w + device_wrapper_width + cfg.padding * 2
+        if is_bare then
+            panel_width = device_wrapper_width + cfg.padding * 2
+        else
+            panel_width = mod_sidebar_w + device_wrapper_width + cfg.padding * 2
+        end
     end
 
     return {
@@ -743,14 +831,18 @@ local function draw_context_menu(ctx, fx, guid, name, enabled, opts)
 end
 
 --- Draw panel content (header + collapsed/expanded body)
-local function draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, is_sidebar_collapsed, cfg, visible_params, visible_count, collapsed_sidebar_w, mod_sidebar_w, state_guid, name, device_id, drag_guid, enabled, opts, colors, avail_height)
+local function draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, is_sidebar_collapsed, cfg, visible_params, visible_count, collapsed_sidebar_w, mod_sidebar_w, state_guid, name, device_id, drag_guid, enabled, opts, colors, avail_height, is_bare)
     local r = reaper
 
     -- Check if device controls are collapsed
     local is_device_collapsed = device_collapsed[state_guid] or false
 
+    -- Check config for mix/delta display
+    local config = require('lib.core.config')
+    local show_mix_delta = config.get('show_mix_delta')
+
     -- Calculate panel dimensions
-    local dims = calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, is_device_collapsed)
+    local dims = calculate_panel_dimensions(is_panel_collapsed, avail_height, cfg, visible_count, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, is_device_collapsed, show_mix_delta, is_bare)
     local panel_height = dims.panel_height
     local panel_width = dims.panel_width
     local content_width = dims.content_width
@@ -788,9 +880,10 @@ local function draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, 
                 return
             end
 
-            -- Draw expanded panel with 3-column layout (no top header)
-            -- Device header will be drawn inside column 2
-            if draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, name, device_id, drag_guid, enabled, opts, colors, panel_collapsed, opts.is_selected) then
+            -- Draw expanded panel with columns (no top header)
+            -- Device header will be drawn inside the device content column
+            -- Bare devices skip the modulator column
+            if draw_expanded_panel(ctx, fx, container, panel_height, cfg, visible_params, visible_count, num_columns, params_per_column, is_sidebar_collapsed, collapsed_sidebar_w, mod_sidebar_w, content_width, state_guid, guid, name, device_id, drag_guid, enabled, opts, colors, panel_collapsed, opts.is_selected, is_bare) then
                 interacted = true
             end
         end)
@@ -822,6 +915,14 @@ function M.draw(ctx, fx, opts)
     opts = opts or {}
     local cfg = M.config
     local colors = M.colors
+
+    -- Initialize state aliases (from state module for persistence)
+    state.device_panel_collapsed = state.device_panel_collapsed or {}
+    state.device_sidebar_collapsed = state.device_sidebar_collapsed or {}
+    state.device_controls_collapsed = state.device_controls_collapsed or {}
+    panel_collapsed = state.device_panel_collapsed
+    sidebar_collapsed = state.device_sidebar_collapsed
+    device_collapsed = state.device_controls_collapsed
 
     -- Skip rendering if FX list is already invalid (stale data from previous operations)
     if state.fx_list_invalid then return false end
@@ -887,7 +988,7 @@ function M.draw(ctx, fx, opts)
     ctx:push_id(guid)
 
     -- Draw panel content (frame + header + body)
-    if draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, is_sidebar_collapsed, cfg, visible_params, visible_count, collapsed_sidebar_w, mod_sidebar_w, state_guid, name, device_id, drag_guid, enabled, opts, colors, avail_height) then
+    if draw_panel_content(ctx, fx, container, guid, is_panel_collapsed, is_sidebar_collapsed, cfg, visible_params, visible_count, collapsed_sidebar_w, mod_sidebar_w, state_guid, name, device_id, drag_guid, enabled, opts, colors, avail_height, opts.is_bare) then
         interacted = true
     end
 
@@ -992,64 +1093,76 @@ end
 
 --- Reset all sidebar collapsed states.
 function M.reset_sidebar()
-    sidebar_collapsed = {}
+    state.device_sidebar_collapsed = {}
+    state_module.save_device_collapsed_states()
 end
 
 --- Set sidebar collapsed state for a specific FX.
 -- @param guid string FX GUID
 -- @param collapsed boolean
 function M.set_sidebar_collapsed(guid, collapsed)
-    sidebar_collapsed[guid] = collapsed
+    state.device_sidebar_collapsed = state.device_sidebar_collapsed or {}
+    state.device_sidebar_collapsed[guid] = collapsed
+    state_module.save_device_collapsed_states()
 end
 
 --- Get sidebar collapsed state for a specific FX.
 -- @param guid string FX GUID
 -- @return boolean
 function M.is_sidebar_collapsed(guid)
-    return sidebar_collapsed[guid] or false
+    return (state.device_sidebar_collapsed and state.device_sidebar_collapsed[guid]) or false
 end
 
 --- Collapse all sidebars
 function M.collapse_all_sidebars()
+    state.device_sidebar_collapsed = state.device_sidebar_collapsed or {}
     for guid, _ in pairs(expanded_state) do
-        sidebar_collapsed[guid] = true
+        state.device_sidebar_collapsed[guid] = true
     end
+    state_module.save_device_collapsed_states()
 end
 
 --- Expand all sidebars
 function M.expand_all_sidebars()
-    sidebar_collapsed = {}
+    state.device_sidebar_collapsed = {}
+    state_module.save_device_collapsed_states()
 end
 
 --- Reset all panel collapsed states.
 function M.reset_panel_collapsed()
-    panel_collapsed = {}
+    state.device_panel_collapsed = {}
+    state_module.save_device_collapsed_states()
 end
 
 --- Set panel collapsed state for a specific FX.
 -- @param guid string FX GUID
 -- @param collapsed boolean
 function M.set_panel_collapsed(guid, collapsed)
-    panel_collapsed[guid] = collapsed
+    state.device_panel_collapsed = state.device_panel_collapsed or {}
+    state.device_panel_collapsed[guid] = collapsed
+    state_module.save_device_collapsed_states()
 end
 
 --- Get panel collapsed state for a specific FX.
 -- @param guid string FX GUID
 -- @return boolean
 function M.is_panel_collapsed(guid)
-    return panel_collapsed[guid] or false
+    return (state.device_panel_collapsed and state.device_panel_collapsed[guid]) or false
 end
 
 --- Collapse all panels
 function M.collapse_all_panels()
+    state.device_panel_collapsed = state.device_panel_collapsed or {}
     for guid, _ in pairs(expanded_state) do
-        panel_collapsed[guid] = true
+        state.device_panel_collapsed[guid] = true
     end
+    state_module.save_device_collapsed_states()
 end
 
 --- Expand all panels
 function M.expand_all_panels()
-    panel_collapsed = {}
+    state.device_panel_collapsed = {}
+    state_module.save_device_collapsed_states()
 end
 
 return M

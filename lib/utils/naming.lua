@@ -34,9 +34,12 @@ end
 function M.strip_sidefx_prefixes(name)
     if not name then return "" end
     -- Patterns from most specific to least specific
+    name = name:gsub("^R%d+_C%d+_BD%d+:%s*", "")    -- R1_C1_BD1: prefix (bare device in chain)
     name = name:gsub("^R%d+_C%d+_D%d+_FX:%s*", "")  -- R1_C1_D1_FX: prefix
     name = name:gsub("^R%d+_C%d+_D%d+:%s*", "")     -- R1_C1_D1: prefix
     name = name:gsub("^R%d+_C%d+:%s*", "")          -- R1_C1: prefix
+    name = name:gsub("^POST%d+:%s*", "")             -- POST1: prefix (post FX device)
+    name = name:gsub("^BD%d+:%s*", "")              -- BD1: prefix (bare device)
     name = name:gsub("^D%d+_FX:%s*", "")            -- D1_FX: prefix
     name = name:gsub("^D%d+:%s*", "")               -- D1: prefix
     name = name:gsub("^R%d+:%s*", "")               -- R1: prefix
@@ -76,6 +79,22 @@ end
 function M.is_device_name(name)
     if not name then return false end
     return name:match("^D%d") ~= nil
+end
+
+--- Check if a name indicates a bare device (BD-prefix).
+-- @param name string FX name to check
+-- @return boolean
+function M.is_bare_device_name(name)
+    if not name then return false end
+    return name:match("^BD%d") ~= nil or name:match("_BD%d") ~= nil
+end
+
+--- Check if a name indicates a post FX device (POST-prefix).
+-- @param name string FX name to check
+-- @return boolean
+function M.is_post_device_name(name)
+    if not name then return false end
+    return name:match("^POST%d") ~= nil
 end
 
 --- Check if a name indicates a chain container (R{n}_C{n} pattern, but not device).
@@ -129,8 +148,7 @@ end
 -- @return boolean
 function M.is_modulator_name(name)
     if not name then return false end
-    return name:find("SideFX_Modulator") ~= nil
-        or name:find("SideFX Modulator") ~= nil
+    return name:match("SideFX[_ ]Modulator") ~= nil
 end
 
 --------------------------------------------------------------------------------
@@ -143,6 +161,28 @@ end
 function M.parse_device_index(name)
     if not name then return nil end
     local idx = name:match("^D(%d+)")
+    return idx and tonumber(idx) or nil
+end
+
+--- Parse bare device index from name (BD{n} or R{n}_C{n}_BD{m}).
+-- @param name string Name to parse
+-- @return number|nil Bare device index or nil
+function M.parse_bare_device_index(name)
+    if not name then return nil end
+    -- Try R{n}_C{m}_BD{p} pattern first
+    local idx = name:match("_BD(%d+)")
+    if idx then return tonumber(idx) end
+    -- Try BD{n} pattern
+    idx = name:match("^BD(%d+)")
+    return idx and tonumber(idx) or nil
+end
+
+--- Parse post device index from name (POST{n}).
+-- @param name string Name to parse
+-- @return number|nil Post device index or nil
+function M.parse_post_device_index(name)
+    if not name then return nil end
+    local idx = name:match("^POST(%d+)")
     return idx and tonumber(idx) or nil
 end
 
@@ -370,6 +410,22 @@ function M.build_device_util_name(device_idx)
     return string.format("D%d_Util", device_idx)
 end
 
+--- Build bare device name (raw plugin without container).
+-- @param bare_idx number Bare device index
+-- @param fx_name string FX display name
+-- @return string Full bare device name (e.g., "BD1: ReaComp")
+function M.build_bare_device_name(bare_idx, fx_name)
+    return string.format("BD%d: %s", bare_idx, fx_name)
+end
+
+--- Build post FX device name (always bare, at end of chain).
+-- @param post_idx number Post device index
+-- @param fx_name string FX display name
+-- @return string Full post device name (e.g., "POST1: ReaComp")
+function M.build_post_device_name(post_idx, fx_name)
+    return string.format("POST%d: %s", post_idx, fx_name)
+end
+
 --- Build chain container name.
 -- @param rack_idx number Rack index
 -- @param chain_idx number Chain index
@@ -405,6 +461,16 @@ end
 -- @return string Hierarchical utility name
 function M.build_chain_device_util_name(rack_idx, chain_idx, device_idx)
     return string.format("R%d_C%d_D%d_Util", rack_idx, chain_idx, device_idx)
+end
+
+--- Build chain bare device name (raw plugin in chain without D-container).
+-- @param rack_idx number Rack index
+-- @param chain_idx number Chain index
+-- @param bare_idx number Bare device index within chain
+-- @param fx_name string FX display name
+-- @return string Full hierarchical bare device name (e.g., "R1_C1_BD1: ReaComp")
+function M.build_chain_bare_device_name(rack_idx, chain_idx, bare_idx, fx_name)
+    return string.format("R%d_C%d_BD%d: %s", rack_idx, chain_idx, bare_idx, fx_name)
 end
 
 --- Build rack container name.
