@@ -243,20 +243,34 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
             if i < #fx_list and is_utility_fx(fx_list[i + 1]) then
                 utility = fx_list[i + 1]
             end
-            -- Check if this is a bare device (BD naming convention)
+            -- Check if this is a bare or post device
             local ok_name, fx_name = pcall(function() return fx:get_name() end)
-            local is_bare = ok_name and fx_name and require('lib.utils.naming').is_bare_device_name(fx_name)
+            local naming_module = require('lib.utils.naming')
+            local is_bare = ok_name and fx_name and naming_module.is_bare_device_name(fx_name)
+            local is_post = ok_name and fx_name and naming_module.is_post_device_name(fx_name)
             table.insert(display_fx, {
                 fx = fx,
                 utility = utility,
                 original_idx = fx.pointer,
                 is_legacy = true,
-                is_bare = is_bare,  -- Flag for bare devices (no modulator section, no utility warning)
+                is_bare = is_bare or is_post,  -- Both bare and post use simplified panel
+                is_post = is_post,  -- Flag for post FX (rendered in column 2)
             })
         end
         -- Skip standalone utilities (they're shown in sidebar)
         -- Skip unknown containers
         ::continue_fx_loop::
+    end
+
+    -- Separate main chain and post FX
+    local main_chain = {}
+    local post_chain = {}
+    for _, item in ipairs(display_fx) do
+        if item.is_post then
+            table.insert(post_chain, item)
+        else
+            table.insert(main_chain, item)
+        end
     end
 
     -- Detect drag state for styling
@@ -266,8 +280,11 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
     local is_dragging = has_plugin or has_fx or has_rack
     local drop_h = avail_height - 10
 
+    -- Calculate post FX column width based on content
+    local post_device_width = 170  -- Width per post device (collapsed bare panel width)
+    local post_fx_width = math.max(80, #post_chain * post_device_width + 20)
+
     -- Use a table to pin Post FX area to the right
-    local post_fx_width = 80
     if not ctx:begin_table("chain_layout", 2, r.ImGui_TableFlags_SizingStretchProp()) then
         return
     end
@@ -278,7 +295,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
     -- Column 1: Main chain area
     ctx:table_set_column_index(0)
 
-    if #display_fx == 0 then
+    if #main_chain == 0 then
         -- Empty chain - full height drop zone (always visible)
         if is_dragging then
             ctx:push_style_color(imgui.Col.Button(), 0x4488FF44)
@@ -315,7 +332,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         end
     else
         -- Drop zone before first device (only visible when dragging, so no layout shift)
-        local first_item = display_fx[1]
+        local first_item = main_chain[1]
         local drew_first_zone = false
         if first_item then
             drew_first_zone = draw_drop_zone_indicator(
@@ -333,7 +350,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
 
         -- Draw each FX as a device panel, horizontally
         local display_idx = 0
-        for _, item in ipairs(display_fx) do
+        for _, item in ipairs(main_chain) do
             -- Check before processing each item - previous iteration may have invalidated
             if state.deletion_pending or state.fx_list_invalid then
                 break
@@ -465,9 +482,45 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
     local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
     r.ImGui_DrawList_AddLine(draw_list, sep_x, sep_y, sep_x, sep_y + drop_h, 0x666688FF, 2)
 
-    -- Post FX drop zone
-    local post_is_hovered = (hovered_drop_zone == "post_fx")
-    local post_width = post_is_hovered and 76 or 76
+    -- Small spacer after separator
+    ctx:dummy(4, 1)
+    ctx:same_line()
+
+    -- Render existing post FX devices
+    local bare_device_panel = require('lib.ui.device.bare_device_panel')
+    for post_idx, item in ipairs(post_chain) do
+        if state.deletion_pending or state.fx_list_invalid then
+            break
+        end
+
+        ctx:push_id("post_device_" .. post_idx)
+        bare_device_panel.draw(ctx, item.fx, {
+            avail_height = avail_height - 10,
+            on_delete = function(fx_to_delete)
+                local state_module = require('lib.core.state')
+                state_module.state.deletion_pending = true
+                fx_to_delete:delete()
+                state_module.state.fx_list = nil
+            end,
+            on_drop = function(dragged_guid, target_guid)
+                local dragged = state.track:find_fx_by_guid(dragged_guid)
+                local target = state.track:find_fx_by_guid(target_guid)
+                if dragged and target then
+                    r.TrackFX_CopyToTrack(
+                        state.track.pointer, dragged.pointer,
+                        state.track.pointer, target.pointer,
+                        true  -- move
+                    )
+                    refresh_fx_list()
+                end
+            end,
+        })
+        ctx:pop_id()
+        ctx:same_line()
+    end
+
+    -- Post FX add button/drop zone
+    local post_btn_width = 50
 
     if is_dragging then
         ctx:push_style_color(imgui.Col.Button(), 0x88446644)
@@ -479,15 +532,8 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         ctx:push_style_color(imgui.Col.ButtonActive(), 0x887799AA)
     end
 
-    ctx:button("POST##post_fx", post_width, drop_h)
+    ctx:button("+##post_add", post_btn_width, drop_h)
     ctx:pop_style_color(3)
-
-    -- Track hover state
-    if ctx:is_item_hovered() then
-        hovered_drop_zone = "post_fx"
-    elseif hovered_drop_zone == "post_fx" then
-        hovered_drop_zone = nil
-    end
 
     if ctx:is_item_hovered() then
         ctx:set_tooltip("Post FX area\nDrag plugin here for post-processing")
@@ -498,7 +544,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
         if accepted and plugin_name then
             -- Explicitly get FX count to ensure it's added at the very end
-            local fx_count = state.track:get_fx_count()
+            local fx_count = state.track:get_track_fx_count()
             add_plugin_by_name(plugin_name, fx_count, { bare = true, post = true })
         end
         -- Accept FX reorder drops
@@ -507,7 +553,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
             local dragged = state.track:find_fx_by_guid(fx_guid)
             if dragged then
                 -- Move to end (post position)
-                local fx_count = state.track:get_fx_count()
+                local fx_count = state.track:get_track_fx_count()
                 r.TrackFX_CopyToTrack(
                     state.track.pointer, dragged.pointer,
                     state.track.pointer, fx_count,

@@ -38,6 +38,7 @@ function M.strip_sidefx_prefixes(name)
     name = name:gsub("^R%d+_C%d+_D%d+_FX:%s*", "")  -- R1_C1_D1_FX: prefix
     name = name:gsub("^R%d+_C%d+_D%d+:%s*", "")     -- R1_C1_D1: prefix
     name = name:gsub("^R%d+_C%d+:%s*", "")          -- R1_C1: prefix
+    name = name:gsub("^POST%d+:%s*", "")             -- POST1: prefix (post FX device)
     name = name:gsub("^BD%d+:%s*", "")              -- BD1: prefix (bare device)
     name = name:gsub("^D%d+_FX:%s*", "")            -- D1_FX: prefix
     name = name:gsub("^D%d+:%s*", "")               -- D1: prefix
@@ -86,6 +87,14 @@ end
 function M.is_bare_device_name(name)
     if not name then return false end
     return name:match("^BD%d") ~= nil or name:match("_BD%d") ~= nil
+end
+
+--- Check if a name indicates a post FX device (POST-prefix).
+-- @param name string FX name to check
+-- @return boolean
+function M.is_post_device_name(name)
+    if not name then return false end
+    return name:match("^POST%d") ~= nil
 end
 
 --- Check if a name indicates a chain container (R{n}_C{n} pattern, but not device).
@@ -165,6 +174,15 @@ function M.parse_bare_device_index(name)
     if idx then return tonumber(idx) end
     -- Try BD{n} pattern
     idx = name:match("^BD(%d+)")
+    return idx and tonumber(idx) or nil
+end
+
+--- Parse post device index from name (POST{n}).
+-- @param name string Name to parse
+-- @return number|nil Post device index or nil
+function M.parse_post_device_index(name)
+    if not name then return nil end
+    local idx = name:match("^POST(%d+)")
     return idx and tonumber(idx) or nil
 end
 
@@ -398,6 +416,14 @@ end
 -- @return string Full bare device name (e.g., "BD1: ReaComp")
 function M.build_bare_device_name(bare_idx, fx_name)
     return string.format("BD%d: %s", bare_idx, fx_name)
+end
+
+--- Build post FX device name (always bare, at end of chain).
+-- @param post_idx number Post device index
+-- @param fx_name string FX display name
+-- @return string Full post device name (e.g., "POST1: ReaComp")
+function M.build_post_device_name(post_idx, fx_name)
+    return string.format("POST%d: %s", post_idx, fx_name)
 end
 
 --- Build chain container name.

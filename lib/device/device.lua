@@ -62,13 +62,20 @@ function M.add_plugin_to_track(plugin, position, opts)
         local fx_position = position and (-1000 - position) or -1
         local fx = state.track:add_fx_by_name(plugin.full_name, false, fx_position)
         if fx and fx.pointer >= 0 then
-            -- Get next bare device index and rename with canonical name
-            local bare_idx = fx_utils.get_next_bare_device_index(state.track)
             local short_name = naming.get_short_plugin_name(plugin.full_name)
-            local bare_name = naming.build_bare_device_name(bare_idx, short_name)
-            fx:set_named_config_param("renamed_name", bare_name)
+            local device_name
+            if opts.post then
+                -- Post FX device (at end of chain)
+                local post_idx = fx_utils.get_next_post_device_index(state.track)
+                device_name = naming.build_post_device_name(post_idx, short_name)
+            else
+                -- Regular bare device
+                local bare_idx = fx_utils.get_next_bare_device_index(state.track)
+                device_name = naming.build_bare_device_name(bare_idx, short_name)
+            end
+            fx:set_named_config_param("renamed_name", device_name)
         end
-        r.Undo_EndBlock("SideFX: Add Plugin (bare)", -1)
+        r.Undo_EndBlock(opts.post and "SideFX: Add Post FX" or "SideFX: Add Plugin (bare)", -1)
         return fx
     end
 
