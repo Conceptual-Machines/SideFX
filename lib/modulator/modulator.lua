@@ -31,7 +31,7 @@ end
 -- Constants
 --------------------------------------------------------------------------------
 
-M.MODULATOR_JSFX = "JS:SideFX/SideFX_Modulator"
+M.MODULATOR_JSFX = "JS:SideFX/Utils/SideFX_Modulator"
 M.MODULATOR_DISPLAY_PATTERN = "SideFX[_ ]Modulator"  -- Pattern for matching display name
 M.MOD_OUTPUT_PARAM = 3  -- slider4 in JSFX (0-indexed)
 
