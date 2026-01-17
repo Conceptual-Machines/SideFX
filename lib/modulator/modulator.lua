@@ -78,12 +78,43 @@ function M.add_modulator()
 end
 
 --- Delete a modulator by FX index.
+-- Restores linked parameters to their baseline values before deletion.
 -- @param fx_idx number FX index
 function M.delete_modulator(fx_idx)
     if not state.track then return end
     r.Undo_BeginBlock()
+
+    -- Get all parameters linked to this modulator before deleting
+    local links = M.get_modulator_links(fx_idx)
+
+    -- Restore each linked parameter to its baseline value
+    for _, link in ipairs(links) do
+        local plink_prefix = string.format("param.%d.plink.", link.target_param_idx)
+        local mod_prefix = string.format("param.%d.mod.", link.target_param_idx)
+
+        -- Get baseline value (stored when link was created)
+        local _, baseline_str = r.TrackFX_GetNamedConfigParm(
+            state.track.pointer, link.target_fx_idx, mod_prefix .. "baseline"
+        )
+        local baseline = tonumber(baseline_str)
+
+        -- Deactivate the plink
+        r.TrackFX_SetNamedConfigParm(
+            state.track.pointer, link.target_fx_idx, plink_prefix .. "active", "0"
+        )
+
+        -- Restore parameter to baseline if we have one
+        if baseline then
+            r.TrackFX_SetParamNormalized(
+                state.track.pointer, link.target_fx_idx, link.target_param_idx, baseline
+            )
+        end
+    end
+
+    -- Now delete the modulator
     r.TrackFX_Delete(state.track.pointer, fx_idx)
     r.Undo_EndBlock("Delete SideFX Modulator", -1)
+
     if refresh_callback then
         refresh_callback()
     end
