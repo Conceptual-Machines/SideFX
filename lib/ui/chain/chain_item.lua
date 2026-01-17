@@ -7,6 +7,7 @@
 local imgui = require('imgui')
 local r = reaper
 local rack_ui = require('lib.ui.rack.rack_ui')
+local bare_device_panel = require('lib.ui.device.bare_device_panel')
 
 local M = {}
 
@@ -209,8 +210,24 @@ function M.draw_device_item(ctx, fx, item, avail_height, callbacks)
     local is_selected = (#state.expanded_path == 1 and state.expanded_path[1] == device_guid)
 
     ctx:begin_group()
-    if device_panel then
-        -- Use full device panel
+    if item.is_bare then
+        -- Use simplified bare device panel (no modulators, no utility)
+        bare_device_panel.draw(ctx, fx, {
+            avail_height = avail_height - 10,
+            on_delete = function(fx_to_delete)
+                local state_module = require('lib.core.state')
+                state_module.state.deletion_pending = true
+                fx_to_delete:delete()
+                state_module.state.fx_list = nil
+            end,
+            on_drop = function(dragged_guid, target_guid)
+                if callbacks.on_drop then
+                    callbacks.on_drop(dragged_guid, target_guid)
+                end
+            end,
+        })
+    elseif device_panel then
+        -- Use full device panel for D-containers
         device_panel.draw(ctx, fx, {
             avail_height = avail_height - 10,
             utility = utility,  -- Paired SideFX_Utility for gain/pan

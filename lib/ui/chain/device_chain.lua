@@ -243,11 +243,15 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
             if i < #fx_list and is_utility_fx(fx_list[i + 1]) then
                 utility = fx_list[i + 1]
             end
+            -- Check if this is a bare device (BD naming convention)
+            local ok_name, fx_name = pcall(function() return fx:get_name() end)
+            local is_bare = ok_name and fx_name and require('lib.utils.naming').is_bare_device_name(fx_name)
             table.insert(display_fx, {
                 fx = fx,
                 utility = utility,
                 original_idx = fx.pointer,
                 is_legacy = true,
+                is_bare = is_bare,  -- Flag for bare devices (no modulator section, no utility warning)
             })
         end
         -- Skip standalone utilities (they're shown in sidebar)

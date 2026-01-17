@@ -5,12 +5,14 @@ Content Column Module - Draws device params or collapsed vertical stack
 local M = {}
 
 --- Draw content column (expanded: params, collapsed: name + gain/pan stack)
-function M.draw(ctx, is_device_collapsed, params_column, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts, name, fx_naming, draw_sidebar_column, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, colors)
+-- @param col_idx number Column index to use (0-based, may vary for bare devices)
+function M.draw(ctx, is_device_collapsed, params_column, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts, name, fx_naming, draw_sidebar_column, container, state_guid, gain_pan_w, is_sidebar_collapsed, cfg, colors, col_idx)
     local r = reaper
     local interacted = false
 
-    -- Content Column 2: Device params or collapsed view
-    r.ImGui_TableSetColumnIndex(ctx.ctx, 1)
+    -- Content Column: Device params or collapsed view
+    col_idx = col_idx or 1  -- Default to 1 for backwards compatibility
+    r.ImGui_TableSetColumnIndex(ctx.ctx, col_idx)
     if not is_device_collapsed then
         -- Expanded: show device params
         if params_column.draw(ctx, fx, guid, visible_params, visible_count, num_columns, params_per_column, opts) then

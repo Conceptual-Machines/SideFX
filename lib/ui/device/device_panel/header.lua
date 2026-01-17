@@ -22,20 +22,35 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
     local config = require('lib.core.config')
     local show_mix_delta = config.get('show_mix_delta')
 
-    -- Check for mix (container parameter)
+    -- Check for mix (container parameter or FX's wet for bare devices)
     local has_mix = false
     local mix_val, mix_idx
-    if container and show_mix_delta then
-        local ok_mix
-        ok_mix, mix_idx = pcall(function() return container:get_param_from_ident(":wet") end)
-        if ok_mix and mix_idx and mix_idx >= 0 then
-            local ok_mv
-            ok_mv, mix_val = pcall(function() return container:get_param_normalized(mix_idx) end)
-            has_mix = ok_mv and mix_val
+    local mix_target = nil  -- Which object to control: container or fx
+    if show_mix_delta then
+        if container then
+            -- Regular device: use container's wet
+            local ok_mix
+            ok_mix, mix_idx = pcall(function() return container:get_param_from_ident(":wet") end)
+            if ok_mix and mix_idx and mix_idx >= 0 then
+                local ok_mv
+                ok_mv, mix_val = pcall(function() return container:get_param_normalized(mix_idx) end)
+                has_mix = ok_mv and mix_val
+                mix_target = container
+            end
+        else
+            -- Bare device: use FX's wet if available
+            local ok_mix
+            ok_mix, mix_idx = pcall(function() return fx:get_param_from_ident(":wet") end)
+            if ok_mix and mix_idx and mix_idx >= 0 then
+                local ok_mv
+                ok_mv, mix_val = pcall(function() return fx:get_param_normalized(mix_idx) end)
+                has_mix = ok_mv and mix_val
+                mix_target = fx
+            end
         end
     end
 
-    -- Check for delta (container parameter)
+    -- Check for delta (container parameter only - not available for bare devices)
     local has_delta = false
     local delta_val, delta_idx
     if container and show_mix_delta then
@@ -188,19 +203,19 @@ function M.draw_device_name_path(ctx, fx, container, guid, name, device_id, drag
         local col_idx = 2
 
         -- Column: Mix (if present)
-        if has_mix then
+        if has_mix and mix_target then
             ctx:table_set_column_index(col_idx)
             col_idx = col_idx + 1
 
             local knob_size = 24
             local mix_changed, new_mix = drawing.draw_knob(ctx, "##mix_knob_" .. state_guid, mix_val, knob_size)
             if mix_changed then
-                pcall(function() container:set_param_normalized(mix_idx, new_mix) end)
+                pcall(function() mix_target:set_param_normalized(mix_idx, new_mix) end)
                 interacted = true
             end
             if r.ImGui_IsItemHovered(ctx.ctx) then
                 local mix_pct = math.floor(mix_val * 100)
-                ctx:set_tooltip(string.format("Mix: %d%% (parallel blend)", mix_pct))
+                ctx:set_tooltip(string.format("Mix: %d%% (wet/dry blend)", mix_pct))
             end
         end
 
