@@ -379,25 +379,31 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
             ctx:end_table()
         end
     else
-        -- Collapsed: 2x2 button grid
+        -- Collapsed: 2x2 button grid (matching device collapsed_header.lua style)
         local btn_size = 20
-        if ctx:begin_table("rack_header_" .. rack_guid, 2, r.ImGui_TableFlags_SizingFixedFit()) then
-            ctx:table_setup_column("col1", r.ImGui_TableColumnFlags_WidthFixed(), btn_size + 4)
-            ctx:table_setup_column("col2", r.ImGui_TableColumnFlags_WidthFixed(), btn_size + 4)
+        local avail_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
+        local table_w = (btn_size + 4) * 2
+        local offset_x = math.max(0, (avail_w - table_w) / 2)
+        r.ImGui_SetCursorPosX(ctx.ctx, r.ImGui_GetCursorPosX(ctx.ctx) + offset_x)
+
+        if ctx:begin_table("collapsed_rack_btns_" .. rack_guid, 2, r.ImGui_TableFlags_SizingFixedFit()) then
+            ctx:table_setup_column("col1", imgui.TableColumnFlags.WidthFixed(), btn_size + 4)
+            ctx:table_setup_column("col2", imgui.TableColumnFlags.WidthFixed(), btn_size + 4)
 
             -- Row 1: Drag | Expand
             ctx:table_next_row()
 
-            -- Drag handle
+            -- Drag handle (bordered button)
             ctx:table_set_column_index(0)
-            ctx:push_style_color(imgui.Col.Button(), 0x00000000)
-            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x44444488)
-            ctx:push_style_color(imgui.Col.ButtonActive(), 0x55555588)
-            if ctx:button("≡##drag_rack_" .. rack_guid, btn_size, btn_size) then
-                -- Drag handle doesn't do anything on click
-            end
-            ctx:pop_style_color(3)
-            if ctx:is_item_hovered() then
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x2A2A3AFF)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x3A3A4AFF)
+            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x4A4A5AFF)
+            ctx:push_style_color(r.ImGui_Col_Border(), 0x555555FF)
+            ctx:push_style_var(r.ImGui_StyleVar_FrameBorderSize(), 1)
+            ctx:button("≡##drag_rack_" .. rack_guid, btn_size, btn_size)
+            ctx:pop_style_var()
+            ctx:pop_style_color(4)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
                 ctx:set_tooltip("Drag to reorder")
             end
 
@@ -425,18 +431,21 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
                 ctx:end_drag_drop_target()
             end
 
-            -- Expand button
+            -- Expand button (bordered)
             ctx:table_set_column_index(1)
-            ctx:push_style_color(imgui.Col.Button(), 0x00000000)
-            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x44444488)
-            ctx:push_style_color(imgui.Col.ButtonActive(), 0x55555588)
+            ctx:push_style_color(r.ImGui_Col_Button(), 0x2A2A3AFF)
+            ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x3A3A4AFF)
+            ctx:push_style_color(r.ImGui_Col_ButtonActive(), 0x4A4A5AFF)
+            ctx:push_style_color(r.ImGui_Col_Border(), 0x555555FF)
+            ctx:push_style_var(r.ImGui_StyleVar_FrameBorderSize(), 1)
             if ctx:button(expand_icon .. "##" .. button_id, btn_size, btn_size) then
                 if callbacks and callbacks.on_toggle_expand then
                     callbacks.on_toggle_expand(rack_guid, is_expanded)
                 end
             end
-            ctx:pop_style_color(3)
-            if ctx:is_item_hovered() then
+            ctx:pop_style_var()
+            ctx:pop_style_color(4)
+            if r.ImGui_IsItemHovered(ctx.ctx) then
                 ctx:set_tooltip("Expand rack")
             end
             draw_rack_context_menu(ctx, button_id, rack_guid, rack, state, callbacks)
@@ -450,7 +459,7 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
             if icons.button_bordered(ctx, "rack_on_off_" .. rack_guid, icons.Names.on, 18, on_tint) then
                 pcall(function() rack:set_enabled(not rack_enabled) end)
             end
-            if ctx:is_item_hovered() then
+            if r.ImGui_IsItemHovered(ctx.ctx) then
                 ctx:set_tooltip(rack_enabled and "Bypass rack" or "Enable rack")
             end
 
@@ -459,12 +468,19 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
             if icons.button_bordered(ctx, "rack_del_" .. rack_guid, icons.Names.cancel, 18, 0xFF6666FF) then
                 callbacks.on_delete(rack)
             end
-            if ctx:is_item_hovered() then
+            if r.ImGui_IsItemHovered(ctx.ctx) then
                 ctx:set_tooltip("Delete rack")
             end
 
             ctx:end_table()
         end
+
+        -- Separator line below all buttons (full width)
+        local sep_x, sep_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+        local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+        local content_w = r.ImGui_GetContentRegionAvail(ctx.ctx)
+        r.ImGui_DrawList_AddLine(draw_list, sep_x, sep_y + 1, sep_x + content_w, sep_y + 1, 0x555555FF, 1)
+        r.ImGui_Dummy(ctx.ctx, content_w, 4)
     end
 end
 

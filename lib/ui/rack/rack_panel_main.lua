@@ -44,7 +44,7 @@ local function draw_collapsed_fader_control(ctx, mixer, rack_guid, state, drawin
 
     local avail_w, _ = ctx:get_content_region_avail()
     local total_w = scale_w + fader_w + meter_w + 4
-    local offset_x = math.max(0, (avail_w - total_w) / 2 - 8)
+    local offset_x = math.max(0, (avail_w - total_w) / 2)
     ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + offset_x)
 
     local screen_x, screen_y = ctx:get_cursor_screen_pos()
@@ -55,7 +55,7 @@ local function draw_collapsed_fader_control(ctx, mixer, rack_guid, state, drawin
     local meter_x = fader_x + fader_w + 2
 
     -- Draw scale, fader, and meters
-    drawing.draw_db_scale_marks(ctx, draw_list, scale_x, screen_y, fader_h, scale_w)
+    drawing.draw_db_scale_marks(ctx, draw_list, scale_x, screen_y, fader_h, scale_w, false)
     drawing.draw_fader_visualization(ctx, draw_list, fader_x, screen_y, fader_w, fader_h, gain_norm)
     drawing.draw_stereo_meters_visualization(ctx, draw_list, meter_x, screen_y, meter_w, fader_h)
 
@@ -412,7 +412,7 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
         end
     end
 
-    local rack_w = is_expanded and 350 or 150
+    local rack_w = is_expanded and 350 or 70
     local rack_h = avail_height - 10
 
     -- Check if this rack is selected (first item in expanded_path)
@@ -422,6 +422,10 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
     -- Highlight border if selected
     if is_selected then
         ctx:push_style_color(reaper.ImGui_Col_Border(), 0x5588BBAA)  -- Subtle blue highlight
+    end
+    -- Reduce padding for collapsed rack
+    if not is_expanded then
+        ctx:push_style_var(imgui.StyleVar.WindowPadding(), 2, 2)
     end
     -- Use unique child ID that includes nested flag to ensure no state conflicts
     local child_id = is_nested and ("rack_nested_" .. rack_guid) or ("rack_" .. rack_guid)
@@ -466,22 +470,36 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
         local mixer = get_rack_mixer(rack)
 
         if not is_expanded then
-            -- Collapsed view - chain count + pan slider + fader
+            -- Collapsed view - use table for centered layout
             if mixer then
-                -- Chain count label
-                ctx:text_disabled(string.format("%d chains", #chains))
+                local avail_w, _ = ctx:get_content_region_avail()
 
-                -- Pan slider - read actual value directly (normalized mapping is non-linear for JSFX)
-                local ok_pan, pan_val = pcall(function() return mixer:get_param(1) end)
-                if ok_pan and pan_val then
-                    local avail_w, _ = ctx:get_content_region_avail()
-                    local pan_w = math.min(avail_w - 4, 80)
-                    local pan_offset = math.max(0, (avail_w - pan_w) / 2)
-                    ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + pan_offset)
-                    local pan_changed, new_pan = draw_pan_slider(ctx, "##master_pan_c", pan_val, pan_w)
-                    if pan_changed then
-                        pcall(function() mixer:set_param(1, new_pan) end)
+                -- Single column table to center content
+                if ctx:begin_table("rack_collapsed_content_" .. rack_guid, 1, imgui.TableFlags.SizingStretchSame()) then
+                    ctx:table_setup_column("content", imgui.TableColumnFlags.WidthStretch())
+
+                    -- Row 1: Chain count
+                    ctx:table_next_row()
+                    ctx:table_set_column_index(0)
+                    local chain_text = string.format("%d chains", #chains)
+                    local text_w = r.ImGui_CalcTextSize(ctx.ctx, chain_text)
+                    ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + (avail_w - text_w) / 2)
+                    ctx:text_disabled(chain_text)
+
+                    -- Row 2: Pan slider
+                    ctx:table_next_row()
+                    ctx:table_set_column_index(0)
+                    local ok_pan, pan_val = pcall(function() return mixer:get_param(1) end)
+                    if ok_pan and pan_val then
+                        local pan_w = math.min(avail_w - 8, 40)
+                        ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + (avail_w - pan_w) / 2)
+                        local pan_changed, new_pan = draw_pan_slider(ctx, "##master_pan_c", pan_val, pan_w)
+                        if pan_changed then
+                            pcall(function() mixer:set_param(1, new_pan) end)
+                        end
                     end
+
+                    ctx:end_table()
                 end
 
                 ctx:spacing()
@@ -526,6 +544,10 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
         end
 
         ctx:end_child()
+    end
+    -- Pop padding style var if it was pushed
+    if not is_expanded then
+        ctx:pop_style_var()
     end
     -- Pop border color if it was pushed
     if is_selected then

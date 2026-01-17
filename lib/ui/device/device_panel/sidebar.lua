@@ -118,9 +118,9 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local state_module = require('lib.core.state')
     local interacted = false
 
-    -- Range: -36 to +12 dB (48dB total), 0dB at exactly 75%
-    local DB_MIN, DB_MAX = -36, 12
-    local DB_RANGE = DB_MAX - DB_MIN  -- 48
+    -- Range: -24 to +12 dB (36dB total), matches rack mixer
+    local DB_MIN, DB_MAX = -24, 12
+    local DB_RANGE = DB_MAX - DB_MIN  -- 36
 
     -- gain_val is already the dB value (from get_param, not normalized)
     local gain_db = gain_val or 0
@@ -134,15 +134,15 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local scale_w = 16
 
     local _, remaining_h = ctx:get_content_region_avail()
-    -- Leave room for phase controls below (50px for buttons + spacing) if enabled
+    -- Leave room for dB label (22px) + phase controls below (50px) if enabled
     local config = require('lib.core.config')
     local phase_reserve = config.get('show_phase_controls') and 50 or 0
-    local fader_h = remaining_h - phase_reserve
+    local fader_h = remaining_h - 22 - phase_reserve  -- 22px for dB label at bottom (matches rack)
     fader_h = math.max(50, fader_h)
 
     local avail_w, _ = ctx:get_content_region_avail()
     local total_w = scale_w + fader_w + meter_w + 4
-    local offset_x = math.max(0, (avail_w - total_w) / 2 - 3)  -- Slightly left
+    local offset_x = math.max(0, (avail_w - total_w) / 2)
 
     ctx:set_cursor_pos_x(ctx:get_cursor_pos_x() + offset_x)
 
@@ -153,15 +153,16 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
     local fader_x = screen_x + scale_w + 2
     local meter_x = fader_x + fader_w + 2
 
-    -- dB scale - tick marks at key points, label only at 0
-    local db_marks = {12, 0, -12, -24, -36}
+    -- dB scale - tick marks at key points, labels at 12, 0, -12 (matches rack)
+    local db_marks = {12, 0, -12, -24}
     for _, db in ipairs(db_marks) do
         local mark_norm = (db - DB_MIN) / DB_RANGE
         local mark_y = screen_y + fader_h - (fader_h * mark_norm)
         r.ImGui_DrawList_AddLine(draw_list, scale_x + scale_w - 4, mark_y, scale_x + scale_w, mark_y, 0x666666FF, 1)
-        -- Only label 0 dB
-        if db == 0 then
-            r.ImGui_DrawList_AddText(draw_list, scale_x, mark_y - 5, 0x666666FF, "0")
+        -- Label 12, 0, -12
+        if db == 12 or db == 0 or db == -12 then
+            local label = db == 0 and "0" or tostring(db)
+            r.ImGui_DrawList_AddText(draw_list, scale_x, mark_y - 5, 0x666666FF, label)
         end
     end
 

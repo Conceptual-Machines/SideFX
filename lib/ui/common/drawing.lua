@@ -451,13 +451,14 @@ end
 -- @param screen_y number Top Y position
 -- @param fader_h number Height of fader
 -- @param scale_w number Width of scale
-function M.draw_db_scale_marks(ctx, draw_list, scale_x, screen_y, fader_h, scale_w)
+function M.draw_db_scale_marks(ctx, draw_list, scale_x, screen_y, fader_h, scale_w, show_labels)
+    if show_labels == nil then show_labels = true end
     local db_marks = {12, 6, 0, -6, -12, -18, -24}
     for _, db in ipairs(db_marks) do
         local mark_norm = (db + 24) / 36
         local mark_y = screen_y + fader_h - (fader_h * mark_norm)
         r.ImGui_DrawList_AddLine(draw_list, scale_x + scale_w - 6, mark_y, scale_x + scale_w, mark_y, 0x666666FF, 1)
-        if db == 0 or db == -12 or db == 12 then
+        if show_labels and (db == 0 or db == -12 or db == 12) then
             local label = db == 0 and "0" or tostring(db)
             r.ImGui_DrawList_AddText(draw_list, scale_x, mark_y - 5, 0x888888FF, label)
         end
