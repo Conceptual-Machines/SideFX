@@ -36,10 +36,6 @@ Ableton/Bitwig-style FX rack management for REAPER 7+.
 
 ## Installation
 
-### Via ReaBoot (Easiest)
-
-[ReaBoot](https://reaboot.com/) can install SideFX and all dependencies automatically.
-
 ### Via ReaPack
 
 1. Install dependencies from ReaTeam repositories (ReaImGui, RPP-Parser)
