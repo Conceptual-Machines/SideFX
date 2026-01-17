@@ -688,6 +688,55 @@ https://github.com/Conceptual-Machines/SideFX/raw/main/index.xml</code></pre>
                 <strong>Tip:</strong> Hold <kbd>Shift</kbd> while dragging sliders for fine control.
             </div>
 
+            <h3>Mod Matrix</h3>
+            <p>The Mod Matrix provides a unified view of all parameter links within a device, making it easy to manage multiple modulation assignments at once.</p>
+
+            <h4>Opening the Mod Matrix</h4>
+            <p>Click the <strong>matrix icon</strong> in the device header to open the Mod Matrix dialog for that device. The dialog shows all parameter links from all modulators in the device.</p>
+
+            <h4>Matrix Columns</h4>
+            <table>
+                <tr>
+                    <th>Column</th>
+                    <th>Description</th>
+                </tr>
+                <tr>
+                    <td><strong>LFO</strong></td>
+                    <td>Which modulator (LFO 1, 2, etc.) controls this link</td>
+                </tr>
+                <tr>
+                    <td><strong>Device</strong></td>
+                    <td>The target device name</td>
+                </tr>
+                <tr>
+                    <td><strong>Param</strong></td>
+                    <td>The linked parameter name</td>
+                </tr>
+                <tr>
+                    <td><strong>Mode</strong></td>
+                    <td><strong>U</strong> (Unipolar: 0 to +depth) or <strong>B</strong> (Bipolar: -depth to +depth)</td>
+                </tr>
+                <tr>
+                    <td><strong>Depth</strong></td>
+                    <td>Modulation amount slider (-1 to +1)</td>
+                </tr>
+                <tr>
+                    <td><strong>Dis</strong></td>
+                    <td>Disable/enable the link without removing it</td>
+                </tr>
+                <tr>
+                    <td><strong>Bake</strong></td>
+                    <td>Bake this link to automation</td>
+                </tr>
+                <tr>
+                    <td><strong>Del</strong></td>
+                    <td>Remove the parameter link</td>
+                </tr>
+            </table>
+
+            <h4>Disabling vs Removing Links</h4>
+            <p>Use the <strong>Dis</strong> button to temporarily disable a link while preserving its depth setting. This is useful for A/B comparisons. The <strong>Del</strong> button permanently removes the link.</p>
+
             <!-- ============================================================ -->
 
             <h2 id="baking">Baking Automation</h2>
