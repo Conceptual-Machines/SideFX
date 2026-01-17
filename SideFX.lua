@@ -73,16 +73,41 @@ package.path = script_path .. "?.lua;"
 
 local function check_dependencies()
     local missing = {}
+    local has_reapack = r.ReaPack_BrowsePackages ~= nil
 
     -- Check ReaImGui extension
     if not r.ImGui_CreateContext then
-        table.insert(missing, "ReaImGui extension (install via ReaPack: Extensions > ReaPack > Browse packages)")
+        table.insert(missing, {
+            name = "ReaImGui",
+            desc = "ImGui bindings for REAPER UI",
+            search = "ReaImGui",
+            required = true
+        })
     end
 
     -- Check ReaWrap
     local ok_reawrap = pcall(require, 'imgui')
     if not ok_reawrap then
-        table.insert(missing, "ReaWrap library (install via ReaPack: Extensions > ReaPack > Browse packages)")
+        table.insert(missing, {
+            name = "ReaWrap",
+            desc = "OOP wrapper library",
+            search = "ReaWrap",
+            required = true
+        })
+    end
+
+    -- Check RPP-Parser (for preset import/export)
+    local rpp_parser_path = r.GetResourcePath() .. "/Scripts/ReaTeam Scripts/Development/RPP-Parser/Reateam_RPP-Parser.lua"
+    local f = io.open(rpp_parser_path, "r")
+    if f then
+        f:close()
+    else
+        table.insert(missing, {
+            name = "RPP-Parser",
+            desc = "Required for preset import/export",
+            search = "RPP-Parser",
+            required = false
+        })
     end
 
     -- Check JSFX files
@@ -93,22 +118,73 @@ local function check_dependencies()
         "SideFX_Modulator.jsfx"
     }
     for _, jsfx in ipairs(jsfx_files) do
-        local f = io.open(jsfx_path .. jsfx, "r")
-        if f then
-            f:close()
+        local jf = io.open(jsfx_path .. jsfx, "r")
+        if jf then
+            jf:close()
         else
-            table.insert(missing, "JSFX: " .. jsfx .. " (should be in Effects/SideFX/)")
+            table.insert(missing, {
+                name = jsfx,
+                desc = "Should be in Effects/SideFX/",
+                search = nil,  -- Not available via ReaPack
+                required = true
+            })
         end
     end
 
-    if #missing > 0 then
-        local msg = "SideFX is missing required dependencies:\n\n"
-        for i, dep in ipairs(missing) do
-            msg = msg .. i .. ". " .. dep .. "\n"
+    -- Separate required vs optional
+    local required_missing = {}
+    local optional_missing = {}
+    for _, dep in ipairs(missing) do
+        if dep.required then
+            table.insert(required_missing, dep)
+        else
+            table.insert(optional_missing, dep)
         end
-        msg = msg .. "\nPlease install the missing dependencies and try again."
-        r.ShowMessageBox(msg, "SideFX - Missing Dependencies", 0)
-        return false
+    end
+
+    -- Show dialog for missing dependencies
+    if #required_missing > 0 or #optional_missing > 0 then
+        local msg = "SideFX Dependency Check\n\n"
+
+        if #required_missing > 0 then
+            msg = msg .. "REQUIRED (script will not run without these):\n"
+            for i, dep in ipairs(required_missing) do
+                msg = msg .. "  " .. i .. ". " .. dep.name .. " - " .. dep.desc .. "\n"
+            end
+            msg = msg .. "\n"
+        end
+
+        if #optional_missing > 0 then
+            msg = msg .. "OPTIONAL (some features may not work):\n"
+            for i, dep in ipairs(optional_missing) do
+                msg = msg .. "  " .. i .. ". " .. dep.name .. " - " .. dep.desc .. "\n"
+            end
+            msg = msg .. "\n"
+        end
+
+        if has_reapack then
+            msg = msg .. "Click OK to open ReaPack and install missing packages."
+        else
+            msg = msg .. "Please install dependencies via Extensions > ReaPack > Browse packages"
+        end
+
+        -- Show message and optionally open ReaPack
+        local result = r.ShowMessageBox(msg, "SideFX - Missing Dependencies", has_reapack and 1 or 0)
+
+        if has_reapack and result == 1 then
+            -- Open ReaPack for each missing dependency that has a search term
+            for _, dep in ipairs(missing) do
+                if dep.search then
+                    r.ReaPack_BrowsePackages(dep.search)
+                    break  -- Only open once, user can search for others
+                end
+            end
+        end
+
+        -- Block script if required dependencies are missing
+        if #required_missing > 0 then
+            return false
+        end
     end
 
     return true
