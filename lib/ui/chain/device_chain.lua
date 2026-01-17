@@ -493,13 +493,11 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         ctx:set_tooltip("Post FX area\nDrag plugin here for post-processing")
     end
 
-    -- Drop target for post FX
+    -- Drop target for post FX (always creates bare devices)
     if ctx:begin_drag_drop_target() then
         local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
         if accepted and plugin_name then
-            local shift_held = r.ImGui_IsKeyDown(ctx.ctx, r.ImGui_Mod_Shift())
-            local post_opts = shift_held and { bare = true, post = true } or { post = true }
-            add_plugin_by_name(plugin_name, nil, post_opts)  -- nil = add at end, post = true marks as post FX
+            add_plugin_by_name(plugin_name, nil, { bare = true, post = true })
         end
         -- Accept FX reorder drops
         local fx_accepted, fx_guid = ctx:accept_drag_drop_payload("FX_GUID")
