@@ -1008,56 +1008,118 @@ local function draw_analyzers(ctx, avail_height)
     -- Params: 0=Time, 1=Gain, 2=TrigMode, 3=TrigLevel, 4=Channel, 5=Freeze, 6=Slot
     if show_inline_scope then
         local scope_fx = find_analyzer_fx(state.track, SCOPE_PATTERN)
+        local is_collapsed = state.scope_collapsed or false
 
         ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1AFF)
         local no_scroll = r.ImGui_WindowFlags_NoScrollbar() | r.ImGui_WindowFlags_NoScrollWithMouse()
-        if ctx:begin_child("scope_panel", analyzer_w + 12, panel_h, imgui.ChildFlags.Border(), no_scroll) then
-            -- Header background
-            local hdr_x, hdr_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-            r.ImGui_DrawList_AddRectFilled(draw_list, hdr_x - 4, hdr_y - 4, hdr_x + analyzer_w + 8, hdr_y + 20, 0x252525FF, 0)
+        local scope_w = is_collapsed and 50 or (analyzer_w + 12)
 
-            -- Header row with icon, title, and controls
-            icons.image(ctx, icons.Names.oscilloscope, 14)
-            ctx:same_line()
-            ctx:text("Scope")
-
-            if scope_fx then
-                -- Freeze toggle (param 5)
-                ctx:same_line()
-                local freeze_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 5)
-                local is_frozen = freeze_val > 0.5
-                local freeze_tint = is_frozen and 0x4488FFFF or 0xCCCCCCFF
-                if icons.button(ctx, "freeze_scope", icons.Names.pause, 16, freeze_tint) then
-                    r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 5, is_frozen and 0 or 1)
+        if ctx:begin_child("scope_panel", scope_w, panel_h, imgui.ChildFlags.Border(), no_scroll) then
+            if is_collapsed then
+                -- Collapsed view: vertical strip with buttons
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+                if ctx:button("▶##expand_scope", 20, 20) then
+                    state.scope_collapsed = false
                 end
-                if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
-            end
+                ctx:pop_style_color(2)
+                if ctx:is_item_hovered() then ctx:set_tooltip("Expand Scope") end
 
-            -- Popout button
-            ctx:same_line(analyzer_w - 36)
-            if icons.button(ctx, "popout_scope", icons.Names.popout, 16) then
-                state.scope_popout = true
-            end
-            if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
+                ctx:spacing()
 
-            ctx:same_line()
-            if icons.button(ctx, "del_scope", icons.Names.cancel, 16, 0xFF6666FF) then
-                toggle_scope()
-            end
+                -- External UI button
+                if scope_fx and icons.button_bordered(ctx, "ui_scope", icons.Names.wrench, 18) then
+                    scope_fx:show(3)
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Open FX UI") end
 
-            -- Spacing after header
-            ctx:dummy(0, 4)
+                ctx:spacing()
 
-            -- Visualization
-            local scope_hovered = drawing.draw_oscilloscope(ctx, "##scope_viz", analyzer_w, analyzer_h, slot)
-            if scope_hovered then
-                ctx:set_tooltip("Oscilloscope - Stereo waveform display\nL (green) / R (magenta)\nLogarithmic dB scale")
-            end
+                -- Popout button
+                if icons.button_bordered(ctx, "popout_scope_c", icons.Names.popout, 18) then
+                    state.scope_popout = true
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
 
-            -- Controls
-            if scope_fx then
-                draw_scope_controls(ctx, scope_fx, analyzer_w)
+                ctx:spacing()
+
+                -- Delete button
+                if icons.button_bordered(ctx, "del_scope_c", icons.Names.cancel, 18, 0xFF6666FF) then
+                    toggle_scope()
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Remove") end
+
+                ctx:spacing()
+                ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
+                ctx:text("Sco")
+                ctx:pop_style_color()
+            else
+                -- Expanded view
+                -- Header background
+                local hdr_x, hdr_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+                local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                r.ImGui_DrawList_AddRectFilled(draw_list, hdr_x - 4, hdr_y - 4, hdr_x + analyzer_w + 8, hdr_y + 20, 0x252525FF, 0)
+
+                -- Collapse button
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+                if ctx:button("▼##collapse_scope", 20, 20) then
+                    state.scope_collapsed = true
+                end
+                ctx:pop_style_color(2)
+                if ctx:is_item_hovered() then ctx:set_tooltip("Collapse") end
+
+                ctx:same_line()
+
+                -- Header row with icon, title, and controls
+                icons.image(ctx, icons.Names.oscilloscope, 14)
+                ctx:same_line()
+                ctx:text("Scope")
+
+                if scope_fx then
+                    -- Freeze toggle (param 5)
+                    ctx:same_line()
+                    local freeze_val = r.TrackFX_GetParamNormalized(state.track.pointer, scope_fx.pointer, 5)
+                    local is_frozen = freeze_val > 0.5
+                    local freeze_tint = is_frozen and 0x4488FFFF or 0xCCCCCCFF
+                    if icons.button(ctx, "freeze_scope", icons.Names.pause, 16, freeze_tint) then
+                        r.TrackFX_SetParamNormalized(state.track.pointer, scope_fx.pointer, 5, is_frozen and 0 or 1)
+                    end
+                    if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
+                end
+
+                -- External UI button
+                ctx:same_line(analyzer_w - 56)
+                if scope_fx and icons.button(ctx, "ui_scope_exp", icons.Names.wrench, 16) then
+                    scope_fx:show(3)
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Open FX UI") end
+
+                -- Popout button
+                ctx:same_line()
+                if icons.button(ctx, "popout_scope", icons.Names.popout, 16) then
+                    state.scope_popout = true
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
+
+                ctx:same_line()
+                if icons.button(ctx, "del_scope", icons.Names.cancel, 16, 0xFF6666FF) then
+                    toggle_scope()
+                end
+
+                -- Spacing after header
+                ctx:dummy(0, 4)
+
+                -- Visualization
+                local scope_hovered = drawing.draw_oscilloscope(ctx, "##scope_viz", analyzer_w, analyzer_h, slot)
+                if scope_hovered then
+                    ctx:set_tooltip("Oscilloscope - Stereo waveform display\nL (green) / R (magenta)\nLogarithmic dB scale")
+                end
+
+                -- Controls
+                if scope_fx then
+                    draw_scope_controls(ctx, scope_fx, analyzer_w)
+                end
             end
 
             ctx:end_child()
@@ -1070,56 +1132,118 @@ local function draw_analyzers(ctx, avail_height)
     -- Params: 0=FFTSize, 1=Floor, 2=Smoothing, 3=Slope, 4=Channel, 5=Freeze, 6=Slot
     if show_inline_spectrum then
         local spectrum_fx = find_analyzer_fx(state.track, SPECTRUM_PATTERN)
+        local is_collapsed = state.spectrum_collapsed or false
 
         ctx:push_style_color(imgui.Col.ChildBg(), 0x1A1A1AFF)
         local no_scroll = r.ImGui_WindowFlags_NoScrollbar() | r.ImGui_WindowFlags_NoScrollWithMouse()
-        if ctx:begin_child("spectrum_panel", analyzer_w + 12, panel_h, imgui.ChildFlags.Border(), no_scroll) then
-            -- Header background
-            local hdr_x, hdr_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
-            local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
-            r.ImGui_DrawList_AddRectFilled(draw_list, hdr_x - 4, hdr_y - 4, hdr_x + analyzer_w + 8, hdr_y + 20, 0x252525FF, 0)
+        local spectrum_w = is_collapsed and 50 or (analyzer_w + 12)
 
-            -- Header row with icon, title, and controls
-            icons.image(ctx, icons.Names.spectrum, 14)
-            ctx:same_line()
-            ctx:text("Spectrum")
-
-            if spectrum_fx then
-                -- Freeze toggle (param 5)
-                ctx:same_line()
-                local freeze_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 5)
-                local is_frozen = freeze_val > 0.5
-                local freeze_tint = is_frozen and 0x4488FFFF or 0xCCCCCCFF
-                if icons.button(ctx, "freeze_spectrum", icons.Names.pause, 16, freeze_tint) then
-                    r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 5, is_frozen and 0 or 1)
+        if ctx:begin_child("spectrum_panel", spectrum_w, panel_h, imgui.ChildFlags.Border(), no_scroll) then
+            if is_collapsed then
+                -- Collapsed view: vertical strip with buttons
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+                if ctx:button("▶##expand_spectrum", 20, 20) then
+                    state.spectrum_collapsed = false
                 end
-                if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
-            end
+                ctx:pop_style_color(2)
+                if ctx:is_item_hovered() then ctx:set_tooltip("Expand Spectrum") end
 
-            -- Popout button
-            ctx:same_line(analyzer_w - 36)
-            if icons.button(ctx, "popout_spectrum", icons.Names.popout, 16) then
-                state.spectrum_popout = true
-            end
-            if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
+                ctx:spacing()
 
-            ctx:same_line()
-            if icons.button(ctx, "del_spectrum", icons.Names.cancel, 16, 0xFF6666FF) then
-                toggle_spectrum()
-            end
+                -- External UI button
+                if spectrum_fx and icons.button_bordered(ctx, "ui_spectrum", icons.Names.wrench, 18) then
+                    spectrum_fx:show(3)
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Open FX UI") end
 
-            -- Spacing after header
-            ctx:dummy(0, 4)
+                ctx:spacing()
 
-            -- Visualization
-            local spectrum_hovered = drawing.draw_spectrum(ctx, "##spectrum_viz", analyzer_w, analyzer_h, slot)
-            if spectrum_hovered then
-                ctx:set_tooltip("Spectrum Analyzer - Frequency response\nLogarithmic frequency scale (20Hz-20kHz)\nClick/drag: Adjust floor dB")
-            end
+                -- Popout button
+                if icons.button_bordered(ctx, "popout_spectrum_c", icons.Names.popout, 18) then
+                    state.spectrum_popout = true
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
 
-            -- Controls
-            if spectrum_fx then
-                draw_spectrum_controls(ctx, spectrum_fx, analyzer_w)
+                ctx:spacing()
+
+                -- Delete button
+                if icons.button_bordered(ctx, "del_spectrum_c", icons.Names.cancel, 18, 0xFF6666FF) then
+                    toggle_spectrum()
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Remove") end
+
+                ctx:spacing()
+                ctx:push_style_color(imgui.Col.Text(), 0x888888FF)
+                ctx:text("Spe")
+                ctx:pop_style_color()
+            else
+                -- Expanded view
+                -- Header background
+                local hdr_x, hdr_y = r.ImGui_GetCursorScreenPos(ctx.ctx)
+                local draw_list = r.ImGui_GetWindowDrawList(ctx.ctx)
+                r.ImGui_DrawList_AddRectFilled(draw_list, hdr_x - 4, hdr_y - 4, hdr_x + analyzer_w + 8, hdr_y + 20, 0x252525FF, 0)
+
+                -- Collapse button
+                ctx:push_style_color(r.ImGui_Col_Button(), 0x00000000)
+                ctx:push_style_color(r.ImGui_Col_ButtonHovered(), 0x44444488)
+                if ctx:button("▼##collapse_spectrum", 20, 20) then
+                    state.spectrum_collapsed = true
+                end
+                ctx:pop_style_color(2)
+                if ctx:is_item_hovered() then ctx:set_tooltip("Collapse") end
+
+                ctx:same_line()
+
+                -- Header row with icon, title, and controls
+                icons.image(ctx, icons.Names.spectrum, 14)
+                ctx:same_line()
+                ctx:text("Spectrum")
+
+                if spectrum_fx then
+                    -- Freeze toggle (param 5)
+                    ctx:same_line()
+                    local freeze_val = r.TrackFX_GetParamNormalized(state.track.pointer, spectrum_fx.pointer, 5)
+                    local is_frozen = freeze_val > 0.5
+                    local freeze_tint = is_frozen and 0x4488FFFF or 0xCCCCCCFF
+                    if icons.button(ctx, "freeze_spectrum", icons.Names.pause, 16, freeze_tint) then
+                        r.TrackFX_SetParamNormalized(state.track.pointer, spectrum_fx.pointer, 5, is_frozen and 0 or 1)
+                    end
+                    if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
+                end
+
+                -- External UI button
+                ctx:same_line(analyzer_w - 56)
+                if spectrum_fx and icons.button(ctx, "ui_spectrum_exp", icons.Names.wrench, 16) then
+                    spectrum_fx:show(3)
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Open FX UI") end
+
+                -- Popout button
+                ctx:same_line()
+                if icons.button(ctx, "popout_spectrum", icons.Names.popout, 16) then
+                    state.spectrum_popout = true
+                end
+                if ctx:is_item_hovered() then ctx:set_tooltip("Open in separate window") end
+
+                ctx:same_line()
+                if icons.button(ctx, "del_spectrum", icons.Names.cancel, 16, 0xFF6666FF) then
+                    toggle_spectrum()
+                end
+
+                -- Spacing after header
+                ctx:dummy(0, 4)
+
+                -- Visualization
+                local spectrum_hovered = drawing.draw_spectrum(ctx, "##spectrum_viz", analyzer_w, analyzer_h, slot)
+                if spectrum_hovered then
+                    ctx:set_tooltip("Spectrum Analyzer - Frequency response\nLogarithmic frequency scale (20Hz-20kHz)\nClick/drag: Adjust floor dB")
+                end
+
+                -- Controls
+                if spectrum_fx then
+                    draw_spectrum_controls(ctx, spectrum_fx, analyzer_w)
+                end
             end
 
             ctx:end_child()
