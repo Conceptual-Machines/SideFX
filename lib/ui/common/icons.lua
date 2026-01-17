@@ -90,10 +90,13 @@ local function load_icon(name)
     end
 
     local path = icons_path .. name .. ".png"
-    local img = r.ImGui_CreateImage(path)
-    if img then
+    -- Use pcall to gracefully handle missing files
+    local ok, img = pcall(r.ImGui_CreateImage, path)
+    if ok and img then
         return img
     else
+        -- Log warning but don't crash
+        r.ShowConsoleMsg("SideFX: Icon not found: " .. name .. ".png\n")
         return nil
     end
 end
