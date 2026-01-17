@@ -128,10 +128,10 @@ local function draw_gain_fader_control(ctx, utility, gain_val)
 
     ctx:spacing()
 
-    -- Fader with meter and scale (compact design)
-    local fader_w = 12
-    local meter_w = 8
-    local scale_w = 14
+    -- Fader with meter and scale
+    local fader_w = 18
+    local meter_w = 10
+    local scale_w = 16
 
     local _, remaining_h = ctx:get_content_region_avail()
     -- Leave room for phase controls below (50px for buttons + spacing) if enabled

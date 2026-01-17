@@ -26,9 +26,9 @@ local drawing = nil
 -- @param state table State table
 -- @param drawing module Drawing module
 local function draw_collapsed_fader_control(ctx, mixer, rack_guid, state, drawing)
-    local fader_w = 32
-    local meter_w = 12
-    local scale_w = 20
+    local fader_w = 20
+    local meter_w = 10
+    local scale_w = 16
 
     -- Read actual dB value directly (normalized mapping is non-linear for JSFX)
     local ok_gain, gain_db = pcall(function() return mixer:get_param(0) end)
@@ -63,42 +63,56 @@ local function draw_collapsed_fader_control(ctx, mixer, rack_guid, state, drawin
     if state.track and state.track.pointer then
         local peak_l = r.Track_GetPeakInfo(state.track.pointer, 0)
         local peak_r = r.Track_GetPeakInfo(state.track.pointer, 1)
-        -- DEBUG: show peak values
-        local peak_db_l = peak_l > 0 and 20 * math.log(peak_l, 10) or -100
-        local peak_db_r = peak_r > 0 and 20 * math.log(peak_r, 10) or -100
-        ctx:set_cursor_screen_pos(screen_x, screen_y + fader_h + 25)
-        ctx:text(string.format("%.1f", math.max(peak_db_l, peak_db_r)))
-        -- END DEBUG
         local half_meter_w = meter_w / 2 - 1
         local meter_l_x = meter_x
         local meter_r_x = meter_x + meter_w / 2 + 1
         drawing.draw_peak_meters(ctx, draw_list, meter_l_x, meter_r_x, screen_y, fader_h, half_meter_w, peak_l, peak_r)
     end
 
-    -- Interactive slider
+    -- Interactive slider with fine control (Alt+drag)
     ctx:set_cursor_screen_pos(fader_x, screen_y)
     ctx:push_style_color(imgui.Col.FrameBg(), 0x00000000)
     ctx:push_style_color(imgui.Col.FrameBgHovered(), 0x00000000)
     ctx:push_style_color(imgui.Col.FrameBgActive(), 0x00000000)
     ctx:push_style_color(imgui.Col.SliderGrab(), 0xAAAAAAFF)
     ctx:push_style_color(imgui.Col.SliderGrabActive(), 0xFFFFFFFF)
-    local gain_changed, new_gain_db = ctx:v_slider_double("##master_gain_v", fader_w, fader_h, gain_db, -24, 12, "")
+    local gain_changed, new_gain_db = drawing.v_slider_double_fine(ctx, "##master_gain_v", fader_w, fader_h, gain_db, -24, 12, "", nil, nil, 0)
     if gain_changed then
         pcall(function() mixer:set_param(0, new_gain_db) end)
     end
-    if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
-        pcall(function() mixer:set_param(0, 0) end)  -- Reset to 0dB
-    end
     ctx:pop_style_color(5)
 
-    -- dB label
-    local label_y = screen_y + fader_h + 2
-    local db_text_w, _ = ctx:calc_text_size(gain_format)
-    local label_x = fader_x + (fader_w - db_text_w) / 2
-    ctx:set_cursor_screen_pos(label_x, label_y)
-    ctx:text(gain_format)
+    -- Floating dB value on hover
+    local is_fader_hovered = r.ImGui_IsItemHovered(ctx.ctx)
+    if is_fader_hovered then
+        local hover_label = string.format("%.1f dB", gain_db)
+        local hover_text_w = r.ImGui_CalcTextSize(ctx.ctx, hover_label)
+        local hover_box_w = hover_text_w + 8
+        local hover_box_h = 18
+        local hover_x = fader_x - hover_box_w - 4
+        local _, mouse_y = r.ImGui_GetMousePos(ctx.ctx)
+        local hover_y = mouse_y - hover_box_h / 2
+        -- Clamp to fader bounds
+        hover_y = math.max(screen_y, math.min(screen_y + fader_h - hover_box_h, hover_y))
 
-    -- Edit popup
+        r.ImGui_DrawList_AddRectFilled(draw_list, hover_x, hover_y, hover_x + hover_box_w, hover_y + hover_box_h, 0x222222EE, 3)
+        r.ImGui_DrawList_AddRect(draw_list, hover_x, hover_y, hover_x + hover_box_w, hover_y + hover_box_h, 0x888888FF, 3)
+        r.ImGui_DrawList_AddText(draw_list, hover_x + 4, hover_y + 2, 0xFFFFFFFF, hover_label)
+    end
+
+    -- dB label below fader
+    local label_h = 16
+    local label_y = screen_y + fader_h + 2
+    local label_x = fader_x
+    r.ImGui_DrawList_AddRectFilled(draw_list, label_x, label_y, label_x + fader_w, label_y + label_h, 0x222222FF, 2)
+    local db_text_w = r.ImGui_CalcTextSize(ctx.ctx, gain_format)
+    r.ImGui_DrawList_AddText(draw_list, label_x + (fader_w - db_text_w) / 2, label_y + 1, 0xCCCCCCFF, gain_format)
+
+    -- Invisible button for dB label interaction
+    r.ImGui_SetCursorScreenPos(ctx.ctx, label_x, label_y)
+    ctx:invisible_button("##rack_gain_db_label", fader_w, label_h)
+
+    -- Edit popup on double-click
     if ctx:is_item_hovered() and ctx:is_mouse_double_clicked(0) then
         ctx:open_popup("##gain_edit_popup_" .. rack_guid)
     end
@@ -452,9 +466,9 @@ function M.draw(ctx, rack, avail_height, is_nested, opts)
         local mixer = get_rack_mixer(rack)
 
         if not is_expanded then
-            -- Collapsed view - separate tables without dummy() calls
+            -- Collapsed view - chain count + pan slider + fader
             if mixer then
-                -- Chain count
+                -- Chain count label
                 ctx:text_disabled(string.format("%d chains", #chains))
 
                 -- Pan slider - read actual value directly (normalized mapping is non-linear for JSFX)

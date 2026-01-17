@@ -118,7 +118,9 @@ end
 local function draw_rack_toggle_button(ctx, rack_guid, expand_icon, rack_name, is_expanded, button_id, callbacks)
     -- Show only icon when collapsed, full name when expanded
     local button_text = is_expanded and (expand_icon .. " " .. rack_name:sub(1, 20)) or expand_icon
-    if ctx:button(button_text .. "##" .. button_id, -1, 20) then
+    -- Collapsed: fixed width for just the icon, Expanded: stretch to fill
+    local button_w = is_expanded and -1 or 24
+    if ctx:button(button_text .. "##" .. button_id, button_w, 20) then
         if callbacks and callbacks.on_toggle_expand then
             callbacks.on_toggle_expand(rack_guid, is_expanded)
         end
@@ -299,92 +301,170 @@ function M.draw_rack_header(ctx, rack, is_nested, state, callbacks)
     -- Check if rack is being renamed
     local is_renaming_rack = (state.renaming_fx == rack_guid)
 
-    -- Use table for layout with burger menu, name, on/off, and delete
-    local table_flags = imgui.TableFlags.SizingStretchProp()
-    if ctx:begin_table("rack_header_" .. rack_guid, 4, table_flags) then
-        -- Column 0: Burger menu (fixed width)
-        ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
-        if is_expanded then
-            -- Expanded: name gets most space, buttons fixed width
+    -- Get enabled state for ON button
+    local ok_enabled, rack_enabled = pcall(function() return rack:get_enabled() end)
+    rack_enabled = ok_enabled and rack_enabled or false
+
+    if is_expanded then
+        -- Expanded: single row with all controls
+        local table_flags = imgui.TableFlags.SizingStretchProp()
+        if ctx:begin_table("rack_header_" .. rack_guid, 4, table_flags) then
+            ctx:table_setup_column("drag", imgui.TableColumnFlags.WidthFixed(), 24)
             ctx:table_setup_column("name", imgui.TableColumnFlags.WidthStretch())
             ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 22)
             ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 22)
-        else
-            -- Collapsed: name stretches, buttons fixed width
-            ctx:table_setup_column("collapse", imgui.TableColumnFlags.WidthStretch())
-            ctx:table_setup_column("on", imgui.TableColumnFlags.WidthFixed(), 22)
-            ctx:table_setup_column("x", imgui.TableColumnFlags.WidthFixed(), 22)
-        end
 
-        ctx:table_next_row()
+            ctx:table_next_row()
 
-        -- Column 0: Burger menu drag handle
-        ctx:table_set_column_index(0)
-        ctx:push_style_color(imgui.Col.Button(), 0x00000000)
-        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x44444488)
-        ctx:push_style_color(imgui.Col.ButtonActive(), 0x55555588)
-        if ctx:button("≡##drag_rack_" .. rack_guid, 20, 20) then
-            -- Drag handle doesn't do anything on click
-        end
-        ctx:pop_style_color(3)
-        if ctx:is_item_hovered() then
-            ctx:set_tooltip("Drag to reorder")
-        end
+            -- Column 0: Burger menu drag handle
+            ctx:table_set_column_index(0)
+            ctx:push_style_color(imgui.Col.Button(), 0x00000000)
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x44444488)
+            ctx:push_style_color(imgui.Col.ButtonActive(), 0x55555588)
+            if ctx:button("≡##drag_rack_" .. rack_guid, 20, 20) then
+                -- Drag handle doesn't do anything on click
+            end
+            ctx:pop_style_color(3)
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("Drag to reorder")
+            end
 
-        -- Drag/drop handling on burger menu
-        if ctx:begin_drag_drop_source() then
-            ctx:set_drag_drop_payload("FX_GUID", rack_guid)
-            ctx:text("Moving: " .. rack_name)
-            ctx:end_drag_drop_source()
-        end
+            -- Drag/drop handling on burger menu
+            if ctx:begin_drag_drop_source() then
+                ctx:set_drag_drop_payload("FX_GUID", rack_guid)
+                ctx:text("Moving: " .. rack_name)
+                ctx:end_drag_drop_source()
+            end
 
-        if ctx:begin_drag_drop_target() then
-            local accepted, dragged_guid = ctx:accept_drag_drop_payload("FX_GUID")
-            if accepted and dragged_guid and dragged_guid ~= rack_guid then
-                if callbacks.on_drop then
-                    callbacks.on_drop(dragged_guid, rack_guid)
+            if ctx:begin_drag_drop_target() then
+                local accepted, dragged_guid = ctx:accept_drag_drop_payload("FX_GUID")
+                if accepted and dragged_guid and dragged_guid ~= rack_guid then
+                    if callbacks.on_drop then
+                        callbacks.on_drop(dragged_guid, rack_guid)
+                    end
+                end
+                local plugin_accepted = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                if plugin_accepted and callbacks.on_add_to_rack then
+                    callbacks.on_add_to_rack(plugin_accepted)
+                end
+                local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+                if rack_accepted and callbacks.on_add_nested_rack then
+                    callbacks.on_add_nested_rack()
+                end
+                ctx:end_drag_drop_target()
+            end
+
+            -- Column 1: Rack name
+            ctx:table_set_column_index(1)
+            if is_renaming_rack then
+                draw_rack_rename_input(ctx, rack_guid, state, state_module)
+            else
+                draw_rack_toggle_button(ctx, rack_guid, expand_icon, rack_name, is_expanded, button_id, callbacks)
+                draw_rack_context_menu(ctx, button_id, rack_guid, rack, state, callbacks)
+            end
+
+            -- Column 2: ON button
+            ctx:table_set_column_index(2)
+            local on_tint = rack_enabled and 0x88FF88FF or 0x888888FF
+            if icons.button_bordered(ctx, "rack_on_off_" .. rack_guid, icons.Names.on, 20, on_tint) then
+                pcall(function() rack:set_enabled(not rack_enabled) end)
+            end
+
+            -- Column 3: X button
+            ctx:table_set_column_index(3)
+            if icons.button_bordered(ctx, "rack_del_" .. rack_guid, icons.Names.cancel, 20, 0xFF6666FF) then
+                callbacks.on_delete(rack)
+            end
+
+            ctx:end_table()
+        end
+    else
+        -- Collapsed: 2x2 button grid
+        local btn_size = 20
+        if ctx:begin_table("rack_header_" .. rack_guid, 2, r.ImGui_TableFlags_SizingFixedFit()) then
+            ctx:table_setup_column("col1", r.ImGui_TableColumnFlags_WidthFixed(), btn_size + 4)
+            ctx:table_setup_column("col2", r.ImGui_TableColumnFlags_WidthFixed(), btn_size + 4)
+
+            -- Row 1: Drag | Expand
+            ctx:table_next_row()
+
+            -- Drag handle
+            ctx:table_set_column_index(0)
+            ctx:push_style_color(imgui.Col.Button(), 0x00000000)
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x44444488)
+            ctx:push_style_color(imgui.Col.ButtonActive(), 0x55555588)
+            if ctx:button("≡##drag_rack_" .. rack_guid, btn_size, btn_size) then
+                -- Drag handle doesn't do anything on click
+            end
+            ctx:pop_style_color(3)
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("Drag to reorder")
+            end
+
+            -- Drag/drop handling
+            if ctx:begin_drag_drop_source() then
+                ctx:set_drag_drop_payload("FX_GUID", rack_guid)
+                ctx:text("Moving: " .. rack_name)
+                ctx:end_drag_drop_source()
+            end
+            if ctx:begin_drag_drop_target() then
+                local accepted, dragged_guid = ctx:accept_drag_drop_payload("FX_GUID")
+                if accepted and dragged_guid and dragged_guid ~= rack_guid then
+                    if callbacks.on_drop then
+                        callbacks.on_drop(dragged_guid, rack_guid)
+                    end
+                end
+                local plugin_accepted = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+                if plugin_accepted and callbacks.on_add_to_rack then
+                    callbacks.on_add_to_rack(plugin_accepted)
+                end
+                local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+                if rack_accepted and callbacks.on_add_nested_rack then
+                    callbacks.on_add_nested_rack()
+                end
+                ctx:end_drag_drop_target()
+            end
+
+            -- Expand button
+            ctx:table_set_column_index(1)
+            ctx:push_style_color(imgui.Col.Button(), 0x00000000)
+            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x44444488)
+            ctx:push_style_color(imgui.Col.ButtonActive(), 0x55555588)
+            if ctx:button(expand_icon .. "##" .. button_id, btn_size, btn_size) then
+                if callbacks and callbacks.on_toggle_expand then
+                    callbacks.on_toggle_expand(rack_guid, is_expanded)
                 end
             end
-
-            -- Preserve existing drop behavior for plugins and nested racks
-            local plugin_accepted = ctx:accept_drag_drop_payload("PLUGIN_ADD")
-            if plugin_accepted and callbacks.on_add_to_rack then
-                callbacks.on_add_to_rack(plugin_accepted)
+            ctx:pop_style_color(3)
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("Expand rack")
             end
-
-            local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
-            if rack_accepted and callbacks.on_add_nested_rack then
-                callbacks.on_add_nested_rack()
-            end
-
-            ctx:end_drag_drop_target()
-        end
-
-        -- Column 1: Rack name
-        ctx:table_set_column_index(1)
-        if is_renaming_rack then
-            draw_rack_rename_input(ctx, rack_guid, state, state_module)
-        else
-            draw_rack_toggle_button(ctx, rack_guid, expand_icon, rack_name, is_expanded, button_id, callbacks)
             draw_rack_context_menu(ctx, button_id, rack_guid, rack, state, callbacks)
-        end
 
-        -- Column 2: ON button
-        ctx:table_set_column_index(2)
-        local ok_enabled, rack_enabled = pcall(function() return rack:get_enabled() end)
-        rack_enabled = ok_enabled and rack_enabled or false
-        local on_tint = rack_enabled and 0x88FF88FF or 0x888888FF
-        if icons.button_bordered(ctx, "rack_on_off_" .. rack_guid, icons.Names.on, 20, on_tint) then
-            pcall(function() rack:set_enabled(not rack_enabled) end)
-        end
+            -- Row 2: ON | Delete
+            ctx:table_next_row()
 
-        -- Column 3: X button
-        ctx:table_set_column_index(3)
-        if icons.button_bordered(ctx, "rack_del_" .. rack_guid, icons.Names.cancel, 20, 0xFF6666FF) then
-            callbacks.on_delete(rack)
-        end
+            -- ON button
+            ctx:table_set_column_index(0)
+            local on_tint = rack_enabled and 0x88FF88FF or 0x888888FF
+            if icons.button_bordered(ctx, "rack_on_off_" .. rack_guid, icons.Names.on, 18, on_tint) then
+                pcall(function() rack:set_enabled(not rack_enabled) end)
+            end
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip(rack_enabled and "Bypass rack" or "Enable rack")
+            end
 
-        ctx:end_table()
+            -- Delete button
+            ctx:table_set_column_index(1)
+            if icons.button_bordered(ctx, "rack_del_" .. rack_guid, icons.Names.cancel, 18, 0xFF6666FF) then
+                callbacks.on_delete(rack)
+            end
+            if ctx:is_item_hovered() then
+                ctx:set_tooltip("Delete rack")
+            end
+
+            ctx:end_table()
+        end
     end
 end
 
