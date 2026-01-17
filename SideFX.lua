@@ -111,7 +111,7 @@ local function check_dependencies()
     end
 
     -- Check JSFX files
-    local jsfx_path = r.GetResourcePath() .. "/Effects/SideFX/"
+    local jsfx_path = r.GetResourcePath() .. "/Effects/SideFX/Utils/"
     local jsfx_files = {
         "SideFX_Mixer.jsfx",
         "SideFX_Utility.jsfx",
@@ -124,7 +124,7 @@ local function check_dependencies()
         else
             table.insert(missing, {
                 name = jsfx,
-                desc = "Should be in Effects/SideFX/",
+                desc = "Should be in Effects/SideFX/Utils/",
                 search = nil,  -- Not available via ReaPack
                 required = true
             })
