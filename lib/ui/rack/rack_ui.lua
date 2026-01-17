@@ -574,38 +574,25 @@ function M.draw_chain_row(ctx, chain, chain_idx, rack, mixer, is_selected, is_ne
         -- Handle chain reorder/move
         local accepted_chain, dragged_guid = ctx:accept_drag_drop_payload("CHAIN_REORDER")
         if accepted_chain and dragged_guid then
-            reaper.ShowConsoleMsg("[rack_ui] Chain drop accepted. Dragged GUID: " .. dragged_guid .. "\n")
-
             -- Check if it's same rack or cross-rack move
             local dragged_chain = state.track:find_fx_by_guid(dragged_guid)
             if dragged_chain then
-                reaper.ShowConsoleMsg("[rack_ui] Found dragged chain\n")
                 local source_rack = dragged_chain:get_parent_container()
 
                 if source_rack then
                     local source_guid = source_rack:get_guid()
                     local target_guid = rack:get_guid()
-                    reaper.ShowConsoleMsg("[rack_ui] Source rack: " .. source_guid .. "\n")
-                    reaper.ShowConsoleMsg("[rack_ui] Target rack: " .. target_guid .. "\n")
 
                     if source_guid == target_guid then
                         -- Same rack: reorder
-                        reaper.ShowConsoleMsg("[rack_ui] Same rack - calling on_reorder_chain\n")
                         callbacks.on_reorder_chain(rack, dragged_guid, chain_guid)
                     else
                         -- Different rack: move between racks
-                        reaper.ShowConsoleMsg("[rack_ui] Different rack - calling on_move_chain_between_racks\n")
                         if callbacks.on_move_chain_between_racks then
                             callbacks.on_move_chain_between_racks(source_rack, rack, dragged_guid, chain_guid)
-                        else
-                            reaper.ShowConsoleMsg("[rack_ui] ERROR: on_move_chain_between_racks callback not found!\n")
                         end
                     end
-                else
-                    reaper.ShowConsoleMsg("[rack_ui] ERROR: No source rack found\n")
                 end
-            else
-                reaper.ShowConsoleMsg("[rack_ui] ERROR: Could not find dragged chain by GUID\n")
             end
         end
         ctx:end_drag_drop_target()

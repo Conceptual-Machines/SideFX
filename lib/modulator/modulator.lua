@@ -147,18 +147,11 @@ function M.create_param_link(mod_fx, target_fx, target_param_idx)
 
     if not mod_fx_obj or not target_fx_obj then return false end
 
-    -- Debug: show which FX we're linking
-    local param_name = target_fx_obj:get_param_name(target_param_idx) or "unknown"
-    r.ShowConsoleMsg(string.format("Target FX: %s, param idx: %d (%s)\n",
-        target_fx_obj:get_name() or "unknown", target_param_idx, param_name))
-
     -- Check if target FX is in a container
     local target_parent = target_fx_obj:get_parent_container()
 
     if target_parent then
         -- Target is nested - move modulator into the same container
-        r.ShowConsoleMsg(string.format("Moving modulator into container with target FX\n"))
-
         -- Store GUIDs before moving (indices will change!)
         local mod_guid = mod_fx_obj:get_guid()
         local target_guid = target_fx_obj:get_guid()
@@ -168,7 +161,6 @@ function M.create_param_link(mod_fx, target_fx, target_param_idx)
         local insert_pos = target_parent:get_container_child_count()
         local success = target_parent:add_fx_to_container(mod_fx_obj, insert_pos)
         if not success then
-            r.ShowConsoleMsg("Failed to move modulator into container\n")
             return false
         end
 
@@ -180,18 +172,13 @@ function M.create_param_link(mod_fx, target_fx, target_param_idx)
         -- Re-find both FX by GUID to get their new indices
         mod_fx_obj = state.track:find_fx_by_guid(mod_guid)
         if not mod_fx_obj then
-            r.ShowConsoleMsg("Failed to find modulator after moving\n")
             return false
         end
 
         target_fx_obj = state.track:find_fx_by_guid(target_guid)
         if not target_fx_obj then
-            r.ShowConsoleMsg("Failed to find target FX after moving\n")
             return false
         end
-
-        r.ShowConsoleMsg(string.format("Modulator moved - new index: %d\n", mod_fx_obj.pointer))
-        r.ShowConsoleMsg(string.format("Target FX after move - new index: %d\n", target_fx_obj.pointer))
     end
 
     -- Get the (possibly new) indices after moving
@@ -211,18 +198,13 @@ function M.create_param_link(mod_fx, target_fx, target_param_idx)
         for i, child in ipairs(children) do
             if child:get_guid() == mod_guid then
                 plink_effect_idx = i - 1  -- Convert to 0-based index
-                r.ShowConsoleMsg(string.format("Using LOCAL index %d for modulator in container\n", plink_effect_idx))
                 break
             end
         end
     end
 
-    r.ShowConsoleMsg(string.format("Creating plink: mod_idx=%d (plink_effect=%d), target_idx=%d, param=%d\n",
-        mod_fx_idx, plink_effect_idx, target_fx_idx, target_param_idx))
-
     -- Get current parameter value to use as baseline offset
     local current_value = r.TrackFX_GetParamNormalized(state.track.pointer, target_fx_idx, target_param_idx)
-    r.ShowConsoleMsg(string.format("Current param value: %.3f\n", current_value))
 
     local plink_prefix = string.format("param.%d.plink.", target_param_idx)
 
@@ -234,27 +216,6 @@ function M.create_param_link(mod_fx, target_fx, target_param_idx)
     local ok4 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "offset", tostring(current_value))
     -- Set scale to 0 initially - user increases via Depth control
     local ok5 = r.TrackFX_SetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "scale", "0")
-
-    r.ShowConsoleMsg(string.format("Plink result: active=%s effect=%s param=%s offset=%s scale=%s\n",
-        tostring(ok1), tostring(ok2), tostring(ok3), tostring(ok4), tostring(ok5)))
-
-    -- Verify what was actually created by reading back the plink
-    if ok1 and ok2 and ok3 then
-        local _, actual_effect = r.TrackFX_GetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "effect")
-        local _, actual_param = r.TrackFX_GetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "param")
-        local _, actual_offset = r.TrackFX_GetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "offset")
-        local _, actual_scale = r.TrackFX_GetNamedConfigParm(state.track.pointer, target_fx_idx, plink_prefix .. "scale")
-        r.ShowConsoleMsg(string.format("Plink verification: effect=%s, param=%s, offset=%s, scale=%s\n",
-            actual_effect or "nil", actual_param or "nil", actual_offset or "nil", actual_scale or "nil"))
-
-        -- Also verify the target FX and parameter after moving
-        local final_target_fx = state.track:get_track_fx(target_fx_idx)
-        if final_target_fx then
-            local final_param_name = final_target_fx:get_param_name(target_param_idx)
-            r.ShowConsoleMsg(string.format("Final target verification: FX=%s, param=%d (%s)\n",
-                final_target_fx:get_name(), target_param_idx, final_param_name))
-        end
-    end
 
     return ok1 and ok2 and ok3 and ok4 and ok5
 end

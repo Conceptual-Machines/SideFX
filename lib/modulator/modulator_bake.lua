@@ -213,11 +213,8 @@ end
 function M.get_midi_notes(track, start_time, end_time)
     local notes = {}
 
-    r.ShowConsoleMsg(string.format("  get_midi_notes: looking for notes in range %.3f - %.3f\n", start_time, end_time))
-
     -- Iterate through all media items on the track
     local item_count = r.CountTrackMediaItems(track.pointer)
-    r.ShowConsoleMsg(string.format("  found %d items on track\n", item_count))
     for i = 0, item_count - 1 do
         local item = r.GetTrackMediaItem(track.pointer, i)
         if item then
@@ -243,12 +240,8 @@ function M.get_midi_notes(track, start_time, end_time)
                 -- Get all MIDI notes in this take
                 local _, note_count = r.MIDI_CountEvts(take)
 
-                r.ShowConsoleMsg(string.format("  Item %d: pos=%.3f item_len=%.3f source_len=%.3f loop=%s num_loops=%d\n",
-                    i, item_pos, item_len, source_len, loop_enabled and "yes" or "no", num_loops))
-
                 -- Skip items completely outside our time range
                 if item_end >= start_time and item_pos <= end_time then
-                    r.ShowConsoleMsg(string.format("    note_count=%d\n", note_count))
 
                     for loop = 0, num_loops - 1 do
                         local loop_offset = loop * source_len

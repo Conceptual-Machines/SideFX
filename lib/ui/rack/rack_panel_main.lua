@@ -315,18 +315,14 @@ local function draw_rack_drop_zone(ctx, rack, has_payload, state, add_chain_to_r
         -- Accept chain drops (cross-rack move)
         local chain_accepted, dragged_guid = ctx:accept_drag_drop_payload("CHAIN_REORDER")
         if chain_accepted and dragged_guid then
-            reaper.ShowConsoleMsg("[drop_zone] Chain drop accepted. Dragged GUID: " .. dragged_guid .. "\n")
             local dragged_chain = state.track:find_fx_by_guid(dragged_guid)
             if dragged_chain then
                 local source_rack = dragged_chain:get_parent_container()
                 if source_rack and source_rack:get_guid() ~= rack:get_guid() then
                     -- Different rack: move to end of target rack
-                    reaper.ShowConsoleMsg("[drop_zone] Moving chain to end of target rack\n")
                     if move_chain_between_racks then
                         move_chain_between_racks(source_rack, rack, dragged_guid, nil)
                     end
-                else
-                    reaper.ShowConsoleMsg("[drop_zone] Same rack or no parent - ignoring\n")
                 end
             end
         end

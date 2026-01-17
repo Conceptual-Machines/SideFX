@@ -90,37 +90,25 @@ local function create_rack_container(rack_idx, position)
 
     -- Set up for parallel routing (64 channels for up to 32 stereo chains)
     rack:set_container_channels(64)
-    r.ShowConsoleMsg("SideFX DEBUG: Created rack with 64 channels\n")
 
     -- Configure rack's INPUT pin mappings to only receive stereo on channels 0/1
     -- Using raw REAPER API to ensure it works
     local track_ptr = state.track.pointer
     local rack_ptr = rack.pointer
-    r.ShowConsoleMsg(string.format("SideFX DEBUG: track_ptr=%s, rack_ptr=0x%X\n", tostring(track_ptr), rack_ptr))
 
     -- Clear and set input pins using raw API
     for pin = 0, 7 do
         r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 0, pin, 0, 0)
     end
-    local ok1 = r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 0, 0, 1, 0)  -- input pin 0 <- channel 0
-    local ok2 = r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 0, 1, 2, 0)  -- input pin 1 <- channel 1
-    r.ShowConsoleMsg(string.format("SideFX DEBUG: Rack input pins set - ok1=%s, ok2=%s\n", tostring(ok1), tostring(ok2)))
+    r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 0, 0, 1, 0)  -- input pin 0 <- channel 0
+    r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 0, 1, 2, 0)  -- input pin 1 <- channel 1
 
     -- Clear and set output pins using raw API
     for pin = 0, 7 do
         r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 1, pin, 0, 0)
     end
-    local ok3 = r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 1, 0, 1, 0)  -- output pin 0 -> channel 0
-    local ok4 = r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 1, 1, 2, 0)  -- output pin 1 -> channel 1
-    r.ShowConsoleMsg(string.format("SideFX DEBUG: Rack output pins set - ok3=%s, ok4=%s\n", tostring(ok3), tostring(ok4)))
-
-    -- Verify rack pin mappings using raw API
-    local in0_lo, in0_hi = r.TrackFX_GetPinMappings(track_ptr, rack_ptr, 0, 0)
-    local in1_lo, in1_hi = r.TrackFX_GetPinMappings(track_ptr, rack_ptr, 0, 1)
-    local out0_lo, out0_hi = r.TrackFX_GetPinMappings(track_ptr, rack_ptr, 1, 0)
-    local out1_lo, out1_hi = r.TrackFX_GetPinMappings(track_ptr, rack_ptr, 1, 1)
-    r.ShowConsoleMsg(string.format("SideFX DEBUG: Rack pin verify - in0=%d, in1=%d, out0=%d, out1=%d\n",
-        in0_lo or -1, in1_lo or -1, out0_lo or -1, out1_lo or -1))
+    r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 1, 0, 1, 0)  -- output pin 0 -> channel 0
+    r.TrackFX_SetPinMappings(track_ptr, rack_ptr, 1, 1, 2, 0)  -- output pin 1 -> channel 1
 
     -- Add the mixer JSFX at track level, then move into rack
     local mixer_fx = state.track:add_fx_by_name(M.MIXER_JSFX, false, -1)
@@ -161,11 +149,6 @@ local function create_rack_container(rack_idx, position)
                 r.TrackFX_SetParam(track_ptr, mixer_ptr, vol_param, 0)  -- 0 dB
                 r.TrackFX_SetParam(track_ptr, mixer_ptr, pan_param, 0)  -- center
             end
-
-            -- Verify master
-            local val_after = r.TrackFX_GetParam(track_ptr, mixer_ptr, 0)
-            r.ShowConsoleMsg(string.format("SideFX DEBUG: Mixer initialized - Master=%.2f dB, Chain1 Vol=%.2f dB\n",
-                val_after, r.TrackFX_GetParam(track_ptr, mixer_ptr, 2)))
         else
             -- Mixer was added but move failed - clean up and fail
             r.ShowConsoleMsg("SideFX: Failed to move mixer into rack container. Cleaning up...\n")
@@ -324,7 +307,6 @@ function M.add_rack(parent_rack, position)
 
         if chain_inside then
             chain_inside:set_container_channels(64)
-            r.ShowConsoleMsg(string.format("SideFX DEBUG: Chain %d created with 64 channels\n", chain_idx))
 
             -- Clear all default INPUT pin mappings (pins 0-7)
             -- Then set only pins 0/1 to receive from channels 0/1
@@ -346,14 +328,6 @@ function M.add_rack(parent_rack, position)
 
             chain_inside:set_pin_mappings(1, 0, left_bits, 0)
             chain_inside:set_pin_mappings(1, 1, right_bits, 0)
-
-            -- Verify chain pin mappings
-            local c_in0, _ = chain_inside:get_pin_mappings(0, 0)
-            local c_in1, _ = chain_inside:get_pin_mappings(0, 1)
-            local c_out0, _ = chain_inside:get_pin_mappings(1, 0)
-            local c_out1, _ = chain_inside:get_pin_mappings(1, 1)
-            r.ShowConsoleMsg(string.format("SideFX DEBUG: Chain %d pins - in0=%d, in1=%d, out0=%d (expect %d), out1=%d (expect %d)\n",
-                chain_idx, c_in0 or -1, c_in1 or -1, c_out0 or -1, left_bits, c_out1 or -1, right_bits))
         end
 
         -- Note: Don't initialize mixer chain params - JSFX defaults (0dB) are correct
@@ -828,16 +802,6 @@ function M.add_chain_to_rack(rack, plugin, opts)
             chain_inside:set_pin_mappings(1, 0, left_bits, 0)
             chain_inside:set_pin_mappings(1, 1, right_bits, 0)
 
-            -- Debug: verify pin mappings
-            local track_ptr = state.track.pointer
-            local chain_ptr = chain_inside.pointer
-            local out0_lo, _ = r.TrackFX_GetPinMappings(track_ptr, chain_ptr, 1, 0)
-            local out1_lo, _ = r.TrackFX_GetPinMappings(track_ptr, chain_ptr, 1, 1)
-            r.ShowConsoleMsg(string.format("SideFX DEBUG: Chain %d output pins - pin0=0x%X (expect 0x%X), pin1=0x%X (expect 0x%X)\n",
-                chain_idx, out0_lo or 0, left_bits, out1_lo or 0, right_bits))
-            r.ShowConsoleMsg(string.format("SideFX DEBUG: Chain %d outputs to channels %d/%d (spl%d/spl%d in mixer)\n",
-                chain_idx, out_channel, out_channel + 1, out_channel, out_channel + 1))
-
             -- Initialize this chain's mixer params (REAPER doesn't apply JSFX defaults correctly)
             -- Find mixer in rack and set chain volume to 0dB
             local mixer = nil
@@ -855,8 +819,6 @@ function M.add_chain_to_rack(rack, plugin, opts)
                 local pan_param = 17 + chain_idx     -- Params 18-33 are chain 1-16 pans
                 r.TrackFX_SetParam(track_ptr, mixer_ptr, vol_param, 0)  -- 0 dB
                 r.TrackFX_SetParam(track_ptr, mixer_ptr, pan_param, 0)  -- center
-                r.ShowConsoleMsg(string.format("SideFX DEBUG: Chain %d initialized - Vol param %d = %.2f dB\n",
-                    chain_idx, vol_param, r.TrackFX_GetParam(track_ptr, mixer_ptr, vol_param)))
             end
         end
     end
@@ -1268,26 +1230,18 @@ end
 -- @param target_chain_guid string|nil Target chain GUID to insert before (nil = end)
 -- @return boolean Success
 function M.move_chain_between_racks(source_rack, target_rack, chain_guid, target_chain_guid)
-    r.ShowConsoleMsg("[rack.lua] move_chain_between_racks called\n")
-    r.ShowConsoleMsg("[rack.lua] chain_guid: " .. tostring(chain_guid) .. "\n")
-    r.ShowConsoleMsg("[rack.lua] target_chain_guid: " .. tostring(target_chain_guid) .. "\n")
-
     if not state.track or not source_rack or not target_rack or not chain_guid then
-        r.ShowConsoleMsg("[rack.lua] ERROR: Missing parameters\n")
         return false
     end
     if not fx_utils.is_rack_container(source_rack) or not fx_utils.is_rack_container(target_rack) then
-        r.ShowConsoleMsg("[rack.lua] ERROR: Not rack containers\n")
         return false
     end
 
     -- Can't move to same rack (use reorder instead)
     if source_rack:get_guid() == target_rack:get_guid() then
-        r.ShowConsoleMsg("[rack.lua] Same rack detected, calling reorder instead\n")
         return M.reorder_chain_in_rack(source_rack, chain_guid, target_chain_guid)
     end
 
-    r.ShowConsoleMsg("[rack.lua] Starting cross-rack move...\n")
     r.Undo_BeginBlock()
     r.PreventUIRefresh(1)
 
@@ -1298,22 +1252,18 @@ function M.move_chain_between_racks(source_rack, target_rack, chain_guid, target
     -- Find chain in source rack
     local chain = state.track:find_fx_by_guid(chain_guid)
     if not chain then
-        r.ShowConsoleMsg("[rack.lua] ERROR: Could not find chain by GUID\n")
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Move Chain (failed)", -1)
         return false
     end
-    r.ShowConsoleMsg("[rack.lua] Found chain\n")
 
     -- Verify chain is in source rack
     local parent = chain:get_parent_container()
     if not parent or parent:get_guid() ~= source_rack_guid then
-        r.ShowConsoleMsg("[rack.lua] ERROR: Chain parent doesn't match source rack\n")
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Move Chain (failed)", -1)
         return false
     end
-    r.ShowConsoleMsg("[rack.lua] Verified chain is in source rack\n")
 
     -- Find target position in target rack
     local target_pos = 0
@@ -1336,39 +1286,31 @@ function M.move_chain_between_racks(source_rack, target_rack, chain_guid, target
     if not target_chain_guid then
         target_pos = mixer_pos or target_pos
     end
-    r.ShowConsoleMsg("[rack.lua] Target position: " .. target_pos .. "\n")
 
     -- Extract chain from source rack
-    r.ShowConsoleMsg("[rack.lua] Extracting chain from source rack...\n")
     chain:move_out_of_container()
 
     -- Re-find everything by GUID after move
-    r.ShowConsoleMsg("[rack.lua] Re-finding FX by GUID...\n")
     chain = state.track:find_fx_by_guid(chain_guid)
     source_rack = state.track:find_fx_by_guid(source_rack_guid)
     target_rack = state.track:find_fx_by_guid(target_rack_guid)
 
     if not chain or not source_rack or not target_rack then
-        r.ShowConsoleMsg("[rack.lua] ERROR: Could not re-find FX after extraction\n")
         r.PreventUIRefresh(-1)
         r.Undo_EndBlock("SideFX: Move Chain (failed)", -1)
         return false
     end
-    r.ShowConsoleMsg("[rack.lua] Successfully re-found all FX\n")
 
     -- Insert into target rack
-    r.ShowConsoleMsg("[rack.lua] Inserting into target rack at position " .. target_pos .. "\n")
     target_rack:add_fx_to_container(chain, target_pos)
 
     -- Renumber chains in both racks
-    r.ShowConsoleMsg("[rack.lua] Renumbering chains in both racks...\n")
     M.renumber_chains_in_rack(source_rack)
     M.renumber_chains_in_rack(target_rack)
 
     r.PreventUIRefresh(-1)
     r.Undo_EndBlock("SideFX: Move Chain Between Racks", -1)
 
-    r.ShowConsoleMsg("[rack.lua] Cross-rack move completed successfully\n")
     return true
 end
 
