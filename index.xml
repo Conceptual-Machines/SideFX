@@ -98,7 +98,7 @@ Requirements (install via ReaPack):
     </version>
     </reapack>
   </category>
-  <category name="Apps">
+  <category name="Utils">
     <reapack name="SideFX_Mixer.jsfx" type="effect" desc="SideFX Mixer - 16-chain parallel mixer">
     <version name="0.2.0" author="Nomad Monad" time="2026-01-16T00:00:00Z">
       <source>https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/jsfx/SideFX_Mixer.jsfx</source>
