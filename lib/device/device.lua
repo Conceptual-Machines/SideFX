@@ -19,8 +19,8 @@ local state = state_module.state
 -- Constants
 --------------------------------------------------------------------------------
 
-M.UTILITY_JSFX = "JS:SideFX/SideFX_Utility"
-M.MODULATOR_JSFX = "JS:SideFX/SideFX_Modulator"
+M.UTILITY_JSFX = "JS:SideFX/Utils/SideFX_Utility"
+M.MODULATOR_JSFX = "JS:SideFX/Utils/SideFX_Modulator"
 
 --------------------------------------------------------------------------------
 -- Device Creation
