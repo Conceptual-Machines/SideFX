@@ -562,9 +562,11 @@ end
 -- @param width number Widget width
 -- @param height number Widget height
 -- @param slot number GMEM slot (0-15)
+-- @param draw_data boolean Whether to draw waveform data (default true)
 -- @return boolean True if hovered
-function M.draw_oscilloscope(ctx, label, width, height, slot)
+function M.draw_oscilloscope(ctx, label, width, height, slot, draw_data)
     slot = slot or 0
+    if draw_data == nil then draw_data = true end
     local scope_slot_size = 2100
     local scope_base = 2000 + slot * scope_slot_size
 
@@ -658,8 +660,8 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
     local peak_l_pos, peak_l_neg = 0, 0
     local peak_r_pos, peak_r_neg = 0, 0
 
-    -- Draw both channels if we have samples
-    if buffer_size > 0 then
+    -- Draw both channels if we have samples and draw_data is true
+    if draw_data and buffer_size > 0 then
         local prev_px_l, prev_py_l
         local prev_px_r, prev_py_r
 
@@ -697,25 +699,25 @@ function M.draw_oscilloscope(ctx, label, width, height, slot)
                 prev_px_r, prev_py_r = px, py_r
             end
         end
+
+        -- Helper: amplitude to dB string (short format)
+        local function amp_to_db_str(amp)
+            if math.abs(amp) < 0.001 then return "-oo" end
+            local db = 20 * math.log(math.abs(amp), 10)
+            return string.format("%.0f", db)
+        end
+
+        -- Channel legend with bipolar peak values (+peak/-peak dB)
+        local l_pos_str = amp_to_db_str(peak_l_pos)
+        local l_neg_str = amp_to_db_str(peak_l_neg)
+        local r_pos_str = amp_to_db_str(peak_r_pos)
+        local r_neg_str = amp_to_db_str(peak_r_neg)
+
+        -- Show L/R with bipolar peak values (pos/neg dB) in top-right corner
+        local text_x = x + width - 95
+        r.ImGui_DrawList_AddText(draw_list, text_x, y + 4, color_l, string.format("L: %s / %s", l_pos_str, l_neg_str))
+        r.ImGui_DrawList_AddText(draw_list, text_x, y + 16, color_r, string.format("R: %s / %s", r_pos_str, r_neg_str))
     end
-
-    -- Helper: amplitude to dB string (short format)
-    local function amp_to_db_str(amp)
-        if math.abs(amp) < 0.001 then return "-oo" end
-        local db = 20 * math.log(math.abs(amp), 10)
-        return string.format("%.0f", db)
-    end
-
-    -- Channel legend with bipolar peak values (+peak/-peak dB)
-    local l_pos_str = amp_to_db_str(peak_l_pos)
-    local l_neg_str = amp_to_db_str(peak_l_neg)
-    local r_pos_str = amp_to_db_str(peak_r_pos)
-    local r_neg_str = amp_to_db_str(peak_r_neg)
-
-    -- Show L/R with bipolar peak values (pos/neg dB) in top-right corner
-    local text_x = x + width - 95
-    r.ImGui_DrawList_AddText(draw_list, text_x, y + 4, color_l, string.format("L: %s / %s", l_pos_str, l_neg_str))
-    r.ImGui_DrawList_AddText(draw_list, text_x, y + 16, color_r, string.format("R: %s / %s", r_pos_str, r_neg_str))
 
     -- Border (3 sides - no top to avoid double line with header)
     local border_color = 0x444444FF
@@ -744,9 +746,11 @@ end
 -- @param width number Widget width
 -- @param height number Widget height
 -- @param slot number GMEM slot (0-15)
+-- @param draw_data boolean Whether to draw spectrum data (default true)
 -- @return boolean True if hovered
-function M.draw_spectrum(ctx, label, width, height, slot)
+function M.draw_spectrum(ctx, label, width, height, slot, draw_data)
     slot = slot or 0
+    if draw_data == nil then draw_data = true end
     local fft_slot_size = 520
     local fft_base = 10000 + slot * fft_slot_size
 
@@ -810,135 +814,137 @@ function M.draw_spectrum(ctx, label, width, height, slot)
         end
     end
 
-    -- Draw spectrum using smooth curve
-    -- Build array of (x_pos, magnitude) points from FFT bins
-    local bin_points = {}
-    for bin = 1, num_bins - 1 do  -- Skip bin 0 (DC)
-        local freq = bin * hz_per_bin
-        if freq >= min_freq and freq <= max_freq then
-            local bin_x = freq_to_x(freq)
-            local mag = r.gmem_read(fft_base + bin) or 0
+    -- Draw spectrum using smooth curve (only if draw_data is true)
+    if draw_data then
+        -- Build array of (x_pos, magnitude) points from FFT bins
+        local bin_points = {}
+        for bin = 1, num_bins - 1 do  -- Skip bin 0 (DC)
+            local freq = bin * hz_per_bin
+            if freq >= min_freq and freq <= max_freq then
+                local bin_x = freq_to_x(freq)
+                local mag = r.gmem_read(fft_base + bin) or 0
+                mag = math.max(0, math.min(1, mag))
+                table.insert(bin_points, {x = bin_x, mag = mag})
+            end
+        end
+
+        local bottom_y = y + height - 1
+
+        -- Sample at regular pixel intervals with interpolation for smooth curve
+        local curve_points = {}
+        local step = 2  -- Sample every 2 pixels for smoother curve
+        for px = 0, width - 1, step do
+            local px_x = x + px
+            local mag = 0
+            local found = false
+
+            -- Find surrounding bin points for interpolation
+            if #bin_points >= 2 then
+                for i = 1, #bin_points - 1 do
+                    if bin_points[i].x <= px_x and bin_points[i+1].x >= px_x then
+                        -- Smooth interpolation between bins
+                        local dx = bin_points[i+1].x - bin_points[i].x
+                        if dx > 0.001 then
+                            local t = (px_x - bin_points[i].x) / dx
+                            -- Smoothstep for smoother transitions
+                            t = math.max(0, math.min(1, t))
+                            t = t * t * (3 - 2 * t)
+                            mag = bin_points[i].mag * (1 - t) + bin_points[i+1].mag * t
+                        else
+                            mag = (bin_points[i].mag + bin_points[i+1].mag) * 0.5
+                        end
+                        found = true
+                        break
+                    end
+                end
+
+                -- Handle edges (before first or after last bin)
+                if not found then
+                    if px_x <= bin_points[1].x then
+                        -- Fade in from zero at low frequencies
+                        local fade_dist = bin_points[1].x - x
+                        if fade_dist > 0 then
+                            local t = (px_x - x) / fade_dist
+                            mag = bin_points[1].mag * t
+                        end
+                    elseif px_x >= bin_points[#bin_points].x then
+                        -- Fade out to zero at high frequencies (beyond data range)
+                        local fade_start = bin_points[#bin_points].x
+                        local fade_end = x + width
+                        local fade_dist = fade_end - fade_start
+                        if fade_dist > 0 then
+                            local t = 1 - (px_x - fade_start) / fade_dist
+                            t = math.max(0, t)
+                            mag = bin_points[#bin_points].mag * t * t  -- Quadratic fade
+                        end
+                    end
+                end
+            elseif #bin_points == 1 then
+                mag = bin_points[1].mag
+            end
+
             mag = math.max(0, math.min(1, mag))
-            table.insert(bin_points, {x = bin_x, mag = mag})
+            local point_y = bottom_y - mag * (height - 2)
+            table.insert(curve_points, {x = px_x, y = point_y, mag = mag})
         end
-    end
 
-    local bottom_y = y + height - 1
-
-    -- Sample at regular pixel intervals with interpolation for smooth curve
-    local curve_points = {}
-    local step = 2  -- Sample every 2 pixels for smoother curve
-    for px = 0, width - 1, step do
-        local px_x = x + px
-        local mag = 0
-        local found = false
-
-        -- Find surrounding bin points for interpolation
-        if #bin_points >= 2 then
-            for i = 1, #bin_points - 1 do
-                if bin_points[i].x <= px_x and bin_points[i+1].x >= px_x then
-                    -- Smooth interpolation between bins
-                    local dx = bin_points[i+1].x - bin_points[i].x
-                    if dx > 0.001 then
-                        local t = (px_x - bin_points[i].x) / dx
-                        -- Smoothstep for smoother transitions
-                        t = math.max(0, math.min(1, t))
-                        t = t * t * (3 - 2 * t)
-                        mag = bin_points[i].mag * (1 - t) + bin_points[i+1].mag * t
-                    else
-                        mag = (bin_points[i].mag + bin_points[i+1].mag) * 0.5
-                    end
-                    found = true
-                    break
+        -- Apply smoothing pass to curve points (3-point weighted average)
+        if #curve_points > 2 then
+            local smoothed = {}
+            for i = 1, #curve_points do
+                if i == 1 or i == #curve_points then
+                    smoothed[i] = curve_points[i].y
+                else
+                    -- Weighted average: 25% prev, 50% current, 25% next
+                    smoothed[i] = curve_points[i-1].y * 0.25 +
+                                  curve_points[i].y * 0.5 +
+                                  curve_points[i+1].y * 0.25
                 end
             end
-
-            -- Handle edges (before first or after last bin)
-            if not found then
-                if px_x <= bin_points[1].x then
-                    -- Fade in from zero at low frequencies
-                    local fade_dist = bin_points[1].x - x
-                    if fade_dist > 0 then
-                        local t = (px_x - x) / fade_dist
-                        mag = bin_points[1].mag * t
-                    end
-                elseif px_x >= bin_points[#bin_points].x then
-                    -- Fade out to zero at high frequencies (beyond data range)
-                    local fade_start = bin_points[#bin_points].x
-                    local fade_end = x + width
-                    local fade_dist = fade_end - fade_start
-                    if fade_dist > 0 then
-                        local t = 1 - (px_x - fade_start) / fade_dist
-                        t = math.max(0, t)
-                        mag = bin_points[#bin_points].mag * t * t  -- Quadratic fade
-                    end
+            -- Apply smoothed values
+            for i = 1, #curve_points do
+                curve_points[i].y = smoothed[i]
+            end
+            -- Second smoothing pass for extra smoothness
+            for i = 1, #curve_points do
+                if i == 1 or i == #curve_points then
+                    smoothed[i] = curve_points[i].y
+                else
+                    smoothed[i] = curve_points[i-1].y * 0.25 +
+                                  curve_points[i].y * 0.5 +
+                                  curve_points[i+1].y * 0.25
                 end
             end
-        elseif #bin_points == 1 then
-            mag = bin_points[1].mag
-        end
-
-        mag = math.max(0, math.min(1, mag))
-        local point_y = bottom_y - mag * (height - 2)
-        table.insert(curve_points, {x = px_x, y = point_y, mag = mag})
-    end
-
-    -- Apply smoothing pass to curve points (3-point weighted average)
-    if #curve_points > 2 then
-        local smoothed = {}
-        for i = 1, #curve_points do
-            if i == 1 or i == #curve_points then
-                smoothed[i] = curve_points[i].y
-            else
-                -- Weighted average: 25% prev, 50% current, 25% next
-                smoothed[i] = curve_points[i-1].y * 0.25 +
-                              curve_points[i].y * 0.5 +
-                              curve_points[i+1].y * 0.25
+            for i = 1, #curve_points do
+                curve_points[i].y = smoothed[i]
             end
         end
-        -- Apply smoothed values
-        for i = 1, #curve_points do
-            curve_points[i].y = smoothed[i]
-        end
-        -- Second smoothing pass for extra smoothness
-        for i = 1, #curve_points do
-            if i == 1 or i == #curve_points then
-                smoothed[i] = curve_points[i].y
-            else
-                smoothed[i] = curve_points[i-1].y * 0.25 +
-                              curve_points[i].y * 0.5 +
-                              curve_points[i+1].y * 0.25
-            end
-        end
-        for i = 1, #curve_points do
-            curve_points[i].y = smoothed[i]
-        end
-    end
 
-    -- Draw filled area under curve using triangles
-    local fill_color = 0xCC990066  -- Semi-transparent orange/yellow
-    for i = 1, #curve_points - 1 do
-        local p1 = curve_points[i]
-        local p2 = curve_points[i + 1]
-        -- Draw quad as two triangles
-        r.ImGui_DrawList_AddTriangleFilled(draw_list,
-            p1.x, p1.y,
-            p2.x, p2.y,
-            p2.x, bottom_y,
-            fill_color)
-        r.ImGui_DrawList_AddTriangleFilled(draw_list,
-            p1.x, p1.y,
-            p2.x, bottom_y,
-            p1.x, bottom_y,
-            fill_color)
-    end
+        -- Draw filled area under curve using triangles
+        local fill_color = 0xCC990066  -- Semi-transparent orange/yellow
+        for i = 1, #curve_points - 1 do
+            local p1 = curve_points[i]
+            local p2 = curve_points[i + 1]
+            -- Draw quad as two triangles
+            r.ImGui_DrawList_AddTriangleFilled(draw_list,
+                p1.x, p1.y,
+                p2.x, p2.y,
+                p2.x, bottom_y,
+                fill_color)
+            r.ImGui_DrawList_AddTriangleFilled(draw_list,
+                p1.x, p1.y,
+                p2.x, bottom_y,
+                p1.x, bottom_y,
+                fill_color)
+        end
 
-    -- Draw smooth curve line on top
-    local line_color = 0xFFCC00FF  -- Yellow
-    for i = 1, #curve_points - 1 do
-        local p1 = curve_points[i]
-        local p2 = curve_points[i + 1]
-        r.ImGui_DrawList_AddLine(draw_list, p1.x, p1.y, p2.x, p2.y, line_color, 2.0)
+        -- Draw smooth curve line on top
+        local line_color = 0xFFCC00FF  -- Yellow
+        for i = 1, #curve_points - 1 do
+            local p1 = curve_points[i]
+            local p2 = curve_points[i + 1]
+            r.ImGui_DrawList_AddLine(draw_list, p1.x, p1.y, p2.x, p2.y, line_color, 2.0)
+        end
     end
 
     -- Border (3 sides - no top to avoid double line with header)

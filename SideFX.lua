@@ -879,14 +879,9 @@ local function draw_analyzer_popouts(ctx)
             local avail_w, avail_h = ctx:get_content_region_avail()
             local viz_h = avail_h - 60  -- Leave room for controls
             local is_enabled = scope_fx and r.TrackFX_GetEnabled(state.track.pointer, scope_fx.pointer)
-            if is_enabled then
-                local scope_pop_hovered = drawing.draw_oscilloscope(ctx, "##scope_popout_viz", avail_w, viz_h, slot)
-                if scope_pop_hovered then
-                    ctx:set_tooltip("Oscilloscope - Stereo waveform display\nL (green) / R (magenta)\nLogarithmic dB scale")
-                end
-            else
-                -- Draw empty area when disabled
-                ctx:dummy(avail_w, viz_h)
+            local scope_pop_hovered = drawing.draw_oscilloscope(ctx, "##scope_popout_viz", avail_w, viz_h, slot, is_enabled)
+            if scope_pop_hovered and is_enabled then
+                ctx:set_tooltip("Oscilloscope - Stereo waveform display\nL (green) / R (magenta)\nLogarithmic dB scale")
             end
 
             -- Controls
@@ -926,14 +921,9 @@ local function draw_analyzer_popouts(ctx)
             local avail_w, avail_h = ctx:get_content_region_avail()
             local viz_h = avail_h - 60  -- Leave room for controls
             local is_enabled = spectrum_fx and r.TrackFX_GetEnabled(state.track.pointer, spectrum_fx.pointer)
-            if is_enabled then
-                local spectrum_pop_hovered = drawing.draw_spectrum(ctx, "##spectrum_popout_viz", avail_w, viz_h, slot)
-                if spectrum_pop_hovered then
-                    ctx:set_tooltip("Spectrum Analyzer - Frequency response\nLogarithmic frequency scale (20Hz-20kHz)\nClick/drag: Adjust floor dB")
-                end
-            else
-                -- Draw empty area when disabled
-                ctx:dummy(avail_w, viz_h)
+            local spectrum_pop_hovered = drawing.draw_spectrum(ctx, "##spectrum_popout_viz", avail_w, viz_h, slot, is_enabled)
+            if spectrum_pop_hovered and is_enabled then
+                ctx:set_tooltip("Spectrum Analyzer - Frequency response\nLogarithmic frequency scale (20Hz-20kHz)\nClick/drag: Adjust floor dB")
             end
 
             -- Controls
@@ -1096,14 +1086,9 @@ local function draw_analyzers(ctx, avail_height)
 
                 -- Visualization
                 local is_enabled = scope_fx and r.TrackFX_GetEnabled(state.track.pointer, scope_fx.pointer)
-                if is_enabled then
-                    local scope_hovered = drawing.draw_oscilloscope(ctx, "##scope_viz", analyzer_w, analyzer_h, slot)
-                    if scope_hovered then
-                        ctx:set_tooltip("Oscilloscope - Stereo waveform display\nL (green) / R (magenta)\nLogarithmic dB scale")
-                    end
-                else
-                    -- Draw empty area when disabled
-                    ctx:dummy(analyzer_w, analyzer_h)
+                local scope_hovered = drawing.draw_oscilloscope(ctx, "##scope_viz", analyzer_w, analyzer_h, slot, is_enabled)
+                if scope_hovered and is_enabled then
+                    ctx:set_tooltip("Oscilloscope - Stereo waveform display\nL (green) / R (magenta)\nLogarithmic dB scale")
                 end
 
                 -- Controls
@@ -1234,14 +1219,9 @@ local function draw_analyzers(ctx, avail_height)
 
                 -- Visualization
                 local is_enabled = spectrum_fx and r.TrackFX_GetEnabled(state.track.pointer, spectrum_fx.pointer)
-                if is_enabled then
-                    local spectrum_hovered = drawing.draw_spectrum(ctx, "##spectrum_viz", analyzer_w, analyzer_h, slot)
-                    if spectrum_hovered then
-                        ctx:set_tooltip("Spectrum Analyzer - Frequency response\nLogarithmic frequency scale (20Hz-20kHz)\nClick/drag: Adjust floor dB")
-                    end
-                else
-                    -- Draw empty area when disabled
-                    ctx:dummy(analyzer_w, analyzer_h)
+                local spectrum_hovered = drawing.draw_spectrum(ctx, "##spectrum_viz", analyzer_w, analyzer_h, slot, is_enabled)
+                if spectrum_hovered and is_enabled then
+                    ctx:set_tooltip("Spectrum Analyzer - Frequency response\nLogarithmic frequency scale (20Hz-20kHz)\nClick/drag: Adjust floor dB")
                 end
 
                 -- Controls
