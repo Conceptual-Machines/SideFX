@@ -436,9 +436,9 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
             r.ImGui_TableSetBgColor(ctx.ctx, r.ImGui_TableBgTarget_RowBg0(), 0x3A3A4AFF)
         end
 
-        -- Header Column 1: Modulator collapse button + "Modulators" label
+        -- Header Column 1: Modulator collapse button + "Mod" label + matrix button
         r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
-        if modulator_header.draw(ctx, state_guid) then
+        if modulator_header.draw(ctx, state_guid, { on_mod_matrix = opts.on_mod_matrix }) then
             interacted = true
         end
 

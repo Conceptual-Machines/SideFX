@@ -643,6 +643,7 @@ draw_chain_column = function(ctx, selected_chain, rack_h)
         draw_rack_panel = draw_rack_panel,
         icon_font = icon_font_ref.value,
         default_font = default_font_ref.value,
+        on_mod_matrix = function() mod_matrix.open() end,
     })
 end
 

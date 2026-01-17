@@ -370,14 +370,13 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
         current_preset_name = cached_names[0] or "Sine"
     end
 
-    -- Use table for preset row: Preset (stretch) | Save | Curve | Matrix
+    -- Use table for preset row: Preset (stretch) | Save | Curve
     local table_flags = r.ImGui_TableFlags_SizingFixedFit()
     local icon_btn_size = 24
-    if ctx:begin_table("preset_row_" .. guid, 4, table_flags) then
+    if ctx:begin_table("preset_row_" .. guid, 3, table_flags) then
         r.ImGui_TableSetupColumn(ctx.ctx, "Preset", r.ImGui_TableColumnFlags_WidthStretch(), 1)
         r.ImGui_TableSetupColumn(ctx.ctx, "Save", r.ImGui_TableColumnFlags_WidthFixed(), icon_btn_size)
         r.ImGui_TableSetupColumn(ctx.ctx, "Curve", r.ImGui_TableColumnFlags_WidthFixed(), icon_btn_size)
-        r.ImGui_TableSetupColumn(ctx.ctx, "Matrix", r.ImGui_TableColumnFlags_WidthFixed(), icon_btn_size)
 
         ctx:table_next_row()
 
@@ -449,18 +448,6 @@ local function draw_preset_and_ui_controls(ctx, guid, expanded_modulator, editor
         end
         if ctx:is_item_hovered() then
             ctx:set_tooltip("Open Curve Editor")
-        end
-
-        -- Column 4: Mod Matrix button
-        ctx:table_set_column_index(3)
-        if icons.button_bordered(ctx, "mod_matrix_" .. guid, icons.Names.matrix, 18) then
-            if opts.on_mod_matrix then
-                opts.on_mod_matrix()
-            end
-            interacted = true
-        end
-        if ctx:is_item_hovered() then
-            ctx:set_tooltip("Mod Matrix")
         end
 
         ctx:end_table()

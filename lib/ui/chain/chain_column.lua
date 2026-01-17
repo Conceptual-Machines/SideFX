@@ -416,6 +416,7 @@ function M.draw(ctx, selected_chain, rack_h, opts)
                                         track = state.track,
                                         refresh_fx_list = refresh_fx_list,
                                         is_selected = dev_is_selected,
+                                        on_mod_matrix = opts.on_mod_matrix,
                                         on_delete = function()
                                             dev:delete()
                                             refresh_fx_list()

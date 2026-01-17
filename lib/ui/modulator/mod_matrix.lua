@@ -460,7 +460,7 @@ function M.draw(ctx, state)
     end
 
     -- Set minimum window size
-    r.ImGui_SetNextWindowSize(ctx.ctx, 550, 300, imgui.Cond.FirstUseEver())
+    r.ImGui_SetNextWindowSize(ctx.ctx, 550, 300, r.ImGui_Cond_FirstUseEver())
 
     local flags = r.ImGui_WindowFlags_NoCollapse()
     local visible, p_open = r.ImGui_BeginPopupModal(ctx.ctx, "Mod Matrix##sidefx_mod_matrix", true, flags)
