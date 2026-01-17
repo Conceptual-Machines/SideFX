@@ -18,6 +18,8 @@ local M = {}
 local dialog_state = {
     open = false,
     popup_opened = false,
+    device = nil,       -- The device container to show links for
+    device_name = nil,  -- Display name for the dialog title
 }
 
 --------------------------------------------------------------------------------
@@ -90,89 +92,77 @@ local function get_modulator_links(fx, modulator, modulator_idx)
     return links
 end
 
---- Collect all parameter links from all modulators across all devices
--- @param state table State object
--- @param track TrackFX track object
+--- Collect parameter links from a specific device container
+-- @param device TrackFX device container
 -- @return table Array of link records {lfo_num, device_name, fx, param_name, param_idx, modulator, scale, offset, device_guid, mod_guid}
-local function collect_all_links(state, track)
+local function collect_device_links(device)
     local all_links = {}
-    if not track then return all_links end
+    if not device then return all_links end
 
-    -- Iterate through top-level FX to find devices
-    for _, fx in ipairs(state.top_level_fx) do
-        local ok_is_container, is_container = pcall(function() return fx:is_container() end)
-        if not ok_is_container or not is_container then goto continue end
+    local ok_name, name = pcall(function() return device:get_name() end)
+    if not ok_name or not name then return all_links end
 
-        local ok_name, name = pcall(function() return fx:get_name() end)
-        if not ok_name or not name then goto continue end
+    -- Check if this is a device container (D{n}: ...)
+    local device_num, device_name = name:match("^D(%d+): (.+)$")
+    if not device_num then return all_links end
 
-        -- Check if this is a device container (D{n}: ...)
-        local device_num, device_name = name:match("^D(%d+): (.+)$")
-        if not device_num then goto continue end
+    local ok_guid, device_guid = pcall(function() return device:get_guid() end)
+    if not ok_guid or not device_guid then return all_links end
 
-        local ok_guid, device_guid = pcall(function() return fx:get_guid() end)
-        if not ok_guid or not device_guid then goto continue end
+    -- Get modulators in this device
+    local modulators = get_container_modulators(device)
 
-        -- Get modulators in this device
-        local modulators = get_container_modulators(fx)
-
-        -- Get the main FX in this device (first non-modulator, non-utility child)
-        local main_fx = nil
-        local ok_children, children = pcall(function() return fx:get_container_children() end)
-        if ok_children and children then
-            for _, child in ipairs(children) do
-                local ok_child_name, child_name = pcall(function() return child:get_name() end)
-                if ok_child_name and child_name then
-                    -- Skip modulators and utilities
-                    if not child_name:match("SideFX[_ ]Modulator") and
-                       not child_name:match("SideFX[_ ]Utility") and
-                       not child_name:match("_Util$") then
-                        main_fx = child
-                        break
-                    end
+    -- Get the main FX in this device (first non-modulator, non-utility child)
+    local main_fx = nil
+    local ok_children, children = pcall(function() return device:get_container_children() end)
+    if ok_children and children then
+        for _, child in ipairs(children) do
+            local ok_child_name, child_name = pcall(function() return child:get_name() end)
+            if ok_child_name and child_name then
+                -- Skip modulators and utilities
+                if not child_name:match("SideFX[_ ]Modulator") and
+                   not child_name:match("SideFX[_ ]Utility") and
+                   not child_name:match("_Util$") then
+                    main_fx = child
+                    break
                 end
             end
         end
-
-        if not main_fx then goto continue end
-
-        -- For each modulator, get its links to the main FX
-        for mod_idx, modulator in ipairs(modulators) do
-            local ok_mod_guid, mod_guid = pcall(function() return modulator:get_guid() end)
-            if not ok_mod_guid or not mod_guid then goto continue_mod end
-
-            local mod_local_idx = get_modulator_local_index(fx, mod_guid)
-            if mod_local_idx == nil then goto continue_mod end
-
-            local links = get_modulator_links(main_fx, modulator, mod_local_idx)
-
-            for _, link in ipairs(links) do
-                table.insert(all_links, {
-                    lfo_num = mod_idx,
-                    device_name = device_name,
-                    device_num = tonumber(device_num),
-                    fx = main_fx,
-                    param_name = link.param_name,
-                    param_idx = link.param_idx,
-                    modulator = modulator,
-                    scale = link.scale,
-                    offset = link.offset,
-                    device_guid = device_guid,
-                    mod_guid = mod_guid,
-                })
-            end
-
-            ::continue_mod::
-        end
-
-        ::continue::
     end
 
-    -- Sort by device number, then LFO number
-    table.sort(all_links, function(a, b)
-        if a.device_num ~= b.device_num then
-            return a.device_num < b.device_num
+    if not main_fx then return all_links end
+
+    -- For each modulator, get its links to the main FX
+    for mod_idx, modulator in ipairs(modulators) do
+        local ok_mod_guid, mod_guid = pcall(function() return modulator:get_guid() end)
+        if not ok_mod_guid or not mod_guid then goto continue_mod end
+
+        local mod_local_idx = get_modulator_local_index(device, mod_guid)
+        if mod_local_idx == nil then goto continue_mod end
+
+        local links = get_modulator_links(main_fx, modulator, mod_local_idx)
+
+        for _, link in ipairs(links) do
+            table.insert(all_links, {
+                lfo_num = mod_idx,
+                device_name = device_name,
+                device_num = tonumber(device_num),
+                fx = main_fx,
+                param_name = link.param_name,
+                param_idx = link.param_idx,
+                modulator = modulator,
+                scale = link.scale,
+                offset = link.offset,
+                device_guid = device_guid,
+                mod_guid = mod_guid,
+            })
         end
+
+        ::continue_mod::
+    end
+
+    -- Sort by LFO number
+    table.sort(all_links, function(a, b)
         return a.lfo_num < b.lfo_num
     end)
 
@@ -453,9 +443,16 @@ function M.draw(ctx, state)
         return
     end
 
+    -- Build popup title with device name
+    local popup_title = "Mod Matrix"
+    if dialog_state.device_name then
+        popup_title = "Mod Matrix: " .. dialog_state.device_name
+    end
+    popup_title = popup_title .. "##sidefx_mod_matrix"
+
     -- Open the popup on first frame
     if not dialog_state.popup_opened then
-        r.ImGui_OpenPopup(ctx.ctx, "Mod Matrix##sidefx_mod_matrix")
+        r.ImGui_OpenPopup(ctx.ctx, popup_title)
         dialog_state.popup_opened = true
     end
 
@@ -463,21 +460,23 @@ function M.draw(ctx, state)
     r.ImGui_SetNextWindowSize(ctx.ctx, 550, 300, r.ImGui_Cond_FirstUseEver())
 
     local flags = r.ImGui_WindowFlags_NoCollapse()
-    local visible, p_open = r.ImGui_BeginPopupModal(ctx.ctx, "Mod Matrix##sidefx_mod_matrix", true, flags)
+    local visible, p_open = r.ImGui_BeginPopupModal(ctx.ctx, popup_title, true, flags)
 
     if not visible then
         if not p_open then
             dialog_state.open = false
             dialog_state.popup_opened = false
+            dialog_state.device = nil
+            dialog_state.device_name = nil
         end
         return
     end
 
-    -- Collect all links
-    local all_links = collect_all_links(state, state.track)
+    -- Collect links for this device
+    local all_links = collect_device_links(dialog_state.device)
 
     -- Info text
-    ctx:text_disabled("All parameter links from all modulators")
+    ctx:text_disabled("Parameter links for this device")
     ctx:separator()
     ctx:spacing()
 
@@ -504,12 +503,16 @@ function M.draw(ctx, state)
     if ctx:button("Close", btn_w, 0) then
         dialog_state.open = false
         dialog_state.popup_opened = false
+        dialog_state.device = nil
+        dialog_state.device_name = nil
         r.ImGui_CloseCurrentPopup(ctx.ctx)
     end
 
     if not p_open then
         dialog_state.open = false
         dialog_state.popup_opened = false
+        dialog_state.device = nil
+        dialog_state.device_name = nil
     end
 
     r.ImGui_EndPopup(ctx.ctx)
@@ -519,10 +522,14 @@ end
 -- Dialog Control
 --------------------------------------------------------------------------------
 
---- Open the mod matrix dialog
-function M.open()
+--- Open the mod matrix dialog for a specific device
+-- @param device TrackFX device container
+-- @param device_name string Optional display name for the device
+function M.open(device, device_name)
     dialog_state.open = true
     dialog_state.popup_opened = false
+    dialog_state.device = device
+    dialog_state.device_name = device_name
 end
 
 --- Check if dialog is open

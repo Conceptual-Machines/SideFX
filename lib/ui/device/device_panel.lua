@@ -438,7 +438,14 @@ local function draw_expanded_panel(ctx, fx, container, panel_height, cfg, visibl
 
         -- Header Column 1: Modulator collapse button + "Mod" label + matrix button
         r.ImGui_TableSetColumnIndex(ctx.ctx, 0)
-        if modulator_header.draw(ctx, state_guid, { on_mod_matrix = opts.on_mod_matrix }) then
+        -- Create on_mod_matrix callback that passes container and name
+        local on_mod_matrix_cb = nil
+        if opts.on_mod_matrix then
+            on_mod_matrix_cb = function()
+                opts.on_mod_matrix(container, name)
+            end
+        end
+        if modulator_header.draw(ctx, state_guid, { on_mod_matrix = on_mod_matrix_cb }) then
             interacted = true
         end
 

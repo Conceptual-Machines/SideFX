@@ -580,7 +580,6 @@ local function draw_toolbar(ctx, icon_font_ref)
         on_collapse_from_depth = collapse_from_depth,
         on_config = function() settings_dialog.open(ctx) end,
         on_preset = function() preset_dialog.open(ctx) end,
-        on_mod_matrix = function() mod_matrix.open() end,
         on_toggle_scope = toggle_scope,
         on_toggle_spectrum = toggle_spectrum,
     })
@@ -643,7 +642,7 @@ draw_chain_column = function(ctx, selected_chain, rack_h)
         draw_rack_panel = draw_rack_panel,
         icon_font = icon_font_ref.value,
         default_font = default_font_ref.value,
-        on_mod_matrix = function() mod_matrix.open() end,
+        on_mod_matrix = function(device, device_name) mod_matrix.open(device, device_name) end,
     })
 end
 
@@ -687,7 +686,7 @@ local function draw_device_chain(ctx, fx_list, avail_width, avail_height, icon_f
         header_font = header_font_ref and header_font_ref.value or nil,
         draw_selected_chain_column_if_expanded = draw_selected_chain_column_if_expanded,
         draw_rack_panel = draw_rack_panel,
-        on_mod_matrix = function() mod_matrix.open() end,
+        on_mod_matrix = function(device, device_name) mod_matrix.open(device, device_name) end,
     })
 end
 
