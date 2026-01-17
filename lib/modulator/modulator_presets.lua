@@ -255,7 +255,25 @@ end
 --- Get the path to the factory preset library file
 -- @return string Path to factory .rpl file
 function M.get_preset_library_path()
-    return get_root_path() .. "jsfx/SideFX_Modulator.jsfx.rpl"
+    -- Check dev path first (jsfx/ relative to script root)
+    local dev_path = get_root_path() .. "jsfx/SideFX_Modulator.jsfx.rpl"
+    local f = io.open(dev_path, "r")
+    if f then
+        f:close()
+        return dev_path
+    end
+
+    -- Check ReaPack installed path (Effects/SideFX/Utils/)
+    local resource_path = r.GetResourcePath()
+    local reapack_path = resource_path .. "/Effects/SideFX/Utils/SideFX_Modulator.jsfx.rpl"
+    f = io.open(reapack_path, "r")
+    if f then
+        f:close()
+        return reapack_path
+    end
+
+    -- Fallback to dev path (will fail gracefully if file doesn't exist)
+    return dev_path
 end
 
 --- Get the path to the user preset library file
