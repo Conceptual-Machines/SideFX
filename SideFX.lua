@@ -441,6 +441,12 @@ local function toggle_scope()
             -- Set slot parameter (slider7, param index 6) to isolate GMEM
             local slot = get_track_slot()
             r.TrackFX_SetParamNormalized(state.track.pointer, fx_idx, 6, slot / 15)
+            -- Rename with POST naming for post FX area
+            local naming = require('lib.utils.naming')
+            local fx_utils = require('lib.fx.fx_utils')
+            local post_idx = fx_utils.get_next_post_device_index(state.track)
+            local post_name = naming.build_post_device_name(post_idx, "Oscilloscope")
+            r.TrackFX_SetNamedConfigParm(state.track.pointer, fx_idx, "renamed_name", post_name)
         end
         state.has_scope = true
     end
@@ -462,6 +468,12 @@ local function toggle_spectrum()
             -- Set slot parameter (slider7, param index 6) to isolate GMEM
             local slot = get_track_slot()
             r.TrackFX_SetParamNormalized(state.track.pointer, fx_idx, 6, slot / 15)
+            -- Rename with POST naming for post FX area
+            local naming = require('lib.utils.naming')
+            local fx_utils = require('lib.fx.fx_utils')
+            local post_idx = fx_utils.get_next_post_device_index(state.track)
+            local post_name = naming.build_post_device_name(post_idx, "Spectrum")
+            r.TrackFX_SetNamedConfigParm(state.track.pointer, fx_idx, "renamed_name", post_name)
         end
         state.has_spectrum = true
     end
