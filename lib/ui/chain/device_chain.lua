@@ -17,6 +17,98 @@ local rack_panel = nil
 -- Logger that only logs each message once (prevents spam)
 local log_once = helpers.log_once_func("DeviceChain")
 
+-- Track which drop zone is being hovered (for visual feedback)
+local hovered_drop_zone = nil
+
+--------------------------------------------------------------------------------
+-- Drop Zone Indicator
+--------------------------------------------------------------------------------
+
+--- Draw a drop zone indicator between devices
+-- @param ctx ImGui context wrapper
+-- @param zone_id string Unique ID for this zone
+-- @param insert_pos number FX index to insert before
+-- @param avail_height number Height of the drop zone
+-- @param add_plugin_by_name function Callback to add plugin
+-- @param add_rack_to_track function Callback to add rack
+-- @param refresh_fx_list function Callback to refresh FX list
+-- @param state table State object
+-- @return boolean True if something was dropped
+local function draw_drop_zone_indicator(ctx, zone_id, insert_pos, avail_height, add_plugin_by_name, add_rack_to_track, refresh_fx_list, state, no_same_line)
+    local has_plugin = ctx:get_drag_drop_payload("PLUGIN_ADD")
+    local has_fx = ctx:get_drag_drop_payload("FX_GUID")
+    local has_rack = ctx:get_drag_drop_payload("RACK_ADD")
+    local is_dragging = has_plugin or has_fx or has_rack
+
+    -- Only show drop zones when actively dragging
+    if not is_dragging then
+        return false
+    end
+
+    if not no_same_line then
+        ctx:same_line()
+    end
+
+    -- Determine zone width based on hover state
+    local is_hovered = (hovered_drop_zone == zone_id)
+    local zone_width = is_hovered and 24 or 8
+    local zone_height = avail_height - 10
+
+    -- Style the drop zone
+    if is_hovered then
+        ctx:push_style_color(imgui.Col.Button(), 0x66AAFF88)
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x88CCFFAA)
+        ctx:push_style_color(imgui.Col.ButtonActive(), 0xAADDFFCC)
+    else
+        ctx:push_style_color(imgui.Col.Button(), 0x4488FF44)
+        ctx:push_style_color(imgui.Col.ButtonHovered(), 0x66AAFF66)
+        ctx:push_style_color(imgui.Col.ButtonActive(), 0x88CCFF88)
+    end
+
+    ctx:button("##drop_" .. zone_id, zone_width, zone_height)
+    ctx:pop_style_color(3)
+
+    -- Track hover state for next frame
+    if ctx:is_item_hovered() then
+        hovered_drop_zone = zone_id
+    elseif hovered_drop_zone == zone_id then
+        hovered_drop_zone = nil
+    end
+
+    -- Handle drops
+    if ctx:begin_drag_drop_target() then
+        -- Accept plugin drops
+        local accepted, plugin_name = ctx:accept_drag_drop_payload("PLUGIN_ADD")
+        if accepted and plugin_name then
+            add_plugin_by_name(plugin_name, insert_pos)
+        end
+
+        -- Accept FX reorder drops
+        local fx_accepted, fx_guid = ctx:accept_drag_drop_payload("FX_GUID")
+        if fx_accepted and fx_guid then
+            local dragged = state.track:find_fx_by_guid(fx_guid)
+            if dragged then
+                r.TrackFX_CopyToTrack(
+                    state.track.pointer, dragged.pointer,
+                    state.track.pointer, insert_pos,
+                    true  -- move
+                )
+                refresh_fx_list()
+            end
+        end
+
+        -- Accept rack drops
+        local rack_accepted = ctx:accept_drag_drop_payload("RACK_ADD")
+        if rack_accepted then
+            add_rack_to_track(insert_pos)
+        end
+
+        ctx:end_drag_drop_target()
+    end
+
+    return true  -- Zone was drawn
+end
+
 --------------------------------------------------------------------------------
 -- Device Chain Drawing
 --------------------------------------------------------------------------------
@@ -54,7 +146,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
     if state.fx_list_invalid then
         return
     end
-    
+
     local get_fx_display_name = opts.get_fx_display_name
     local refresh_fx_list = opts.refresh_fx_list
     local add_plugin_by_name = opts.add_plugin_by_name
@@ -103,7 +195,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
             local main_fx = get_device_main_fx(fx)
             local utility = get_device_utility(fx)
             local missing = (utility == nil)
-            
+
             -- Log when utility is missing (safely get name)
             if missing then
                 local ok_name, fx_name = pcall(function() return fx:get_name() end)
@@ -124,7 +216,7 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
                 else
                     state.missing_utilities[container_guid] = nil
                 end
-                
+
                 table.insert(display_fx, {
                     fx = main_fx,
                     utility = utility,
@@ -201,8 +293,22 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         return
     end
 
-    -- Note: No drop zone before first device - drop ON the first device to insert before it
-    -- This prevents layout shifts that cause scroll jumping
+    -- Drop zone before first device (only visible when dragging, so no layout shift)
+    local first_item = display_fx[1]
+    local drew_first_zone = false
+    if first_item then
+        drew_first_zone = draw_drop_zone_indicator(
+            ctx,
+            "zone_first",
+            0,  -- Insert at position 0 (before first device)
+            avail_height,
+            add_plugin_by_name,
+            add_rack_to_track,
+            refresh_fx_list,
+            state,
+            true  -- no_same_line = true (first item, nothing before it)
+        )
+    end
 
     -- Draw each FX as a device panel, horizontally
     local display_idx = 0
@@ -211,14 +317,30 @@ function M.draw(ctx, fx_list, avail_width, avail_height, opts)
         if state.deletion_pending or state.fx_list_invalid then
             break
         end
-        
+
         local fx = item.fx
         display_idx = display_idx + 1
         ctx:push_id("device_" .. display_idx)
 
         local is_container = fx:is_container()
 
-        if display_idx > 1 then
+        if display_idx == 1 then
+            -- First device: add same_line if we drew the first drop zone
+            if drew_first_zone then
+                ctx:same_line()
+            end
+        else
+            -- Subsequent devices: draw drop zone indicator between devices
+            draw_drop_zone_indicator(
+                ctx,
+                "zone_" .. display_idx,
+                item.original_idx,  -- Insert position (before this device)
+                avail_height,
+                add_plugin_by_name,
+                add_rack_to_track,
+                refresh_fx_list,
+                state
+            )
             ctx:same_line()
         end
 
