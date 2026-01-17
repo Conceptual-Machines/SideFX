@@ -49,7 +49,7 @@ Requirements (install via ReaPack):
         <source file="lib/ui/device/device_panel/modulator_header.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/device/device_panel/modulator_header.lua</source>
         <source file="lib/ui/device/device_panel/params.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/device/device_panel/params.lua</source>
         <source file="lib/ui/device/device_panel/sidebar.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/device/device_panel/sidebar.lua</source>
-        <source file="lib/ui/device/modulator_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/device/modulator_panel.lua</source>
+        <source file="lib/ui/device/modulator_sidebar.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/device/modulator_sidebar.lua</source>
         <source file="lib/ui/device/modulator_sidebar.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/device/modulator_sidebar.lua</source>
         <source file="lib/ui/device/param_selector.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/device/param_selector.lua</source>
         <source file="lib/ui/fx/fx_detail_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.2.0/lib/ui/fx/fx_detail_panel.lua</source>
@@ -131,7 +131,7 @@ Requirements (install via ReaPack):
         <source file="lib/ui/device/device_panel/modulator_header.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.1/lib/ui/device/device_panel/modulator_header.lua</source>
         <source file="lib/ui/device/device_panel/params.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.1/lib/ui/device/device_panel/params.lua</source>
         <source file="lib/ui/device/device_panel/sidebar.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.1/lib/ui/device/device_panel/sidebar.lua</source>
-        <source file="lib/ui/device/modulator_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.1/lib/ui/device/modulator_panel.lua</source>
+        <source file="lib/ui/device/modulator_sidebar.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.1/lib/ui/device/modulator_sidebar.lua</source>
         <source file="lib/ui/device/modulator_sidebar.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.1/lib/ui/device/modulator_sidebar.lua</source>
         <source file="lib/ui/fx/fx_detail_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.1/lib/ui/fx/fx_detail_panel.lua</source>
         <source file="lib/ui/fx/fx_list_column.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.1/lib/ui/fx/fx_list_column.lua</source>
@@ -184,7 +184,7 @@ Requirements (install via ReaPack):
         <source file="lib/ui/device/device_panel/modulator_header.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.0/lib/ui/device/device_panel/modulator_header.lua</source>
         <source file="lib/ui/device/device_panel/params.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.0/lib/ui/device/device_panel/params.lua</source>
         <source file="lib/ui/device/device_panel/sidebar.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.0/lib/ui/device/device_panel/sidebar.lua</source>
-        <source file="lib/ui/device/modulator_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.0/lib/ui/device/modulator_panel.lua</source>
+        <source file="lib/ui/device/modulator_sidebar.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.0/lib/ui/device/modulator_sidebar.lua</source>
         <source file="lib/ui/device/modulator_sidebar.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.0/lib/ui/device/modulator_sidebar.lua</source>
         <source file="lib/ui/fx/fx_detail_panel.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.0/lib/ui/fx/fx_detail_panel.lua</source>
         <source file="lib/ui/fx/fx_list_column.lua">https://raw.githubusercontent.com/Conceptual-Machines/SideFX/v0.1.0/lib/ui/fx/fx_list_column.lua</source>
