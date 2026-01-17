@@ -873,25 +873,7 @@ local function draw_analyzer_popouts(ctx)
                 end
                 ctx:pop_style_color()
                 if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
-                ctx:same_line()
             end
-
-            -- Delete button
-            ctx:push_style_color(imgui.Col.Button(), 0x663333FF)
-            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x884444FF)
-            if ctx:button("Remove##del_scope_pop") then
-                toggle_scope()
-                state.scope_popout = false
-            end
-            ctx:pop_style_color(2)
-
-            ctx:same_line()
-
-            -- Dock back button
-            if ctx:button("Dock") then
-                state.scope_popout = false
-            end
-            if ctx:is_item_hovered() then ctx:set_tooltip("Dock back to main window") end
 
             -- Visualization - use available space
             local avail_w, avail_h = ctx:get_content_region_avail()
@@ -932,25 +914,7 @@ local function draw_analyzer_popouts(ctx)
                 end
                 ctx:pop_style_color()
                 if ctx:is_item_hovered() then ctx:set_tooltip(is_frozen and "Unfreeze" or "Freeze") end
-                ctx:same_line()
             end
-
-            -- Delete button
-            ctx:push_style_color(imgui.Col.Button(), 0x663333FF)
-            ctx:push_style_color(imgui.Col.ButtonHovered(), 0x884444FF)
-            if ctx:button("Remove##del_spec_pop") then
-                toggle_spectrum()
-                state.spectrum_popout = false
-            end
-            ctx:pop_style_color(2)
-
-            ctx:same_line()
-
-            -- Dock back button
-            if ctx:button("Dock##spec") then
-                state.spectrum_popout = false
-            end
-            if ctx:is_item_hovered() then ctx:set_tooltip("Dock back to main window") end
 
             -- Visualization - use available space
             local avail_w, avail_h = ctx:get_content_region_avail()
