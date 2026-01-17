@@ -8,6 +8,7 @@ local imgui = require('imgui')
 local helpers = require('helpers')
 local icons = require('lib.ui.common.icons')
 local param_selector = require('lib.ui.device.param_selector')
+local click_or_drag = require('lib.ui.common.click_or_drag')
 
 local M = {}
 
@@ -57,19 +58,35 @@ function M.draw(ctx, state, icon_font, icon_size, on_plugin_add, filter_plugins)
     end
 
     if ctx:begin_child("PluginList", 0, 0, imgui.ChildFlags.Border()) then
+        local r = reaper
         local i = 0
         for plugin in helpers.iter(state.browser.filtered) do
             i = i + 1
+            local item_id = "plugin_" .. i
             ctx:push_id(i)
 
             -- Icon
             local icon_name = plugin.is_instrument and icons.Names.keyboard or icons.Names.knobs
             icons.image(ctx, icon_name, 16)
 
-            -- Text with default font
+            -- Text as selectable (but don't trigger on click - we handle it ourselves)
             ctx:same_line()
-            if ctx:selectable(plugin.name, false) then
+            click_or_drag.begin_item(ctx, item_id)
+            ctx:selectable(plugin.name, false)
+            local action = click_or_drag.end_item(ctx, item_id)
+
+            -- Handle click (release without drag) = add plugin
+            if action == "click" then
                 on_plugin_add(plugin)
+            end
+
+            -- Handle drag = start drag-drop
+            if action == "drag_start" or action == "dragging" then
+                if ctx:begin_drag_drop_source(r.ImGui_DragDropFlags_SourceAllowNullID()) then
+                    ctx:set_drag_drop_payload("PLUGIN_ADD", plugin.full_name)
+                    ctx:text("Add: " .. plugin.name)
+                    ctx:end_drag_drop_source()
+                end
             end
 
             -- Right-click context menu (use plugin full_name for unique ID)
@@ -81,14 +98,7 @@ function M.draw(ctx, state, icon_font, icon_size, on_plugin_add, filter_plugins)
                 ctx:end_popup()
             end
 
-            -- Drag source for plugin (drag to add to chain)
-            if ctx:begin_drag_drop_source() then
-                ctx:set_drag_drop_payload("PLUGIN_ADD", plugin.full_name)
-                ctx:text("Add: " .. plugin.name)
-                ctx:end_drag_drop_source()
-            end
-
-            if ctx:is_item_hovered() then
+            if r.ImGui_IsItemHovered(ctx.ctx) then
                 ctx:set_tooltip(plugin.full_name .. "\n(drag to chain or click to add)\n(right-click to select parameters)")
             end
 
