@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <index version="1" name="SideFX" commit="HEAD">
-  <category name="Scripts">
+  <category name="">
     <reapack name="SideFX.lua" type="script" desc="SideFX - Smart FX Container Manager">
       <metadata>
         <description><![CDATA[Smart FX container management for REAPER 7+.
