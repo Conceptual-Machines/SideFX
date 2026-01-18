@@ -222,11 +222,16 @@ local function get_root_path()
     if info and info.source then
         local script_path = info.source:match("@?(.*)")
         if script_path then
+            -- Normalize path separators (Windows uses backslashes)
+            script_path = script_path:gsub("\\", "/")
             -- This file is in lib/modulator/, so go up two levels
-            local root = script_path:match("(.*/lib/modulator/)"):gsub("/lib/modulator/$", "/")
-            if root then
-                cached_root_path = root
-                return root
+            local match = script_path:match("(.*/lib/modulator/)")
+            if match then
+                local root = match:gsub("/lib/modulator/$", "/")
+                if root then
+                    cached_root_path = root
+                    return root
+                end
             end
         end
     end

@@ -20,6 +20,15 @@ function TestNaming:test_get_short_plugin_name()
     luaunit.assertEquals("ReaComp", naming.get_short_plugin_name("ReaComp"), "no prefix unchanged")
 end
 
+function TestNaming:test_get_short_plugin_name_windows_paths()
+    -- Windows backslash paths should be handled the same as Unix forward slash paths
+    luaunit.assertEquals("SideFX_Utility", naming.get_short_plugin_name("JS: SideFX\\SideFX_Utility"), "strips JS path with backslash")
+    luaunit.assertEquals("plugin.jsfx", naming.get_short_plugin_name("JS: path\\to\\plugin.jsfx"), "strips deep backslash path")
+    luaunit.assertEquals("plugin.jsfx", naming.get_short_plugin_name("JS: C:\\Users\\Name\\Scripts\\plugin.jsfx"), "strips full Windows path")
+    -- Mixed separators (shouldn't happen but handle gracefully)
+    luaunit.assertEquals("plugin.jsfx", naming.get_short_plugin_name("JS: path/to\\plugin.jsfx"), "strips mixed separator path")
+end
+
 function TestNaming:test_strip_sidefx_prefixes()
     luaunit.assertEquals("ReaComp", naming.strip_sidefx_prefixes("D1: ReaComp"), "strips D1: prefix")
     luaunit.assertEquals("ReaEQ", naming.strip_sidefx_prefixes("D2: ReaEQ"), "strips D2: prefix")
