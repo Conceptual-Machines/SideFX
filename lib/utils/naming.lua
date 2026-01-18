@@ -21,8 +21,8 @@ function M.get_short_plugin_name(full_name)
     name = name:gsub("^AUi?: ", "")     -- AU, AUi
     name = name:gsub("^JS: ", "")
     name = name:gsub("^CLAPi?: ", "")   -- CLAP, CLAPi
-    -- Strip path for JS
-    name = name:gsub("^.+/", "")
+    -- Strip path for JS (handle both Windows and Unix separators)
+    name = name:gsub("^.+[/\\]", "")
     -- Strip manufacturer info in parentheses at end
     name = name:gsub("%s*%([^)]+%)%s*$", "")
     return name
